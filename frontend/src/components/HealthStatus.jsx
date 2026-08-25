@@ -10,8 +10,8 @@ export default function HealthStatus() {
   if (error) {
     return (
       <p className="status status--error">
-        Chưa kết nối được API ({error.message}). Hãy chắc chắn backend đang chạy ở{' '}
-        <code>{import.meta.env.VITE_API_BASE_URL}</code>.
+        Chưa kết nối được API ({error.message}). Hãy chắc chắn API Gateway đang chạy ở{' '}
+        <code>{import.meta.env.VITE_API_BASE_URL}</code> và Auth Service đã khởi động.
       </p>
     )
   }
