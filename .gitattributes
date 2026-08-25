@@ -1,0 +1,20 @@
+* text=auto
+
+# Shell scripts phải là LF
+*.sh text eol=lf
+mvnw text eol=lf
+
+# Windows scripts là CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.jar binary
+*.ico binary
+
+# SVG là text
+*.svg text
