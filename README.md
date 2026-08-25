@@ -21,7 +21,9 @@ Mobile (React Native)┘         │                        │
 
 ```
 VMarket/
-├── services/                  # Toàn bộ microservice
+├── services/                  # Toàn bộ microservice (Maven multi-module)
+│   ├── pom.xml                # Parent POM - quản lý version chung (Boot/Cloud/Lombok)
+│   ├── mvnw                   # Maven Wrapper dùng chung (build từ đây cho cả 11 module)
 │   ├── api-gateway/           # Spring Cloud Gateway (8080)
 │   ├── auth-service/          # Xác thực, phân quyền RBAC (8081, PostgreSQL)
 │   ├── user-service/          # Hồ sơ, sổ địa chỉ (8082, PostgreSQL)
@@ -37,6 +39,7 @@ VMarket/
 │   ├── recommendation-service/# Gợi ý sản phẩm (8101, FastAPI + PostgreSQL + Redis)
 │   └── chatbot-service/       # Chatbot RAG (8102, FastAPI + MongoDB)
 ├── frontend/                  # Web end-user (React + Vite, cổng 5173)
+├── scripts/                   # Script quản lý dự án (vmarket.cmd)
 ├── infra/                     # Cấu hình hạ tầng (init script PostgreSQL...)
 ├── docs/                      # SRS và tài liệu dự án
 ├── docker-compose.yml         # Hạ tầng dùng chung cho dev
@@ -81,8 +84,8 @@ Sau khi `docker compose up -d` lần đầu, PostgreSQL tự tạo đủ CSDL ch
 
 ```bash
 cd services/auth-service
-.\mvnw.cmd spring-boot:run        # Windows
-# ./mvnw spring-boot:run          # macOS/Linux
+..\mvnw.cmd spring-boot:run       # Windows (Maven Wrapper đặt ở services/)
+# ../mvnw spring-boot:run         # macOS/Linux
 ```
 
 Mỗi service đọc cấu hình từ biến môi trường (đã có giá trị dev mặc định khớp compose): `DB_HOST`, `DB_PORT`, `DB_NAME`, `RABBITMQ_HOST`...
@@ -93,10 +96,41 @@ Mỗi service đọc cấu hình từ biến môi trường (đã có giá trị
 
 ```bash
 cd services/api-gateway
-.\mvnw.cmd spring-boot:run        # cổng 8080
+..\mvnw.cmd spring-boot:run       # cổng 8080
 ```
 
 Gateway định tuyến theo prefix: `/api/auth/**` → auth-service, `/api/products/**` → product-service... (xem `application.yml` của gateway; có thể đổi URL đích bằng biến `AUTH_SERVICE_URL`, `PRODUCT_SERVICE_URL`...).
+
+## Build & test toàn bộ backend (multi-module)
+
+```bash
+cd services
+.\mvnw.cmd test                   # chạy test cả 11 module một lệnh
+.\mvnw.cmd clean package -DskipTests
+```
+
+Version Spring Boot / Spring Cloud / Lombok quản lý tập trung ở `services/pom.xml` — nâng cấp chỉ cần sửa 1 nơi.
+
+## Scripts tiện lợi (Windows)
+
+```bash
+scripts\vmarket.cmd infra                  # bật hạ tầng nhẹ
+scripts\vmarket.cmd infra-search           # bật thêm Elasticsearch
+scripts\vmarket.cmd core                   # chạy gateway + auth + user
+scripts\vmarket.cmd service order-service  # chạy 1 service bất kỳ
+scripts\vmarket.cmd fe                     # chạy frontend
+scripts\vmarket.cmd build                  # build toàn bộ backend
+scripts\vmarket.cmd test                   # test toàn bộ backend
+scripts\vmarket.cmd stop                   # tắt các process Java
+```
+
+## Build Docker cho từng service
+
+Build context là **thư mục gốc repo** (Dockerfile cần parent POM):
+
+```bash
+docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
+```
 
 ## Chạy frontend
 
