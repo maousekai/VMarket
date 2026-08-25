@@ -9,7 +9,7 @@ Service xác thực và phân quyền RBAC của VMarket (Spring Boot, kiến tr
 - Spring AMQP (RabbitMQ — sẵn sàng cho event bus)
 - Spring Boot Actuator (health-check)
 - PostgreSQL (dev/prod), H2 in-memory (chỉ cho test)
-- Maven Wrapper (`mvnw`) — không cần cài Maven
+- Maven Wrapper (`mvnw`) đặt ở thư mục `services/` — không cần cài Maven
 
 ## Chạy local
 
@@ -24,8 +24,9 @@ Lần đầu chạy, PostgreSQL tự tạo CSDL `vmarket_auth` cho service này.
 Bước 2 — chạy service:
 
 ```bash
-.\mvnw.cmd spring-boot:run     # Windows
-# ./mvnw spring-boot:run       # macOS/Linux
+cd services/auth-service
+..\mvnw.cmd spring-boot:run     # Windows
+# ../mvnw spring-boot:run       # macOS/Linux
 ```
 
 Service chạy tại cổng **8081**.
@@ -57,13 +58,15 @@ Qua API Gateway (cổng 8080): `curl http://localhost:8080/api/auth/health`
 Chạy với profile khác:
 
 ```bash
-.\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=prod
+..\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=prod
 ```
 
 ## Chạy bằng Docker
 
+Build context là thư mục gốc repo (Dockerfile cần parent POM):
+
 ```bash
-docker build -t vmarket-auth-service .
+docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
 docker run -p 8081:8081 -e DB_HOST=host.docker.internal vmarket-auth-service
 ```
 
@@ -72,7 +75,7 @@ docker run -p 8081:8081 -e DB_HOST=host.docker.internal vmarket-auth-service
 Test dùng H2 in-memory (MODE PostgreSQL) nên không cần PostgreSQL thật:
 
 ```bash
-.\mvnw.cmd test
+..\mvnw.cmd test
 ```
 
 ## Cấu trúc thư mục (kiến trúc phân lớp)
