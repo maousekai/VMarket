@@ -1,43 +1,114 @@
+name: vmarket
+
+# TỐI ƯU TÀI NGUYÊN:
+# - Chỉ 4 hạ tầng nhẹ chạy mặc định (~1.5GB RAM). Elasticsearch nặng (~1GB) đặt
+#   profile "search" - chỉ bật khi làm AI Search: docker compose --profile search up -d
+# - Mỗi container có mem_limit để không chiếm hết RAM máy.
+# - Chạy đúng những gì cần: docker compose up -d postgres redis  (chỉ 2 service này)
+
 services:
-  # PostgreSQL dùng chung cho môi trường dev
-  db:
-    image: postgres:16-alpine
-    container_name: vmarket-db
+  # PostgreSQL - CSDL quan hệ cho: auth, user, shop, order, payment, delivery, review, recommendation
+  postgres:
+    image: postgres:17-alpine
+    container_name: vmarket-postgres
     environment:
-      POSTGRES_DB: vmarket
       POSTGRES_USER: vmarket
       POSTGRES_PASSWORD: vmarket
+      POSTGRES_DB: vmarket_auth
     ports:
       - "5432:5432"
     volumes:
-      - vmarket-db-data:/var/lib/postgresql/data
+      - vmarket-pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    mem_limit: 512m
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vmarket -d vmarket"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U vmarket -d vmarket_auth"]
+      interval: 10s
       timeout: 5s
       retries: 10
 
-  # Bật lên khi làm ticket "Dockerize BE" (PBL6-2):
-  # backend:
-  #   build: ./backend
-  #   container_name: vmarket-backend
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
+  # MongoDB - CSDL cho: product, notification, chatbot
+  mongo:
+    image: mongo:8.0
+    container_name: vmarket-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - vmarket-mongo-data:/data/db
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # Redis - cho: cart, delivery (vị trí shipper), recommendation (cache)
+  redis:
+    image: redis:7.4-alpine
+    container_name: vmarket-redis
+    command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - vmarket-redis-data:/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # RabbitMQ - Event Bus giữa các service (management UI: http://localhost:15672, guest/guest)
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    container_name: vmarket-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - vmarket-rabbit-data:/var/lib/rabbitmq
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # Elasticsearch - CHỈ cho AI Search (nặng ~1GB). Bật khi cần:
+  #   docker compose --profile search up -d
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+    container_name: vmarket-elasticsearch
+    profiles: ["search"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - vmarket-es-data:/usr/share/elasticsearch/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+
+  # Các service ứng dụng sẽ được thêm vào ở ticket "Dockerize BE/FE" (PBL6-2, PBL6-3).
+  # Mẫu tham khảo (bật kèm mem_limit để kiểm soát tài nguyên):
+  # api-gateway:
+  #   build: ./services/api-gateway
+  #   container_name: vmarket-gateway
+  #   mem_limit: 384m
   #   environment:
-  #     SPRING_PROFILES_ACTIVE: dev
-  #     DB_HOST: db
+  #     AUTH_SERVICE_URL: http://auth-service:8081
   #   ports:
   #     - "8080:8080"
 
-  # Bật lên khi làm ticket "Dockerize FE" (PBL6-3):
-  # frontend:
-  #   build: ./frontend
-  #   container_name: vmarket-frontend
-  #   depends_on:
-  #     - backend
-  #   ports:
-  #     - "5173:5173"
-
 volumes:
-  vmarket-db-data:
+  vmarket-pg-data:
+  vmarket-mongo-data:
+  vmarket-redis-data:
+  vmarket-rabbit-data:
+  vmarket-es-data:
