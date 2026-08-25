@@ -1,0 +1,3 @@
+# Tu dong eslint + prettier cac file frontend truoc khi commit
+cd frontend
+npx lint-staged
