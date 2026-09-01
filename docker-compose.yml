@@ -1,4 +1,4 @@
-name: vmarket
+name: vmarket1
 
 # TỐI ƯU TÀI NGUYÊN:
 # - Chỉ 4 hạ tầng nhẹ chạy mặc định (~1.5GB RAM). Elasticsearch nặng (~1GB) đặt
@@ -95,16 +95,277 @@ services:
       timeout: 10s
       retries: 12
 
-  # Các service ứng dụng sẽ được thêm vào ở ticket "Dockerize BE/FE" (PBL6-2, PBL6-3).
-  # Mẫu tham khảo (bật kèm mem_limit để kiểm soát tài nguyên):
-  # api-gateway:
-  #   build: ./services/api-gateway
-  #   container_name: vmarket-gateway
-  #   mem_limit: 384m
-  #   environment:
-  #     AUTH_SERVICE_URL: http://auth-service:8081
-  #   ports:
-  #     - "8080:8080"
+  # API Gateway - diem vao duy nhat cua he thong (frontend goi vao day qua localhost:8080)
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: vmarket-gateway
+    mem_limit: 384m
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      USER_SERVICE_URL: http://user-service:8082
+      SHOP_SERVICE_URL: http://shop-service:8083
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      CART_SERVICE_URL: http://cart-service:8085
+      ORDER_SERVICE_URL: http://order-service:8086
+      PAYMENT_SERVICE_URL: http://payment-service:8087
+      DELIVERY_SERVICE_URL: http://delivery-service:8088
+      REVIEW_SERVICE_URL: http://review-service:8089
+      NOTIFICATION_SERVICE_URL: http://notification-service:8090
+      AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8101
+      CHATBOT_SERVICE_URL: http://chatbot-service:8102
+    ports:
+      - "8080:8080"
+
+  # Auth - xac thuc/phan quyen (PostgreSQL)
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: vmarket-auth
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_auth
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # User - quan ly nguoi dung (PostgreSQL)
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    container_name: vmarket-user
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_user
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Shop - quan ly cua hang (PostgreSQL)
+  shop-service:
+    build:
+      context: .
+      dockerfile: services/shop-service/Dockerfile
+    container_name: vmarket-shop
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_shop
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Product - quan ly san pham (MongoDB)
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    container_name: vmarket-product
+    mem_limit: 512m
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      DB_NAME: vmarket_product
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Cart - gio hang (Redis)
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    container_name: vmarket-cart
+    mem_limit: 384m
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Order - quan ly don hang (PostgreSQL)
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    container_name: vmarket-order
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_order
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Payment - thanh toan (PostgreSQL)
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    container_name: vmarket-payment
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_payment
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Delivery - van chuyen (PostgreSQL)
+  delivery-service:
+    build:
+      context: .
+      dockerfile: services/delivery-service/Dockerfile
+    container_name: vmarket-delivery
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_delivery
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Review - danh gia (PostgreSQL)
+  review-service:
+    build:
+      context: .
+      dockerfile: services/review-service/Dockerfile
+    container_name: vmarket-review
+    mem_limit: 512m
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vmarket_review
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Notification - thong bao (MongoDB)
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    container_name: vmarket-notification
+    mem_limit: 512m
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      DB_NAME: vmarket_notification
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # AI Search - tim kiem thong minh (FastAPI)
+  ai-search-service:
+    build:
+      context: ./services/ai-search-service
+    container_name: vmarket-ai-search
+    mem_limit: 256m
+
+  # Recommendation - goi y san pham (FastAPI)
+  recommendation-service:
+    build:
+      context: ./services/recommendation-service
+    container_name: vmarket-recommendation
+    mem_limit: 256m
+
+  # Chatbot - tro ly ho tro (FastAPI)
+  chatbot-service:
+    build:
+      context: ./services/chatbot-service
+    container_name: vmarket-chatbot
+    mem_limit: 256m
+
+networks:
+  vmarket_network:
+    driver: bridge
 
 volumes:
   vmarket-pg-data:
