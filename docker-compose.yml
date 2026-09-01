@@ -20,6 +20,8 @@ services:
     volumes:
       - vmarket-pg-data:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - vmarket-network
     mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vmarket -d vmarket_auth"]
@@ -35,6 +37,8 @@ services:
       - "27017:27017"
     volumes:
       - vmarket-mongo-data:/data/db
+    networks:
+      - vmarket-network
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
@@ -51,6 +55,8 @@ services:
       - "6379:6379"
     volumes:
       - vmarket-redis-data:/data
+    networks:
+      - vmarket-network
     mem_limit: 256m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -67,6 +73,8 @@ services:
       - "15672:15672"
     volumes:
       - vmarket-rabbit-data:/var/lib/rabbitmq
+    networks:
+      - vmarket-network
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -88,6 +96,8 @@ services:
       - "9200:9200"
     volumes:
       - vmarket-es-data:/usr/share/elasticsearch/data
+    networks:
+      - vmarket-network
     mem_limit: 1g
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health >/dev/null || exit 1"]
@@ -95,16 +105,48 @@ services:
       timeout: 10s
       retries: 12
 
-  # Các service ứng dụng sẽ được thêm vào ở ticket "Dockerize BE/FE" (PBL6-2, PBL6-3).
-  # Mẫu tham khảo (bật kèm mem_limit để kiểm soát tài nguyên):
+  # =====================================================================
+  # CÁC SERVICE ỨNG DỤNG - mỗi service backend chỉ cần THÊM 1 BLOCK dưới đây.
+  # Service discovery: trong cùng network "vmarket-network", gọi nhau bằng
+  # TÊN SERVICE (vd: http://auth-service:8081) - không cần IP.
+  # Mẫu (bỏ comment khi service đó được code ở sprint sau):
+  #
+  # auth-service:
+  #   build: ./services/auth-service
+  #   container_name: vmarket-auth
+  #   networks:
+  #     - vmarket-network
+  #   mem_limit: 384m
+  #   environment:
+  #     DB_HOST: postgres
+  #     DB_PORT: 5432
+  #     DB_NAME: vmarket_auth
+  #     RABBITMQ_HOST: rabbitmq
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8081:8081"
+  #
   # api-gateway:
   #   build: ./services/api-gateway
   #   container_name: vmarket-gateway
+  #   networks:
+  #     - vmarket-network
   #   mem_limit: 384m
   #   environment:
   #     AUTH_SERVICE_URL: http://auth-service:8081
+  #     USER_SERVICE_URL: http://user-service:8082
   #   ports:
   #     - "8080:8080"
+
+# Network chung cho toàn bộ hệ thống (service discovery qua tên service).
+networks:
+  vmarket-network:
+    name: vmarket-network
+    driver: bridge
 
 volumes:
   vmarket-pg-data:
