@@ -1,28 +1,111 @@
-name: vmarket1
-
+# ============================================================
+# VMarket - Docker Compose (HA TANG CHUNG + API GATEWAY + FRONTEND)
+# ============================================================
+# - Ha tang: PostgreSQL, MongoDB, Redis, RabbitMQ (+ Elasticsearch
+#   profile "search").
+# - 2 lop "mat" de FE ket noi duoc BE ngay khi `docker compose up -d`:
+#     + api-gateway (localhost:8080): browser goi vao day. Gateway trong
+#       container tro cac URL service den host.docker.internal (cac
+#       business service chay local qua scripts/vmarket - mvnw).
+#       Doi host dich vu bang bien BACKEND_SERVICES_HOST trong .env
+#       (vd container hoa service thi dat la ten service trong network).
+#     + frontend (localhost:5173): SPA nginx; bundle duoc bake
+#       VITE_API_BASE_URL (bien .env) de browser goi truc tiep Gateway.
+# - Business service van them block rieng khi can, DUNG CHUNG config qua
+#   anchor `*common-environment` (xem mau block ben duoi).
+# - Moi gia tri cau hinh lay tu file .env (copy tu .env.example).
+#
 # TỐI ƯU TÀI NGUYÊN:
-# - Chỉ 4 hạ tầng nhẹ chạy mặc định (~1.5GB RAM). Elasticsearch nặng (~1GB) đặt
-#   profile "search" - chỉ bật khi làm AI Search: docker compose --profile search up -d
-# - Mỗi container có mem_limit để không chiếm hết RAM máy.
-# - Chạy đúng những gì cần: docker compose up -d postgres redis  (chỉ 2 service này)
+# - Ha tang nhe mac dinh ~1.5GB RAM. Elasticsearch nang (~1GB) dat
+#   profile "search" - chi bat khi lam AI Search:
+#     docker compose --profile search up -d
+# - Moi container co mem_limit de khong chiem het RAM may.
+
+name: ${COMPOSE_PROJECT_NAME:-vmarket}
+
+# ------------------------------------------------------------
+# BLOCK DUNG CHUNG - env ket noi ha tang cho moi business service.
+# Service chi can merge bang merge-key cua YAML:
+#   environment:
+#     <<: *common-environment
+#     DB_NAME: vmarket_<ten_service>   # override gia tri rieng (neu co)
+# ------------------------------------------------------------
+x-common-environment: &common-environment
+  # PostgreSQL
+  DB_HOST: ${POSTGRES_HOST:-postgres}
+  DB_PORT: ${POSTGRES_PORT:-5432}
+  DB_USERNAME: ${POSTGRES_USER:-vmarket}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
+  # MongoDB
+  MONGO_HOST: ${MONGO_HOST:-mongo}
+  MONGO_PORT: ${MONGO_PORT:-27017}
+  # Redis
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  # RabbitMQ
+  RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+  RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+
+# ------------------------------------------------------------
+# MAU BLOCK BUSINESS SERVICE (bo comment + dien ten khi can them service)
+# ------------------------------------------------------------
+#  <service-name>:
+#    build:
+#      context: .
+#      dockerfile: services/<service-name>/Dockerfile
+#    container_name: vmarket-<ten>
+#    mem_limit: 512m
+#    environment:
+#      <<: *common-environment
+#      DB_NAME: vmarket_<ten>      # service dung PostgreSQL (Mongo thi DB_NAME cung dung)
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#      rabbitmq:
+#        condition: service_healthy
+
+# ------------------------------------------------------------
+# BLOCK DUNG CHUNG 2 - URL cac business service cho API Gateway.
+# Business service chay local (mvnw) nen dung host.docker.internal;
+# sau nay container hoa thi doi BACKEND_SERVICES_HOST trong .env
+# thanh ten service trong network (vd: auth-service).
+# ------------------------------------------------------------
+x-service-urls: &service-urls
+  AUTH_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8081
+  USER_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8082
+  SHOP_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8083
+  PRODUCT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8084
+  CART_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8085
+  ORDER_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8086
+  PAYMENT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8087
+  DELIVERY_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8088
+  REVIEW_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8089
+  NOTIFICATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8090
+  AI_SEARCH_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8100
+  RECOMMENDATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8101
+  CHATBOT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8102
 
 services:
-  # PostgreSQL - CSDL quan hệ cho: auth, user, shop, order, payment, delivery, review, recommendation
+  # PostgreSQL - CSDL quan he cho: auth, user, shop, order, payment, delivery, review
   postgres:
     image: postgres:17-alpine
     container_name: vmarket-postgres
     environment:
-      POSTGRES_USER: vmarket
-      POSTGRES_PASSWORD: vmarket
-      POSTGRES_DB: vmarket_auth
+      POSTGRES_USER: ${POSTGRES_USER:-vmarket}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
+      POSTGRES_DB: ${POSTGRES_DB:-vmarket_auth}
     ports:
-      - "5432:5432"
+      # Port host: POSTGRES_HOST_PORT (5433 - tranh xung dot voi PostgreSQL
+      # cai local tren may). Port trong container luon la 5432.
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - vmarket-pg-data:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
     mem_limit: 512m
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vmarket -d vmarket_auth"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vmarket} -d ${POSTGRES_DB:-vmarket_auth}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -32,7 +115,9 @@ services:
     image: mongo:8.0
     container_name: vmarket-mongo
     ports:
-      - "27017:27017"
+      # Port host: MONGO_HOST_PORT (27018 - tranh xung dot voi mongod cai
+      # local tren may). Port trong container luon la 27017.
+      - "${MONGO_HOST_PORT:-27018}:27017"
     volumes:
       - vmarket-mongo-data:/data/db
     mem_limit: 512m
@@ -42,13 +127,13 @@ services:
       timeout: 5s
       retries: 10
 
-  # Redis - cho: cart, delivery (vị trí shipper), recommendation (cache)
+  # Redis - cho: cart, delivery (vi tri shipper), recommendation (cache)
   redis:
     image: redis:7.4-alpine
     container_name: vmarket-redis
     command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - vmarket-redis-data:/data
     mem_limit: 256m
@@ -58,13 +143,16 @@ services:
       timeout: 3s
       retries: 10
 
-  # RabbitMQ - Event Bus giữa các service (management UI: http://localhost:15672, guest/guest)
+  # RabbitMQ - Event Bus giua cac service (UI: http://localhost:15672)
   rabbitmq:
     image: rabbitmq:4.1-management
     container_name: vmarket-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - vmarket-rabbit-data:/var/lib/rabbitmq
     mem_limit: 512m
@@ -74,7 +162,7 @@ services:
       timeout: 10s
       retries: 10
 
-  # Elasticsearch - CHỈ cho AI Search (nặng ~1GB). Bật khi cần:
+  # Elasticsearch - CHI cho AI Search (nang ~1GB). Bat khi can:
   #   docker compose --profile search up -d
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
@@ -85,7 +173,7 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     ports:
-      - "9200:9200"
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
     volumes:
       - vmarket-es-data:/usr/share/elasticsearch/data
     mem_limit: 1g
@@ -95,7 +183,37 @@ services:
       timeout: 10s
       retries: 12
 
-  # API Gateway - diem vao duy nhat cua he thong (frontend goi vao day qua localhost:8080)
+  # Auth Service - xac thuc / JWT (container hoa: khong can chay mvnw nua).
+  # Ket noi postgres + rabbitmq bang ten service trong network (port noi bo).
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: vmarket-auth-service
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_auth
+      # Origin FE duoc phep (trung voi CORS_ALLOWED_ORIGINS trong .env)
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+    ports:
+      # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
+      - "${AUTH_SERVICE_PORT:-8081}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8081/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # API Gateway - diem vao duy nhat cua he thong (browser goi vao localhost:8080).
+  # Gateway goi cac business service chay tren may host qua host.docker.internal;
+  # auth-service da container hoa nen goi truc tiep qua ten service trong network.
   api-gateway:
     build:
       context: .
@@ -103,269 +221,34 @@ services:
     container_name: vmarket-gateway
     mem_limit: 384m
     environment:
+      <<: *service-urls
+      # Override rieng cho auth-service (chay trong network, khong qua host)
       AUTH_SERVICE_URL: http://auth-service:8081
-      USER_SERVICE_URL: http://user-service:8082
-      SHOP_SERVICE_URL: http://shop-service:8083
-      PRODUCT_SERVICE_URL: http://product-service:8084
-      CART_SERVICE_URL: http://cart-service:8085
-      ORDER_SERVICE_URL: http://order-service:8086
-      PAYMENT_SERVICE_URL: http://payment-service:8087
-      DELIVERY_SERVICE_URL: http://delivery-service:8088
-      REVIEW_SERVICE_URL: http://review-service:8089
-      NOTIFICATION_SERVICE_URL: http://notification-service:8090
-      AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
-      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8101
-      CHATBOT_SERVICE_URL: http://chatbot-service:8102
+      # Origin FE duoc phep goi API qua gateway (phai trung voi FRONTEND_PORT).
+      # Spring relaxed binding: APP_CORS_ALLOWED_ORIGINS -> app.cors.allowed-origins
+      APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT:-8080}:8080"
+    # host-gateway: giu host.docker.internal hoat dong ca tren Linux
+    # (Docker Desktop Windows/Mac da co san, dong nay vo hai).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
-  # Auth - xac thuc/phan quyen (PostgreSQL)
-  auth-service:
+  # Frontend - React + Vite (SPA tinh phuc vu bang nginx; mo: http://localhost:5173).
+  # Browser tren may host goi truc tiep Gateway qua VITE_API_BASE_URL
+  # (bake vao bundle luc build), nen khong can nam trong network backend.
+  frontend:
     build:
-      context: .
-      dockerfile: services/auth-service/Dockerfile
-    container_name: vmarket-auth
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_auth
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
+      context: ./frontend
+      args:
+        # URL Gateway ma trinh duyet goi truc tiep (Vite bake vao bundle luc build)
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+    container_name: vmarket-frontend
+    mem_limit: 64m
+    ports:
+      - "${FRONTEND_PORT:-5173}:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # User - quan ly nguoi dung (PostgreSQL)
-  user-service:
-    build:
-      context: .
-      dockerfile: services/user-service/Dockerfile
-    container_name: vmarket-user
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_user
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Shop - quan ly cua hang (PostgreSQL)
-  shop-service:
-    build:
-      context: .
-      dockerfile: services/shop-service/Dockerfile
-    container_name: vmarket-shop
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_shop
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Product - quan ly san pham (MongoDB)
-  product-service:
-    build:
-      context: .
-      dockerfile: services/product-service/Dockerfile
-    container_name: vmarket-product
-    mem_limit: 512m
-    environment:
-      MONGO_HOST: mongo
-      MONGO_PORT: "27017"
-      DB_NAME: vmarket_product
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      mongo:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Cart - gio hang (Redis)
-  cart-service:
-    build:
-      context: .
-      dockerfile: services/cart-service/Dockerfile
-    container_name: vmarket-cart
-    mem_limit: 384m
-    environment:
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Order - quan ly don hang (PostgreSQL)
-  order-service:
-    build:
-      context: .
-      dockerfile: services/order-service/Dockerfile
-    container_name: vmarket-order
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_order
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Payment - thanh toan (PostgreSQL)
-  payment-service:
-    build:
-      context: .
-      dockerfile: services/payment-service/Dockerfile
-    container_name: vmarket-payment
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_payment
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Delivery - van chuyen (PostgreSQL)
-  delivery-service:
-    build:
-      context: .
-      dockerfile: services/delivery-service/Dockerfile
-    container_name: vmarket-delivery
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_delivery
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Review - danh gia (PostgreSQL)
-  review-service:
-    build:
-      context: .
-      dockerfile: services/review-service/Dockerfile
-    container_name: vmarket-review
-    mem_limit: 512m
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: vmarket_review
-      DB_USERNAME: vmarket
-      DB_PASSWORD: vmarket
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # Notification - thong bao (MongoDB)
-  notification-service:
-    build:
-      context: .
-      dockerfile: services/notification-service/Dockerfile
-    container_name: vmarket-notification
-    mem_limit: 512m
-    environment:
-      MONGO_HOST: mongo
-      MONGO_PORT: "27017"
-      DB_NAME: vmarket_notification
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
-    depends_on:
-      mongo:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  # AI Search - tim kiem thong minh (FastAPI)
-  ai-search-service:
-    build:
-      context: ./services/ai-search-service
-    container_name: vmarket-ai-search
-    mem_limit: 256m
-
-  # Recommendation - goi y san pham (FastAPI)
-  recommendation-service:
-    build:
-      context: ./services/recommendation-service
-    container_name: vmarket-recommendation
-    mem_limit: 256m
-
-  # Chatbot - tro ly ho tro (FastAPI)
-  chatbot-service:
-    build:
-      context: ./services/chatbot-service
-    container_name: vmarket-chatbot
-    mem_limit: 256m
-
-networks:
-  vmarket_network:
-    driver: bridge
+      - api-gateway
 
 volumes:
   vmarket-pg-data:

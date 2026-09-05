@@ -14,6 +14,23 @@ param([Parameter(Position = 0)][string]$Cmd = "help", [Parameter(Position = 1)][
 $root = Split-Path $PSScriptRoot -Parent
 $compose = "docker compose -f `"$root\docker-compose.yml`""
 
+# Doc port host cua ha tang Docker tu file .env goc roi set thanh bien moi
+# truong cho cac service Java chay local (mvnw spring-boot:run):
+#   DB_PORT    <- POSTGRES_HOST_PORT (vi du 5433, tranh xung dot PostgreSQl local)
+#   MONGO_PORT <- MONGO_HOST_PORT   (vi du 27018, tranh xung dot mongod local)
+# Cach lam nay giup service local khong cham vao PostgreSQL/mongod cai san
+# tren may ma ket noi dung vao container Docker.
+function Get-DotEnvValue([string]$Key, [string]$Fallback) {
+  $envFile = Join-Path $root ".env"
+  if (Test-Path $envFile) {
+    $line = Select-String -Path $envFile -Pattern ("^\s*" + [regex]::Escape($Key) + "\s*=\s*(.+?)\s*$") | Select-Object -First 1
+    if ($line) { return $line.Matches[0].Groups[1].Value }
+  }
+  return $Fallback
+}
+$env:DB_PORT = Get-DotEnvValue "POSTGRES_HOST_PORT" "5433"
+$env:MONGO_PORT = Get-DotEnvValue "MONGO_HOST_PORT" "27018"
+
 function Start-Service($name) {
   if (-not (Test-Path "$root\services\$name")) { Write-Output "Khong ton tai service: $name"; return }
   Write-Output ">> Dang chay $name (cua so moi)..."

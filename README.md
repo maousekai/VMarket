@@ -141,6 +141,13 @@ copy .env.example .env            # VITE_API_BASE_URL=http://localhost:8080 (gat
 npm run dev                       # http://localhost:5173
 ```
 
+Hoặc chạy frontend bằng Docker (image tự build, phục vụ bằng nginx):
+
+```bash
+docker compose up -d --build frontend   # http://localhost:5173
+# Muon doi URL API: sua build.args.VITE_API_BASE_URL cua service frontend trong docker-compose.yml
+```
+
 Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết nối API thành công" khi gateway + auth-service đang chạy.
 
 ## Kiểm tra cài đặt thành công
