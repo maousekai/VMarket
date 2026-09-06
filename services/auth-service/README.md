@@ -123,14 +123,30 @@ src/main/java/com/vmarket/auth/
 ├── service/      # Business logic
 ├── repository/   # Spring Data repository (User/Role/UserRole/RefreshToken)
 ├── entity/       # JPA entity + BaseEntity (ULID) + RoleName
+├── exception/    # ApiException + GlobalExceptionHandler (body lỗi chuẩn)
 └── dto/          # Đối tượng truyền dữ liệu
-src/main/resources/db/migration/   # Flyway (V1__init_auth_schema.sql, ...)
+src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 ```
+
+## Endpoint
+
+| Method & path            | Mô tả                                                      |
+| ------------------------ | -------------------------------------------------------- |
+| `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, trạng thái PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
+| `GET  /api/auth/health`  | Health-check                                              |
+
+Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
+Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 (đều cùng format trên).
+
+Ràng buộc đăng ký: email hợp lệ ≤320 ký tự (lưu lowercase + trim); username 3–50 ký tự
+`[a-zA-Z0-9._-]` (phân biệt hoa/thường, có trim); mật khẩu 8–32 ký tự, ≥1 chữ hoa +
+≥1 số + ≥1 ký tự đặc biệt (hash BCrypt).
 
 ## Roadmap nghiệp vụ (theo SRS)
 
 - [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
-- [ ] FR-AUTH-01 (PBL6-42): Đăng ký tài khoản
+- [x] FR-AUTH-01 (PBL6-42): tạo tài khoản (`POST /api/auth/register`, migration V2)
+  - [ ] gửi email xác thực tài khoản (OTP/link) — chưa có ticket, cần đưa vào backlog
 - [ ] FR-AUTH-02 (PBL6-43): Đăng nhập JWT access/refresh token + khóa sau 5 lần sai
 - [ ] FR-AUTH-03 (PBL6-44): Đăng nhập Google OAuth 2.0
 - [ ] FR-AUTH-04 (PBL6-45): Quên mật khẩu
