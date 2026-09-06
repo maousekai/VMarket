@@ -35,11 +35,8 @@ management:
       exposure:
         include: health,info
 
-springdoc:
-  swagger-ui:
-    path: /swagger-ui.html
-  api-docs:
-    path: /v3/api-docs
+# springdoc dung path mac dinh: /swagger-ui.html va /v3/api-docs
+# (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
 
 app:
   cors:

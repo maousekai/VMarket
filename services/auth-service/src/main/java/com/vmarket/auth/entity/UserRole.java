@@ -31,11 +31,11 @@ import lombok.Setter;
 public class UserRole {
 
 	@Id
-	@Column(name = "user_id", length = 26)
+	@Column(name = "user_id", length = BaseEntity.ID_LENGTH)
 	private String userId;
 
 	@Id
-	@Column(name = "role_id", length = 26)
+	@Column(name = "role_id", length = BaseEntity.ID_LENGTH)
 	private String roleId;
 
 	@CreationTimestamp

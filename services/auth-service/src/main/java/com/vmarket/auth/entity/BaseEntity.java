@@ -19,8 +19,11 @@ import lombok.Setter;
 @Setter
 public abstract class BaseEntity {
 
+	/** Độ dài ULID chuỗi (Crockford base32) — dùng chung cho mọi cột id / FK. */
+	public static final int ID_LENGTH = 26;
+
 	@Id
-	@Column(length = 26, updatable = false, nullable = false)
+	@Column(length = ID_LENGTH, updatable = false, nullable = false)
 	private String id;
 
 	@PrePersist

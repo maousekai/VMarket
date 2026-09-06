@@ -26,7 +26,7 @@ import lombok.Setter;
 @NoArgsConstructor
 public class RefreshToken extends BaseEntity {
 
-	@Column(name = "user_id", nullable = false, length = 26)
+	@Column(name = "user_id", nullable = false, length = BaseEntity.ID_LENGTH)
 	private String userId;
 
 	@Column(name = "token_hash", nullable = false, unique = true, length = 255)
