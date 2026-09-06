@@ -14,9 +14,13 @@ RUN npm ci --no-audit --no-fund
 
 COPY . .
 
-# Vite doc bien VITE_* luc build nen API URL duoc "bake" vao bundle.
-# Trinh duyet chay tren may host nen goi truc tiep Gateway qua localhost:8080.
-ARG VITE_API_BASE_URL=http://localhost:8080
+# Vite doc bien VITE_* luc BUILD nen gia tri nay bi "bake" cung vao bundle —
+# doi no sau khi image da build thi phai build lai, khong sua bang env luc chay.
+#
+# Mac dinh RONG = bundle goi `/api/...` tren CUNG ORIGIN voi trang web, nginx o
+# stage sau reverse proxy sang api-gateway => khong dinh CORS. Chi truyen URL
+# tuyet doi khi that su can browser goi thang gateway o host khac.
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 

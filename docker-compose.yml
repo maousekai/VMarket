@@ -262,16 +262,25 @@ services:
     build:
       context: ./frontend
       args:
-        # URL Gateway ma trinh duyet goi truc tiep (Vite bake vao bundle luc build)
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+        # RONG = bundle goi `/api/...` cung origin, nginx trong container FE
+        # reverse proxy sang api-gateway => khong CORS. Chi dat URL tuyet doi
+        # khi muon browser goi thang gateway (luc do CORS quay lai).
+        # Vite bake gia tri nay vao bundle LUC BUILD -> doi thi phai build lai:
+        #   docker compose up -d --build frontend
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     container_name: vmarket-frontend
     networks:
       - vmarket-network
     mem_limit: 64m
     ports:
       - "${FRONTEND_PORT:-5173}:8080"
+    # Chi de xep thu tu khoi dong. nginx dung resolver dong nen FE van len duoc
+    # khi gateway chua san sang (request /api/ tra 502 cho toi khi gateway UP),
+    # khong ket container FE vao vong doi cua gateway.
     depends_on:
       - api-gateway
+    # Khong khai healthcheck o day: frontend/Dockerfile da co HEALTHCHECK san
+    # trong image (khai lai = 2 nguon cho cung mot thu).
 
 # Network chung cho tat ca service (PBL6-9). `name:` dinh danh de khong phu
 # thuoc ten project compose; cac service goi nhau bang ten service trong network.
