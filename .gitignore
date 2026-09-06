@@ -31,5 +31,14 @@ logs_*.txt
 .env.*.local
 !.env.example
 
+# Cau hinh .env theo tung service (PBL6-CICD):
+#   .env.dev          -> COMMIT (chi gia tri dev, khong co bi mat that)
+#   .env.prod.example -> COMMIT (khung, gia tri de trong)
+#   .env.prod         -> KHONG BAO GIO commit (chua bi mat that)
+services/*/env/.env.prod
+services/*/env/.env.*.local
+**/.env.prod
+!**/.env.prod.example
+
 # Docker
 docker-compose.override.yml

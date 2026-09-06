@@ -39,10 +39,16 @@ VMarket/
 │   ├── recommendation-service/# Gợi ý sản phẩm (8101, FastAPI + PostgreSQL + Redis)
 │   └── chatbot-service/       # Chatbot RAG (8102, FastAPI + MongoDB)
 ├── frontend/                  # Web end-user (React + Vite, cổng 5173)
-├── scripts/                   # Script quản lý dự án (vmarket.cmd)
+├── templates/                 # Template dùng chung khi tạo service mới
+│   ├── Dockerfile.springboot  #   Dockerfile multi-stage cho MỌI service Spring Boot
+│   ├── caller-workflow.yml.tpl#   Khuôn workflow CI/CD của một service
+│   └── env/                   #   Khuôn 3 file .env (example/dev/prod)
+├── .github/workflows/         # CI/CD: 1 workflow dùng chung + 1 file/service
+├── scripts/                   # Script quản lý dự án (vmarket.cmd, new-service.ps1)
 ├── infra/                     # Cấu hình hạ tầng (init script PostgreSQL...)
 ├── docs/                      # SRS và tài liệu dự án
-├── docker-compose.yml         # Hạ tầng dùng chung cho dev
+├── docker-compose.yml         # Hạ tầng + service cho DEV (build tại chỗ)
+├── docker-compose.prod.yml    # PROD: kéo image từ ghcr.io, không build
 └── CONTRIBUTING.md            # Quy ước branch/commit/PR
 ```
 
@@ -126,11 +132,39 @@ scripts\vmarket.cmd stop                   # tắt các process Java
 
 ## Build Docker cho từng service
 
-Build context là **thư mục gốc repo** (Dockerfile cần parent POM):
+Toàn bộ service Spring Boot dùng **chung một Dockerfile mẫu**; đổi service chỉ cần đổi 2 build-arg. Build context là **thư mục gốc repo** (stage build cần parent POM):
 
 ```bash
-docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
+docker build -f templates/Dockerfile.springboot \
+  --build-arg SERVICE_NAME=auth-service \
+  --build-arg SERVICE_PORT=8081 \
+  -t vmarket-auth-service:local .
 ```
+
+Image cuối dùng JRE slim, chạy user non-root, có sẵn `HEALTHCHECK`. Nhờ tách layer dependency/ứng dụng, build lại sau khi sửa code chỉ mất ~10 giây thay vì ~66 giây.
+
+## CI/CD — mỗi service build & deploy độc lập
+
+Mỗi microservice có pipeline riêng, kích hoạt theo **thay đổi trong thư mục của chính nó** (path-based trigger): sửa `services/auth-service/**` không làm build lại 10 service khác.
+
+```
+.github/workflows/
+├── _reusable-springboot-service.yml   # logic dùng chung: build → test → coverage
+│                                      # → image → smoke test → deploy
+└── auth-service.yml                   # ~20 dòng gọi lại, kèm path filter
+```
+
+Tạo service mới:
+
+```powershell
+.\scripts\new-service.ps1 -Name order-service -Port 8086     # Windows
+```
+
+```bash
+./scripts/new-service.sh order-service 8086                  # macOS/Linux
+```
+
+Hướng dẫn đầy đủ (6 bước tạo service, quy ước `.env` dev/prod, triển khai, rollback, xử lý sự cố): **[docs/CICD-TEMPLATE.md](docs/CICD-TEMPLATE.md)**.
 
 ## Chạy frontend
 
@@ -164,5 +198,6 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 ## Tài liệu
 
 - [SRS — Đặc tả yêu cầu](docs/SRS-VMarket.md)
+- [Template Docker + CI/CD dùng chung](docs/CICD-TEMPLATE.md)
 - [Quy ước git/commit/PR](CONTRIBUTING.md)
 - [README Auth Service](services/auth-service/README.md)

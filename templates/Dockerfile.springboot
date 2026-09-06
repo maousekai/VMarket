@@ -1,0 +1,114 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# VMarket — Dockerfile MẪU DÙNG CHUNG cho MỌI microservice Spring Boot
+# =============================================================================
+# Một file duy nhất cho cả 11 service (api-gateway, auth, user, shop, product,
+# cart, order, payment, delivery, review, notification). Đổi service chỉ cần
+# đổi build-arg, KHÔNG sửa nội dung file này.
+#
+# Build (context = THƯ MỤC GỐC repo, vì cần parent POM services/pom.xml):
+#   docker build -f templates/Dockerfile.springboot \
+#     --build-arg SERVICE_NAME=auth-service \
+#     --build-arg SERVICE_PORT=8081 \
+#     -t vmarket-auth-service:local .
+#
+# Chạy:
+#   docker run --rm -p 8081:8081 --env-file services/auth-service/env/.env.dev \
+#     vmarket-auth-service:local
+#
+# Vì sao multi-stage: stage build cần Maven + JDK (~600MB), stage runtime chỉ
+# cần JRE slim (~180MB). Image cuối KHÔNG chứa Maven, JDK, source code hay
+# repository .m2 — vừa nhẹ vừa giảm bề mặt tấn công (NFR-SEC-05).
+# =============================================================================
+
+ARG JAVA_VERSION=17
+ARG MAVEN_VERSION=3.9
+
+# -----------------------------------------------------------------------------
+# STAGE 1 — BUILD: biên dịch + đóng gói jar bằng Maven
+# -----------------------------------------------------------------------------
+FROM maven:${MAVEN_VERSION}-eclipse-temurin-${JAVA_VERSION} AS build
+
+ARG SERVICE_NAME
+WORKDIR /build
+
+# --- (1) Lớp DEPENDENCY: chỉ copy POM, chưa copy source ----------------------
+# Docker cache theo từng lệnh: layer này chỉ bị dựng lại khi POM thay đổi.
+# Sửa code Java sẽ KHÔNG phải tải lại ~95 thư viện => build lần 2 nhanh hơn
+# nhiều lần. (Đây là điểm khác biệt lớn nhất so với Dockerfile cũ vốn copy
+# source và pom cùng lúc nên mọi commit đều tải lại toàn bộ dependency.)
+#
+# Cố ý KHÔNG dùng `--mount=type=cache`: cache mount không nằm trong image layer
+# nên GitHub Actions (cache type=gha) không tái sử dụng được. Ghi thẳng vào
+# layer mới là cách cache hiệu quả trên cả máy local lẫn CI.
+COPY services/pom.xml ./pom.xml
+COPY services/${SERVICE_NAME}/pom.xml ${SERVICE_NAME}/pom.xml
+RUN mvn -B -ntp -f ${SERVICE_NAME}/pom.xml dependency:go-offline
+
+# --- (2) Lớp SOURCE: copy code rồi đóng gói ---------------------------------
+# -DskipTests: unit test đã chạy ở job riêng của pipeline CI (fail sớm, có
+# report + coverage). Chạy lại test trong Docker chỉ làm chậm build image.
+COPY services/${SERVICE_NAME}/src ${SERVICE_NAME}/src
+RUN mvn -B -ntp -f ${SERVICE_NAME}/pom.xml clean package -DskipTests \
+ && cp ${SERVICE_NAME}/target/*.jar app.jar
+
+# --- (3) Tách fat jar thành các lớp (layered jar) ----------------------------
+# `jarmode=tools` là cơ chế chính thức của Spring Boot 3.3+ / 4.x (bản cũ dùng
+# `jarmode=layertools` đã bị bỏ). Kết quả: thư viện (~40MB, ít đổi) và code
+# ứng dụng (~200KB, đổi mỗi commit) nằm ở 2 layer khác nhau => mỗi lần deploy
+# chỉ push/pull lại layer nhỏ.
+# --application-filename app.jar: chuẩn hoá tên jar để ENTRYPOINT dùng chung
+# được cho mọi service (không phụ thuộc artifactId/version).
+# .keep: giữ thư mục layer rỗng để lệnh COPY ở stage sau luôn hợp lệ.
+RUN java -Djarmode=tools -jar app.jar extract \
+        --layers --destination extracted \
+        --application-filename app.jar --force \
+ && mkdir -p extracted/dependencies extracted/snapshot-dependencies extracted/application \
+ && touch extracted/dependencies/.keep extracted/snapshot-dependencies/.keep
+
+# -----------------------------------------------------------------------------
+# STAGE 2 — RUNTIME: JRE slim, chạy bằng user non-root
+# -----------------------------------------------------------------------------
+FROM eclipse-temurin:${JAVA_VERSION}-jre-alpine AS runtime
+
+ARG SERVICE_NAME
+ARG SERVICE_PORT=8080
+
+LABEL org.opencontainers.image.title="vmarket-${SERVICE_NAME}" \
+      org.opencontainers.image.source="https://github.com/maousekai/VMarket" \
+      org.opencontainers.image.vendor="VMarket - PBL6 Nhom 1"
+
+# SERVER_PORT được application.yml của service đọc: server.port=${SERVER_PORT}
+# JAVA_OPTS: MaxRAMPercentage để JVM tôn trọng mem_limit của container thay vì
+# nhìn RAM của cả máy host; ExitOnOutOfMemoryError để container chết hẳn và
+# được orchestrator restart thay vì sống dở (NFR-REL-01).
+ENV SERVICE_NAME=${SERVICE_NAME} \
+    SERVER_PORT=${SERVICE_PORT} \
+    JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+
+# Cố ý KHÔNG đặt SPRING_PROFILES_ACTIVE ở đây: profile do file .env quyết định
+# (.env.dev -> dev, .env.prod -> prod). Xem services/<service>/env/.
+
+WORKDIR /app
+
+# Chạy non-root: nếu ứng dụng bị khai thác, kẻ tấn công không có quyền root
+# trong container (OWASP / NFR-SEC-05).
+RUN addgroup -S vmarket && adduser -S vmarket -G vmarket
+
+# Thứ tự COPY = thứ tự thay đổi từ ÍT tới NHIỀU, để layer trước được cache lại.
+COPY --from=build --chown=vmarket:vmarket /build/extracted/dependencies/ ./
+COPY --from=build --chown=vmarket:vmarket /build/extracted/snapshot-dependencies/ ./
+COPY --from=build --chown=vmarket:vmarket /build/extracted/application/ ./
+
+USER vmarket
+EXPOSE ${SERVICE_PORT}
+
+# Health check dùng wget của busybox (có sẵn trong alpine, không cần cài thêm).
+# start-period 45s: chừa thời gian Spring Boot khởi động + kết nối DB.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=5 \
+  CMD wget -qO- "http://127.0.0.1:${SERVER_PORT}/actuator/health" 2>/dev/null \
+      | grep -q '"status":"UP"' || exit 1
+
+# `exec` để java thành PID 1 => nhận được SIGTERM và shutdown gracefully khi
+# `docker stop` / rolling update, không bị kill cứng sau 10 giây.
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

@@ -1,0 +1,75 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# VMarket — BIẾN THỂ GRADLE của Dockerfile mẫu dùng chung
+# =============================================================================
+# Toàn bộ service hiện tại của VMarket dùng Maven (services/pom.xml multi-module)
+# nên file này CHƯA được dùng. Giữ lại để khi có service mới chọn Gradle thì
+# không phải thiết kế lại từ đầu — cấu trúc 2 stage, layered jar, non-root,
+# healthcheck đều giống hệt bản Maven (templates/Dockerfile.springboot).
+#
+# Build (context = thư mục gốc repo):
+#   docker build -f templates/Dockerfile.springboot-gradle \
+#     --build-arg SERVICE_NAME=<ten-service> \
+#     --build-arg SERVICE_PORT=<port> \
+#     -t vmarket-<ten-service>:local .
+# =============================================================================
+
+ARG JAVA_VERSION=17
+ARG GRADLE_VERSION=8.10
+
+# -----------------------------------------------------------------------------
+# STAGE 1 — BUILD
+# -----------------------------------------------------------------------------
+FROM gradle:${GRADLE_VERSION}-jdk${JAVA_VERSION} AS build
+
+ARG SERVICE_NAME
+WORKDIR /build
+
+# (1) Lớp dependency: chỉ copy file build script để cache phần tải thư viện.
+COPY services/${SERVICE_NAME}/build.gradle* services/${SERVICE_NAME}/settings.gradle* ./
+COPY services/${SERVICE_NAME}/gradle ./gradle
+RUN gradle --no-daemon dependencies || true
+
+# (2) Lớp source
+COPY services/${SERVICE_NAME}/src ./src
+RUN gradle --no-daemon clean bootJar -x test \
+ && cp build/libs/*.jar app.jar
+
+# (3) Tách layered jar (giống bản Maven)
+RUN java -Djarmode=tools -jar app.jar extract \
+        --layers --destination extracted \
+        --application-filename app.jar --force \
+ && mkdir -p extracted/dependencies extracted/snapshot-dependencies extracted/application \
+ && touch extracted/dependencies/.keep extracted/snapshot-dependencies/.keep
+
+# -----------------------------------------------------------------------------
+# STAGE 2 — RUNTIME
+# -----------------------------------------------------------------------------
+FROM eclipse-temurin:${JAVA_VERSION}-jre-alpine AS runtime
+
+ARG SERVICE_NAME
+ARG SERVICE_PORT=8080
+
+LABEL org.opencontainers.image.title="vmarket-${SERVICE_NAME}" \
+      org.opencontainers.image.source="https://github.com/maousekai/VMarket" \
+      org.opencontainers.image.vendor="VMarket - PBL6 Nhom 1"
+
+ENV SERVICE_NAME=${SERVICE_NAME} \
+    SERVER_PORT=${SERVICE_PORT} \
+    JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+
+WORKDIR /app
+RUN addgroup -S vmarket && adduser -S vmarket -G vmarket
+
+COPY --from=build --chown=vmarket:vmarket /build/extracted/dependencies/ ./
+COPY --from=build --chown=vmarket:vmarket /build/extracted/snapshot-dependencies/ ./
+COPY --from=build --chown=vmarket:vmarket /build/extracted/application/ ./
+
+USER vmarket
+EXPOSE ${SERVICE_PORT}
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=5 \
+  CMD wget -qO- "http://127.0.0.1:${SERVER_PORT}/actuator/health" 2>/dev/null \
+      | grep -q '"status":"UP"' || exit 1
+
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

@@ -69,3 +69,62 @@ chore(docker): thêm docker-compose cho PostgreSQL
 - Cần **ít nhất 1 approval** trước khi merge.
 - Không push trực tiếp vào `dev`, `release`, `product`.
 - Merge xong xoá nhánh ticket trên remote.
+- **PR phải có pipeline xanh** trước khi merge: mọi thay đổi trong `services/<tên>/**`
+  đều kích hoạt workflow riêng của service đó (build → unit test → coverage →
+  đóng gói image → smoke test).
+
+## 5. CI/CD — mỗi service một pipeline độc lập
+
+Toàn bộ logic CI/CD nằm ở **một** workflow dùng chung
+`.github/workflows/_reusable-springboot-service.yml`. Mỗi service chỉ có một file
+~20 dòng gọi lại nó, kèm **path-based trigger**:
+
+```
+.github/workflows/
+├── _reusable-springboot-service.yml   ← logic dùng chung, viết một lần
+├── auth-service.yml                   ← chỉ chạy khi services/auth-service/** đổi
+└── <service>.yml                      ← mỗi service một file
+```
+
+Hệ quả cần nhớ khi làm việc:
+
+- Sửa code của service nào thì **chỉ pipeline của service đó chạy**. Sửa
+  `services/pom.xml` hoặc `templates/Dockerfile.springboot` thì **mọi** pipeline chạy
+  (đúng như thiết kế — đó là file dùng chung).
+- Muốn đổi quy trình CI (thêm bước lint, đổi cách chạy test...) thì sửa
+  **workflow dùng chung**, đừng sửa từng file service.
+- Image được đẩy lên `ghcr.io` với tag `sha-<7 ký tự>`; deploy và rollback đều
+  dựa vào tag này.
+
+Chi tiết đầy đủ: [docs/CICD-TEMPLATE.md](docs/CICD-TEMPLATE.md).
+
+## 6. Quy tắc bí mật và biến môi trường
+
+Mỗi service có 3 file cấu hình trong `services/<tên>/env/`:
+
+| File | Commit? | Nội dung |
+| --- | :---: | --- |
+| `.env.example` | ✅ | Danh mục **đầy đủ** biến, chỉ placeholder |
+| `.env.dev` | ✅ | Giá trị dev (khớp `docker-compose.yml`), **không có bí mật thật** |
+| `.env.prod.example` | ✅ | Khung prod, giá trị bí mật để trống |
+| `.env.prod` | ❌ **KHÔNG BAO GIỜ** | Bí mật thật, chỉ tồn tại trên server (`chmod 600`) |
+
+Quy tắc bắt buộc:
+
+1. Bí mật thật (`JWT_SECRET`, `MAIL_PASSWORD`, `PAYOS_CHECKSUM_KEY`...) chỉ nằm ở
+   **GitHub Secrets** hoặc **`.env.prod` trên server**. Không bao giờ trong git.
+2. Thêm biến mới: khai vào `.env.example` **trước**, rồi mới tới `.env.dev` và
+   `.env.prod.example`.
+3. `application.yml` không hard-code host/port/mật khẩu — luôn dùng
+   `${BIẾN:giá-trị-mặc-định}`.
+4. Nếu lỡ commit bí mật: **đổi ngay giá trị đó**, đừng chỉ xoá khỏi file — nó vẫn
+   nằm trong lịch sử git.
+
+## 7. Checklist trước khi mở PR cho một service
+
+- [ ] `cd services && ./mvnw -pl <service> -am verify` xanh tại máy
+- [ ] `docker build -f templates/Dockerfile.springboot --build-arg SERVICE_NAME=<service> --build-arg SERVICE_PORT=<port> -t vmarket-<service>:local .` thành công
+- [ ] Container chạy được và `GET /actuator/health` trả `{"status":"UP"}`
+- [ ] Biến môi trường mới đã khai đủ trong cả 3 file `env/`
+- [ ] `git status` không thấy file `.env` hay `.env.prod` nào
+- [ ] Commit message đúng Conventional Commits (mục 3)

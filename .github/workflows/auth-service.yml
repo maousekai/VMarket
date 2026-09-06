@@ -1,0 +1,60 @@
+# =============================================================================
+# Pipeline RIÊNG của auth-service (service đầu tiên áp dụng template — PoC)
+# =============================================================================
+# File này cố tình rất ngắn: toàn bộ logic nằm ở workflow dùng chung
+# `_reusable-springboot-service.yml`. Thêm service mới = copy file này, đổi
+# 4 dòng (tên service, port, db, path filter).
+#
+# ĐIỂM MẤU CHỐT — `paths` bên dưới chính là "path-based trigger":
+# workflow này CHỈ chạy khi commit chạm vào thư mục của auth-service.
+# Sửa services/order-service/** sẽ KHÔNG kích hoạt pipeline này.
+# =============================================================================
+
+name: auth-service
+
+on:
+  push:
+    branches: [dev, release, product]
+    paths:
+      - 'services/auth-service/**'      # code của chính service này
+      - 'services/pom.xml'              # parent POM đổi -> ảnh hưởng mọi service
+      - 'templates/Dockerfile.springboot'   # template đóng gói đổi
+      - '.github/workflows/auth-service.yml'
+      - '.github/workflows/_reusable-springboot-service.yml'
+  pull_request:
+    paths:
+      - 'services/auth-service/**'
+      - 'services/pom.xml'
+      - 'templates/Dockerfile.springboot'
+      - '.github/workflows/auth-service.yml'
+      - '.github/workflows/_reusable-springboot-service.yml'
+  # Cho phép bấm chạy tay từ tab Actions (tiện khi demo/bảo vệ)
+  workflow_dispatch:
+
+# Push commit mới sẽ huỷ lần chạy cũ của cùng nhánh — tiết kiệm phút chạy CI.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci-cd:
+    uses: ./.github/workflows/_reusable-springboot-service.yml
+    with:
+      service-name: auth-service
+      service-port: 8081
+      db-name: vmarket_auth
+      java-version: '17'
+      # NFR-MAI-02: tối thiểu 60% cho tầng nghiệp vụ. Đo tại chỗ ngày 06/09/2026
+      # là 100% (12/12 dòng, đã loại trừ config/dto/Application) nên bật ngưỡng
+      # ngay từ đầu — code mới không kèm test sẽ bị pipeline chặn.
+      coverage-min: 60
+      smoke-test: true
+      # PR chỉ build để kiểm tra, không đẩy image lên registry.
+      push-image: ${{ github.event_name == 'push' }}
+      # Bật khi nhóm đã có VPS + khai đủ secrets DEPLOY_* (xem docs/CICD-TEMPLATE.md).
+      deploy: false
+    secrets: inherit
