@@ -8,10 +8,14 @@ export default function HealthStatus() {
   }
 
   if (error) {
+    // Mặc định FE gọi cùng origin (`/api/...`) qua reverse proxy, nên không có
+    // URL tuyệt đối để hiển thị — nói rõ đang gọi qua đâu để dễ chẩn đoán.
+    const target = import.meta.env.VITE_API_BASE_URL || '/api (qua reverse proxy)'
+
     return (
       <p className="status status--error">
-        Chưa kết nối được API ({error.message}). Hãy chắc chắn API Gateway đang chạy ở{' '}
-        <code>{import.meta.env.VITE_API_BASE_URL}</code> và Auth Service đã khởi động.
+        Chưa kết nối được API ({error.message}). Đang gọi qua <code>{target}</code> — hãy chắc
+        chắn API Gateway và Auth Service đã khởi động.
       </p>
     )
   }

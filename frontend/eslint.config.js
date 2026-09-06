@@ -28,5 +28,13 @@ export default [
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // vite.config.js chạy bằng Node (lúc build), không chạy trong trình duyệt,
+    // nên cần globals của Node — nếu không `process` sẽ bị báo 'is not defined'.
+    files: ['vite.config.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
   eslintConfigPrettier,
 ]

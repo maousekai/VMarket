@@ -137,7 +137,7 @@ docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
 ```bash
 cd frontend
 npm install
-copy .env.example .env            # VITE_API_BASE_URL=http://localhost:8080 (gateway)
+copy .env.example .env            # để trống VITE_API_BASE_URL = gọi cùng origin
 npm run dev                       # http://localhost:5173
 ```
 
@@ -145,10 +145,11 @@ Hoặc chạy frontend bằng Docker (image tự build, phục vụ bằng nginx
 
 ```bash
 docker compose up -d --build frontend   # http://localhost:5173
-# Muon doi URL API: sua build.args.VITE_API_BASE_URL cua service frontend trong docker-compose.yml
 ```
 
 Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết nối API thành công" khi gateway + auth-service đang chạy.
+
+FE gọi API bằng đường dẫn tương đối `/api/...` trên **cùng origin** với trang, rồi reverse proxy chuyển tiếp sang gateway: nginx trong container khi chạy Docker, Vite dev server khi chạy `npm run dev`. Nhờ vậy trình duyệt chỉ thấy một origin nên **không phát sinh CORS**. Chi tiết ở [README của frontend](frontend/README.md).
 
 ## Kiểm tra cài đặt thành công
 
@@ -158,7 +159,8 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | Gateway   | `curl http://localhost:8080/actuator/health`          | `{"status":"UP"}`           |
 | Auth      | `curl http://localhost:8081/api/auth/health`          | `{"status":"UP",...}`       |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
-| Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |
+| Qua reverse proxy của FE | `curl http://localhost:5173/api/auth/health` | `{"status":"UP",...}` — chứng minh nginx proxy sang gateway |
+| Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công", tab Network không có request `OPTIONS` |
 | RabbitMQ  | mở `http://localhost:15672`                           | đăng nhập guest/guest       |
 
 ## Tài liệu
