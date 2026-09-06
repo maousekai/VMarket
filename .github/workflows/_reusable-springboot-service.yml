@@ -1,0 +1,408 @@
+# =============================================================================
+# VMarket — WORKFLOW CI/CD MẪU DÙNG CHUNG cho MỌI microservice Spring Boot
+# =============================================================================
+# Đây là "reusable workflow": KHÔNG tự chạy, mà được workflow riêng của từng
+# service gọi lại (xem .github/workflows/auth-service.yml). Nhờ vậy toàn bộ
+# logic CI/CD chỉ viết MỘT LẦN ở đây; thêm service mới chỉ tốn ~20 dòng.
+#
+# Luồng:  build-test  ->  image  ->  smoke-test  ->  deploy
+#         (unit test)   (đóng gói)  (chạy thật)   (lên server)
+#
+# Mỗi service chạy pipeline RIÊNG, trigger bằng path filter ở workflow gọi
+# => sửa auth-service không build lại 10 service kia (SRS NFR-SCA-01).
+# =============================================================================
+
+name: Reusable · Spring Boot service
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: 'Tên thư mục service trong services/ (vd: auth-service)'
+        required: true
+        type: string
+      service-port:
+        description: 'Cổng service lắng nghe bên trong container (vd: 8081)'
+        required: true
+        type: number
+      java-version:
+        description: 'Phiên bản JDK dùng để build'
+        required: false
+        type: string
+        default: '17'
+      db-name:
+        description: 'Tên database PostgreSQL tạo sẵn cho bước smoke test'
+        required: false
+        type: string
+        default: 'vmarket_test'
+      coverage-min:
+        description: >-
+          Ngưỡng độ phủ dòng tối thiểu (%). 0 = chỉ in báo cáo, không chặn.
+          NFR-MAI-02 yêu cầu 60% cho tầng nghiệp vụ — nâng dần khi service
+          đã có test nghiệp vụ thật.
+        required: false
+        type: number
+        default: 0
+      smoke-test:
+        description: 'Chạy thử container thật với hạ tầng trước khi deploy'
+        required: false
+        type: boolean
+        default: true
+      push-image:
+        description: 'Đẩy image lên GitHub Container Registry (ghcr.io)'
+        required: false
+        type: boolean
+        default: false
+      deploy:
+        description: 'Triển khai lên server qua SSH (cần đủ secrets DEPLOY_*)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DEPLOY_HOST:
+        required: false
+      DEPLOY_USER:
+        required: false
+      DEPLOY_SSH_KEY:
+        required: false
+      DEPLOY_PATH:
+        required: false
+
+# Quyền tối thiểu: đọc code + ghi package (để push image lên ghcr.io).
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ===========================================================================
+  # 1) BUILD & UNIT TEST — chỉ biên dịch + test ĐÚNG module của service này
+  # ===========================================================================
+  build-test:
+    name: Build & test (${{ inputs.service-name }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài JDK ${{ inputs.java-version }} + cache Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: maven
+
+      # Git trên Windows không giữ bit thực thi của mvnw -> cấp lại trên Linux.
+      - name: Cấp quyền thực thi cho Maven Wrapper
+        run: chmod +x services/mvnw
+
+      # -pl <service> -am : chỉ build module này + parent POM của nó.
+      #   => KHÔNG kéo theo 10 service khác (đây chính là "build độc lập").
+      # verify : compile -> test -> package -> sinh báo cáo JaCoCo.
+      - name: Build & unit test
+        working-directory: services
+        run: ./mvnw -B -ntp -pl ${{ inputs.service-name }} -am verify
+
+      - name: Lưu báo cáo test (kể cả khi test fail)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ inputs.service-name }}
+          path: |
+            services/${{ inputs.service-name }}/target/surefire-reports/**
+            services/${{ inputs.service-name }}/target/site/jacoco/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Đọc jacoco.xml, in độ phủ và chặn build nếu dưới ngưỡng yêu cầu.
+      - name: Kiểm tra độ phủ unit test (NFR-MAI-02)
+        run: |
+          REPORT="services/${{ inputs.service-name }}/target/site/jacoco/jacoco.xml"
+          MIN="${{ inputs.coverage-min }}"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::Không tìm thấy $REPORT — bỏ qua kiểm tra coverage."
+            exit 0
+          fi
+          python3 - "$REPORT" "$MIN" <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
+
+          report_path, minimum = sys.argv[1], float(sys.argv[2])
+          root = ET.parse(report_path).getroot()
+
+          # Counter tổng của cả report nằm ở các thẻ <counter> con trực tiếp.
+          line = next((c for c in root.findall('counter')
+                       if c.get('type') == 'LINE'), None)
+          if line is None:
+              print('::warning::Report không có counter LINE — bỏ qua.')
+              sys.exit(0)
+
+          covered = int(line.get('covered'))
+          missed = int(line.get('missed'))
+          total = covered + missed
+          pct = (covered / total * 100) if total else 0.0
+
+          print(f'Do phu dong: {pct:.1f}% ({covered}/{total} dong)')
+          summary = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary:
+              with open(summary, 'a', encoding='utf-8') as fh:
+                  fh.write('### Unit test coverage\n\n')
+                  fh.write('| Chỉ số | Giá trị |\n|---|---|\n')
+                  fh.write(f'| Độ phủ dòng | **{pct:.1f}%** ({covered}/{total}) |\n')
+                  fh.write(f'| Ngưỡng yêu cầu | {minimum:.0f}% |\n')
+
+          if pct + 1e-9 < minimum:
+              print(f'::error::Do phu {pct:.1f}% < nguong yeu cau {minimum:.0f}%')
+              sys.exit(1)
+          PY
+
+  # ===========================================================================
+  # 2) IMAGE — đóng gói bằng Dockerfile MẪU DÙNG CHUNG, đẩy lên ghcr.io
+  # ===========================================================================
+  image:
+    name: Đóng gói Docker image
+    needs: build-test
+    # Chỉ chạy khi THẬT SỰ đẩy image lên registry. Với pull_request
+    # (push-image=false) job này chỉ hâm cache rồi vứt bản build đi, trong khi
+    # smoke-test vẫn tự build lại từ đầu — tốn thêm một lượt build vô ích.
+    if: ${{ inputs.push-image }}
+    runs-on: ubuntu-latest
+    outputs:
+      image-ref: ${{ steps.meta.outputs.image-ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tên image trên ghcr.io bắt buộc viết thường.
+      - name: Xác định tên image
+        id: meta
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${OWNER}/vmarket-${{ inputs.service-name }}"
+          echo "image=${IMAGE}"                       >> "$GITHUB_OUTPUT"
+          echo "image-ref=${IMAGE}:sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Đăng nhập ghcr.io
+        if: ${{ inputs.push-image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN có sẵn, không cần tạo secret riêng.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # sha-xxxxxxx : tag bất biến, dùng để rollback chính xác
+      # <branch>    : tag theo nhánh (dev / release / product)
+      # latest      : chỉ gắn cho nhánh mặc định
+      - name: Sinh tag & label cho image
+        id: tags
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.meta.outputs.image }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Cùng MỘT Dockerfile cho mọi service — chỉ đổi build-arg.
+      # cache-from/to type=gha: tái dùng layer dependency giữa các lần chạy CI.
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: templates/Dockerfile.springboot
+          build-args: |
+            SERVICE_NAME=${{ inputs.service-name }}
+            SERVICE_PORT=${{ inputs.service-port }}
+            JAVA_VERSION=${{ inputs.java-version }}
+          push: ${{ inputs.push-image }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.tags.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.service-name }}
+          cache-to: type=gha,scope=${{ inputs.service-name }},mode=max
+
+  # ===========================================================================
+  # 3) SMOKE TEST — chạy image THẬT với hạ tầng thật, gọi /actuator/health
+  # ===========================================================================
+  # Đây là bằng chứng cho DoD: "build/deploy độc lập không lỗi". Bước này bắt
+  # được các lỗi mà unit test không thấy: sai ENTRYPOINT, thiếu thư viện trong
+  # layer, sai biến môi trường, app chết ngay khi khởi động...
+  smoke-test:
+    name: Smoke test container
+    # Phụ thuộc MỀM vào `image`: khi job đó chạy (push) thì chờ nó xong để dùng
+    # lại cache type=gha; khi nó bị skip (pull_request) thì smoke-test vẫn chạy
+    # và tự build + load image.
+    needs: [build-test, image]
+    if: >-
+      ${{ always() && inputs.smoke-test
+          && needs.build-test.result == 'success'
+          && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: vmarket
+          POSTGRES_PASSWORD: vmarket
+          POSTGRES_DB: ${{ inputs.db-name }}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vmarket"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      mongo:
+        image: mongo:8.0
+        ports: ['27017:27017']
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      rabbitmq:
+        # Trùng image với docker-compose.yml / docker-compose.prod.yml để smoke
+        # test chạy đúng broker mà dev và prod đang dùng.
+        image: rabbitmq:4.1-management
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 15s --health-timeout 10s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Build lại từ cache của job trước (gần như tức thì) và nạp vào docker
+      # local của runner để chạy được.
+      - name: Nạp image vào runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: templates/Dockerfile.springboot
+          build-args: |
+            SERVICE_NAME=${{ inputs.service-name }}
+            SERVICE_PORT=${{ inputs.service-port }}
+            JAVA_VERSION=${{ inputs.java-version }}
+          load: true
+          tags: vmarket-${{ inputs.service-name }}:smoke
+          cache-from: type=gha,scope=${{ inputs.service-name }}
+
+      - name: Báo cáo kích thước image
+        run: |
+          SIZE=$(docker image inspect vmarket-${{ inputs.service-name }}:smoke \
+                 --format '{{.Size}}')
+          MB=$((SIZE / 1024 / 1024))
+          echo "Kích thước image: ${MB} MB"
+          {
+            echo "### Image ${{ inputs.service-name }}"
+            echo ""
+            echo "| Chỉ số | Giá trị |"
+            echo "|---|---|"
+            echo "| Kích thước | **${MB} MB** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MB" -gt 400 ]; then
+            echo "::warning::Image ${MB}MB lớn hơn mong đợi (<400MB)."
+          fi
+
+      # --network host: container dùng chung mạng với runner nên gọi được
+      # postgres/redis/... đang publish ở 127.0.0.1.
+      - name: Khởi động container
+        run: |
+          docker run -d --name smoke --network host \
+            -e SPRING_PROFILES_ACTIVE=dev \
+            -e SERVER_PORT=${{ inputs.service-port }} \
+            -e DB_HOST=127.0.0.1 -e DB_PORT=5432 \
+            -e DB_NAME=${{ inputs.db-name }} \
+            -e DB_USERNAME=vmarket -e DB_PASSWORD=vmarket \
+            -e MONGO_HOST=127.0.0.1 -e MONGO_PORT=27017 \
+            -e REDIS_HOST=127.0.0.1 -e REDIS_PORT=6379 \
+            -e RABBITMQ_HOST=127.0.0.1 -e RABBITMQ_PORT=5672 \
+            -e RABBITMQ_USERNAME=guest -e RABBITMQ_PASSWORD=guest \
+            vmarket-${{ inputs.service-name }}:smoke
+
+      - name: Chờ /actuator/health trả UP
+        run: |
+          URL="http://127.0.0.1:${{ inputs.service-port }}/actuator/health"
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS --max-time 3 "$URL" 2>/dev/null || true)
+            case "$BODY" in
+              *'"status":"UP"'*)
+                echo "OK sau ${i}s: $BODY"
+                echo "| Health check | ✅ UP sau ${i}s |" >> "$GITHUB_STEP_SUMMARY"
+                exit 0 ;;
+            esac
+            sleep 1
+          done
+          echo "::error::Service không UP sau 60 giây."
+          exit 1
+
+      # Log container là thứ đầu tiên cần khi smoke test đỏ.
+      - name: In log container khi thất bại
+        if: failure()
+        run: docker logs smoke || true
+
+      - name: Dọn dẹp
+        if: always()
+        run: docker rm -f smoke || true
+
+  # ===========================================================================
+  # 4) DEPLOY — kéo image mới về server và restart DUY NHẤT service này
+  # ===========================================================================
+  # Mặc định TẮT (deploy: false). Bật khi nhóm đã có VPS và khai đủ 4 secrets:
+  #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PATH
+  deploy:
+    name: Deploy lên server
+    needs: [image, smoke-test]
+    if: >-
+      ${{ always() && inputs.deploy
+          && needs.image.result == 'success'
+          && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      # Giá trị đi vào `script` qua `envs:` chứ KHÔNG nội suy ${{ secrets.* }}
+      # thẳng vào chuỗi lệnh: nội suy thẳng thì secret nằm nguyên văn trên dòng
+      # lệnh chạy ở server (lộ trong `ps`, trong history, trong log shell).
+      # `envs:` truyền chúng thành biến môi trường của phiên SSH.
+      - name: Kéo image mới & restart đúng 1 service
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DEPLOY_PATH,GHCR_TOKEN,GHCR_USER,SERVICE_NAME
+          script: |
+            set -e
+            cd "$DEPLOY_PATH"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose -f docker-compose.prod.yml pull "$SERVICE_NAME"
+            # --no-deps là mấu chốt: CHỈ service này được recreate, 10 service
+            # còn lại và hạ tầng giữ nguyên uptime (bằng chứng deploy độc lập).
+            docker compose -f docker-compose.prod.yml up -d --no-deps "$SERVICE_NAME"
+            docker image prune -f
+
+      - name: Smoke test sau khi deploy
+        uses: appleboy/ssh-action@v1
+        env:
+          SERVICE_PORT: ${{ inputs.service-port }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: SERVICE_PORT
+          script: |
+            for i in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:${SERVICE_PORT}/actuator/health" \
+                   | grep -q '"status":"UP"'; then
+                echo "Deploy OK sau ${i}0 giây"; exit 0
+              fi
+              sleep 10
+            done
+            echo "Service không UP sau khi deploy"; exit 1

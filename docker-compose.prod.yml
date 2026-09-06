@@ -1,0 +1,207 @@
+# ============================================================
+# VMarket - Docker Compose MOI TRUONG PRODUCTION
+# ============================================================
+# Khac biet cot loi so voi docker-compose.yml (dev):
+#
+#   | Diem            | dev (docker-compose.yml)   | prod (file nay)              |
+#   |-----------------|----------------------------|------------------------------|
+#   | Nguon image     | `build:` tai cho           | `image:` keo tu ghcr.io       |
+#   | Cau hinh        | env_file .env.dev          | env_file .env.prod (bi mat)   |
+#   | Spring profile  | dev (ddl-auto update)      | prod (ddl-auto validate)      |
+#   | Port ha tang    | publish ra host de debug   | KHONG publish (chi noi bo)    |
+#   | restart         | khong dat                  | unless-stopped                |
+#   | Log             | mac dinh (khong gioi han)  | xoay vong, toi da 30MB/service|
+#
+# Vi sao KHONG build tren server: build can Maven + JDK + ~1GB RAM, VPS hoc tap
+# khong kham noi. Image da duoc CI build & test san, server chi `pull` roi chay.
+#
+# ------------------------------------------------------------
+# TRIEN KHAI LAN DAU tren server
+# ------------------------------------------------------------
+#   git clone https://github.com/maousekai/VMarket.git && cd VMarket
+#   cp .env.example .env                              # bien ha tang
+#   cp services/auth-service/env/.env.prod.example \
+#      services/auth-service/env/.env.prod            # roi DIEN bi mat
+#   chmod 600 services/*/env/.env.prod
+#   echo $GHCR_TOKEN | docker login ghcr.io -u <user> --password-stdin
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# ------------------------------------------------------------
+# CAP NHAT 1 SERVICE (chinh la buoc job `deploy` cua CI chay)
+# ------------------------------------------------------------
+#   docker compose -f docker-compose.prod.yml pull auth-service
+#   docker compose -f docker-compose.prod.yml up -d --no-deps auth-service
+#
+#   `--no-deps` = CHI service nay duoc recreate. Cac service khac va ha tang
+#   giu nguyen uptime => day chinh la "deploy doc lap tung service"
+#   (SRS NFR-SCA-01).
+#
+# ------------------------------------------------------------
+# ROLLBACK khi ban moi loi
+# ------------------------------------------------------------
+#   AUTH_SERVICE_TAG=sha-<7-ky-tu-cua-commit-tot> \
+#     docker compose -f docker-compose.prod.yml up -d --no-deps auth-service
+# ============================================================
+
+name: ${COMPOSE_PROJECT_NAME:-vmarket}
+
+# Cau hinh log dung chung: khong gioi han thi file log an het o dia VPS.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-common-environment: &common-environment
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USERNAME: ${POSTGRES_USER:?POSTGRES_USER chua duoc dat trong .env}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD chua duoc dat trong .env}
+  MONGO_HOST: mongo
+  MONGO_PORT: 27017
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME chua duoc dat trong .env}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD chua duoc dat trong .env}
+
+services:
+  # ==========================================================
+  # HA TANG - KHONG publish port ra Internet (chi noi bo network)
+  # ==========================================================
+  postgres:
+    image: postgres:17-alpine
+    container_name: vmarket-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-vmarket_auth}
+    volumes:
+      - vmarket-pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [vmarket-network]
+    mem_limit: 512m
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vmarket}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:8.0
+    container_name: vmarket-mongo
+    restart: unless-stopped
+    volumes:
+      - vmarket-mongo-data:/data/db
+    networks: [vmarket-network]
+    mem_limit: 512m
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: vmarket-redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - vmarket-redis-data:/data
+    networks: [vmarket-network]
+    mem_limit: 256m
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    container_name: vmarket-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?}
+    volumes:
+      - vmarket-rabbit-data:/var/lib/rabbitmq
+    networks: [vmarket-network]
+    mem_limit: 512m
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ==========================================================
+  # BUSINESS SERVICE - image do CI build, server chi keo ve chay
+  # ==========================================================
+  auth-service:
+    # Tag mac dinh `product` = tag theo NHANH product (type=ref,event=branch).
+    # KHONG dung `latest`: metadata-action gan `latest` cho NHANH MAC DINH cua
+    # repo, ma nhanh mac dinh la `dev` -> deploy prod bang `latest` se deploy
+    # nham HEAD cua dev. Dat AUTH_SERVICE_TAG=sha-xxxxxxx de ghim mot ban cu
+    # the hoac rollback.
+    image: ${AUTH_SERVICE_IMAGE:-ghcr.io/maousekai/vmarket-auth-service}:${AUTH_SERVICE_TAG:-product}
+    container_name: vmarket-auth-service
+    restart: unless-stopped
+    networks: [vmarket-network]
+    mem_limit: 512m
+    logging: *default-logging
+    # Bi mat that (AUTH_JWT_SECRET, MAIL_PASSWORD...) nam trong file nay tren
+    # server, KHONG nam trong git. Ten bien phai khop application.yml cua
+    # auth-service: AUTH_JWT_SECRET khong co gia tri mac dinh o profile prod nen
+    # thieu no la container chet ngay luc khoi dong.
+    env_file:
+      - services/auth-service/env/.env.prod
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_auth
+    ports:
+      # Chi mo tren loopback: Internet vao qua reverse proxy / API Gateway,
+      # khong goi thang service (NFR-SEC-03).
+      - "127.0.0.1:${AUTH_SERVICE_PORT:-8081}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    # healthcheck da co san trong image (templates/Dockerfile.springboot)
+
+  # ----------------------------------------------------------
+  # MAU BLOCK cho service tiep theo - bo comment va dien ten
+  # ----------------------------------------------------------
+  #  <service-name>:
+  #    image: ${<SERVICE>_IMAGE:-ghcr.io/maousekai/vmarket-<service-name>}:${<SERVICE>_TAG:-product}
+  #    container_name: vmarket-<ten>
+  #    restart: unless-stopped
+  #    networks: [vmarket-network]
+  #    mem_limit: 512m
+  #    logging: *default-logging
+  #    env_file:
+  #      - services/<service-name>/env/.env.prod
+  #    environment:
+  #      <<: *common-environment
+  #      DB_NAME: vmarket_<ten>
+  #    ports:
+  #      - "127.0.0.1:<port>:<port>"
+  #    depends_on:
+  #      postgres:
+  #        condition: service_healthy
+
+networks:
+  vmarket-network:
+    name: vmarket-network
+    driver: bridge
+
+volumes:
+  vmarket-pg-data:
+  vmarket-mongo-data:
+  vmarket-redis-data:
+  vmarket-rabbit-data:

@@ -96,12 +96,36 @@ Chạy với profile khác:
 
 ## Chạy bằng Docker
 
-Build context là thư mục gốc repo (Dockerfile cần parent POM):
+Auth Service là service đầu tiên dùng **Dockerfile mẫu chung** (`templates/Dockerfile.springboot`) — không còn Dockerfile riêng. Build context là thư mục gốc repo (stage build cần parent POM):
 
 ```bash
-docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
-docker run -p 8081:8081 -e DB_HOST=host.docker.internal vmarket-auth-service
+docker build -f templates/Dockerfile.springboot \
+  --build-arg SERVICE_NAME=auth-service \
+  --build-arg SERVICE_PORT=8081 \
+  -t vmarket-auth-service:local .
+
+docker run --rm --network vmarket-network -p 8081:8081 \
+  --env-file services/auth-service/env/.env.dev \
+  vmarket-auth-service:local
 ```
+
+Hoặc đơn giản: `docker compose up -d auth-service`.
+
+## Cấu hình `.env` theo môi trường
+
+```
+services/auth-service/env/
+├── .env.example        # danh mục đầy đủ biến (commit)
+├── .env.dev            # giá trị dev, khớp docker-compose (commit)
+└── .env.prod.example   # khung prod, bí mật để trống (commit)
+    .env.prod           # bí mật thật — CHỈ trên server, không commit
+```
+
+Xem [docs/CICD-TEMPLATE.md](../../docs/CICD-TEMPLATE.md) mục 5.
+
+## CI/CD
+
+Pipeline riêng: [`.github/workflows/auth-service.yml`](../../.github/workflows/auth-service.yml) — chỉ chạy khi `services/auth-service/**` thay đổi. Các bước: build → unit test → kiểm tra coverage (ngưỡng 60%) → đóng gói image → smoke test container thật → (tuỳ chọn) deploy.
 
 ## Chạy test
 

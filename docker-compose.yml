@@ -56,9 +56,17 @@ x-common-environment: &common-environment
 #  <service-name>:
 #    build:
 #      context: .
-#      dockerfile: services/<service-name>/Dockerfile
+#      dockerfile: templates/Dockerfile.springboot   # template dung chung moi service
+#      args:
+#        SERVICE_NAME: <service-name>
+#        SERVICE_PORT: <port>
 #    container_name: vmarket-<ten>
+#    networks:
+#      - vmarket-network
 #    mem_limit: 512m
+#    env_file:
+#      - path: services/<service-name>/env/.env.dev
+#        required: false
 #    environment:
 #      <<: *common-environment
 #      DB_NAME: vmarket_<ten>      # service dung PostgreSQL (Mongo thi DB_NAME cung dung)
@@ -67,6 +75,7 @@ x-common-environment: &common-environment
 #        condition: service_healthy
 #      rabbitmq:
 #        condition: service_healthy
+#    # healthcheck da co san trong image, khong can khai lai o day
 
 # ------------------------------------------------------------
 # BLOCK DUNG CHUNG 2 - URL cac business service cho API Gateway.
@@ -200,20 +209,32 @@ services:
   auth-service:
     build:
       context: .
-      dockerfile: services/auth-service/Dockerfile
+      # Dockerfile MAU DUNG CHUNG cho moi service Spring Boot (PBL6-CICD).
+      # Doi service chi can doi 2 build args ben duoi - khong con Dockerfile
+      # rieng cho tung service nua.
+      dockerfile: templates/Dockerfile.springboot
+      args:
+        SERVICE_NAME: auth-service
+        SERVICE_PORT: 8081
     container_name: vmarket-auth-service
     networks:
       - vmarket-network
     mem_limit: 512m
+    # Cau hinh theo TUNG SERVICE, tach dev/prod (PBL6-CICD).
+    # Thu tu uu tien: `environment` > `env_file` > default trong application.yml
+    # => cac bien ha tang duoi day van thang, .env.dev bo sung phan con lai
+    #    (SPRING_PROFILES_ACTIVE, JWT_*, MAIL_*, LOG_LEVEL...).
+    env_file:
+      - path: services/auth-service/env/.env.dev
+        required: false
     environment:
       <<: *common-environment
       DB_NAME: vmarket_auth
       # Origin FE duoc phep (trung voi CORS_ALLOWED_ORIGINS trong .env)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
-      # JWT (PBL6-41) - PROD phai override AUTH_JWT_SECRET bang chuoi ngau nhien manh.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
-      AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
-      AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-30d}
+      # JWT (PBL6-41): KHONG khai o day nua. Bien AUTH_JWT_* nam trong
+      # services/auth-service/env/.env.dev (nap qua env_file ben tren) de moi
+      # bien chi co DUNG MOT nguon. Khai lai o day se ghi de .env.dev.
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"
@@ -222,12 +243,9 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8081/actuator/health >/dev/null 2>&1 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 40s
+    # Khong khai healthcheck o day nua: HEALTHCHECK da nam trong image
+    # (templates/Dockerfile.springboot) nen moi service deu co san, khong phai
+    # copy-paste vao compose cho tung service.
 
   # API Gateway - diem vao duy nhat cua he thong (browser goi vao localhost:8080).
   # Gateway goi cac business service chay tren may host qua host.docker.internal;

@@ -1,0 +1,54 @@
+# =============================================================================
+# VMarket — .dockerignore cho build context = THƯ MỤC GỐC repo
+# =============================================================================
+# Áp dụng cho mọi lệnh build service backend:
+#   docker build -f templates/Dockerfile.springboot --build-arg SERVICE_NAME=... .
+#
+# Vì sao cần: build context được nén và gửi toàn bộ sang Docker daemon TRƯỚC
+# khi chạy lệnh đầu tiên. Không có file này, mỗi lần build phải gửi cả
+# frontend/node_modules (~200MB) và .git — chậm và vô ích.
+# (frontend/ có .dockerignore riêng cho context ./frontend của chính nó.)
+# =============================================================================
+
+# Git & CI
+.git
+.gitignore
+.gitattributes
+.github
+
+# Frontend — không liên quan tới build service Java
+frontend
+admin
+mobile
+
+# Build artifacts của Java / Python / Node
+**/target
+**/build/libs
+**/build/classes
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.venv
+
+# Bí mật: chặn nhiều lớp để .env KHÔNG BAO GIỜ lọt vào image
+**/.env
+**/.env.*
+!**/.env.example
+
+# IDE / OS
+.idea
+.vscode
+**/*.iml
+.DS_Store
+Thumbs.db
+
+# Tài liệu, worklog, script — không cần cho việc build image
+docs
+worklogs
+scripts
+*.md
+services/*/README.md
+
+# Chính các file compose (image không cần biết về compose)
+docker-compose*.yml

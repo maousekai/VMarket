@@ -18,6 +18,7 @@
 	<properties>
 		<java.version>17</java.version>
 		<spring-cloud.version>2025.1.3</spring-cloud.version>
+		<jacoco.version>0.8.13</jacoco.version>
 	</properties>
 
 	<modules>
@@ -47,6 +48,47 @@
 	</dependencyManagement>
 
 	<build>
+		<plugins>
+			<!--
+			  JaCoCo - do do phu unit test (NFR-MAI-02: toi thieu 60% tang nghiep vu).
+			  Khai o day nen MOI module deu duoc do, khong phai them tung service.
+			  - prepare-agent: gan agent vao JVM luc chay test
+			  - report (phase verify): sinh target/site/jacoco/jacoco.xml
+			    -> pipeline CI doc file nay de kiem tra nguong coverage
+			  Plugin CHI sinh bao cao, khong tu fail build; viec chan/khong chan do
+			  input `coverage-min` cua workflow quyet dinh (moi service mot nguong).
+			-->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco.version}</version>
+				<configuration>
+					<!-- Loai tru code khong chua logic nghiep vu de con so phan anh dung -->
+					<excludes>
+						<exclude>**/*Application.class</exclude>
+						<exclude>**/config/**</exclude>
+						<exclude>**/dto/**</exclude>
+						<exclude>**/entity/**</exclude>
+					</excludes>
+				</configuration>
+				<executions>
+					<execution>
+						<id>jacoco-prepare-agent</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>jacoco-report</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
+
 		<pluginManagement>
 			<plugins>
 				<plugin>
