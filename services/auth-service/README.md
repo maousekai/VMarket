@@ -19,12 +19,13 @@ Service xác thực và phân quyền RBAC của VMarket (Spring Boot, kiến tr
 Bước 1 — khởi động hạ tầng (từ thư mục **gốc** repo):
 
 ```bash
-docker compose up -d
+docker compose up -d postgres
 ```
 
-Lần đầu chạy, PostgreSQL tự tạo CSDL `vmarket_auth` cho service này.
+Lần đầu chạy, PostgreSQL tự tạo CSDL `vmarket_auth`. Container publish ra host ở
+cổng **5433** (`POSTGRES_HOST_PORT` — tránh đụng PostgreSQL cài sẵn trên máy).
 
-Bước 2 — chạy service:
+Bước 2 — chạy service (profile `dev` mặc định → datasource trỏ `localhost:5433`):
 
 ```bash
 cd services/auth-service
@@ -32,7 +33,11 @@ cd services/auth-service
 # ../mvnw spring-boot:run       # macOS/Linux
 ```
 
-Service chạy tại cổng **8081**.
+Service chạy tại cổng **8081**. Lúc khởi động, **Flyway tự chạy** `V1__init_auth_schema.sql`
+tạo 4 bảng + seed 5 role (log: `Migrating schema "public" to version "1"`).
+
+> Nếu PostgreSQL nằm ở host/port khác, override khi chạy: `set DB_HOST=... & set DB_PORT=...`
+> (Spring đọc `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USERNAME` / `DB_PASSWORD`).
 
 ## Kiểm tra health-check
 
