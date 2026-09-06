@@ -21,6 +21,7 @@ param(
   [int]$Port,
 
   [Parameter(Position = 2)]
+  [ValidatePattern('^[a-z][a-z0-9_]*$')]
   [string]$DbName
 )
 

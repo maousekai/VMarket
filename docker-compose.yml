@@ -232,10 +232,9 @@ services:
       DB_NAME: vmarket_auth
       # Origin FE duoc phep (trung voi CORS_ALLOWED_ORIGINS trong .env)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
-      # JWT (PBL6-41) - PROD phai override AUTH_JWT_SECRET bang chuoi ngau nhien manh.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
-      AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
-      AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-30d}
+      # JWT (PBL6-41): KHONG khai o day nua. Bien AUTH_JWT_* nam trong
+      # services/auth-service/env/.env.dev (nap qua env_file ben tren) de moi
+      # bien chi co DUNG MOT nguon. Khai lai o day se ghi de .env.dev.
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"

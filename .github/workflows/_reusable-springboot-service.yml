@@ -159,6 +159,10 @@ jobs:
   image:
     name: Đóng gói Docker image
     needs: build-test
+    # Chỉ chạy khi THẬT SỰ đẩy image lên registry. Với pull_request
+    # (push-image=false) job này chỉ hâm cache rồi vứt bản build đi, trong khi
+    # smoke-test vẫn tự build lại từ đầu — tốn thêm một lượt build vô ích.
+    if: ${{ inputs.push-image }}
     runs-on: ubuntu-latest
     outputs:
       image-ref: ${{ steps.meta.outputs.image-ref }}
@@ -224,8 +228,14 @@ jobs:
   # layer, sai biến môi trường, app chết ngay khi khởi động...
   smoke-test:
     name: Smoke test container
-    needs: image
-    if: ${{ inputs.smoke-test }}
+    # Phụ thuộc MỀM vào `image`: khi job đó chạy (push) thì chờ nó xong để dùng
+    # lại cache type=gha; khi nó bị skip (pull_request) thì smoke-test vẫn chạy
+    # và tự build + load image.
+    needs: [build-test, image]
+    if: >-
+      ${{ always() && inputs.smoke-test
+          && needs.build-test.result == 'success'
+          && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
     runs-on: ubuntu-latest
 
     services:
@@ -249,7 +259,9 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 10s --health-timeout 5s --health-retries 10
       rabbitmq:
-        image: rabbitmq:4.1-alpine
+        # Trùng image với docker-compose.yml / docker-compose.prod.yml để smoke
+        # test chạy đúng broker mà dev và prod đang dùng.
+        image: rabbitmq:4.1-management
         env:
           RABBITMQ_DEFAULT_USER: guest
           RABBITMQ_DEFAULT_PASS: guest
@@ -350,32 +362,44 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     steps:
+      # Giá trị đi vào `script` qua `envs:` chứ KHÔNG nội suy ${{ secrets.* }}
+      # thẳng vào chuỗi lệnh: nội suy thẳng thì secret nằm nguyên văn trên dòng
+      # lệnh chạy ở server (lộ trong `ps`, trong history, trong log shell).
+      # `envs:` truyền chúng thành biến môi trường của phiên SSH.
       - name: Kéo image mới & restart đúng 1 service
         uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          SERVICE_NAME: ${{ inputs.service-name }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DEPLOY_PATH,GHCR_TOKEN,GHCR_USER,SERVICE_NAME
           script: |
             set -e
-            cd "${{ secrets.DEPLOY_PATH }}"
-            echo "${{ secrets.GITHUB_TOKEN }}" \
-              | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose -f docker-compose.prod.yml pull ${{ inputs.service-name }}
+            cd "$DEPLOY_PATH"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose -f docker-compose.prod.yml pull "$SERVICE_NAME"
             # --no-deps là mấu chốt: CHỈ service này được recreate, 10 service
             # còn lại và hạ tầng giữ nguyên uptime (bằng chứng deploy độc lập).
-            docker compose -f docker-compose.prod.yml up -d --no-deps ${{ inputs.service-name }}
+            docker compose -f docker-compose.prod.yml up -d --no-deps "$SERVICE_NAME"
             docker image prune -f
 
       - name: Smoke test sau khi deploy
         uses: appleboy/ssh-action@v1
+        env:
+          SERVICE_PORT: ${{ inputs.service-port }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: SERVICE_PORT
           script: |
             for i in $(seq 1 30); do
-              if curl -fsS "http://127.0.0.1:${{ inputs.service-port }}/actuator/health" \
+              if curl -fsS "http://127.0.0.1:${SERVICE_PORT}/actuator/health" \
                    | grep -q '"status":"UP"'; then
                 echo "Deploy OK sau ${i}0 giây"; exit 0
               fi

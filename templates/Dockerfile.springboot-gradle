@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # =============================================================================
 # VMarket — BIẾN THỂ GRADLE của Dockerfile mẫu dùng chung
 # =============================================================================
@@ -35,12 +34,16 @@ COPY services/${SERVICE_NAME}/src ./src
 RUN gradle --no-daemon clean bootJar -x test \
  && cp build/libs/*.jar app.jar
 
-# (3) Tách layered jar (giống bản Maven)
+# (3) Tách layered jar (giống bản Maven, kể cả chốt an toàn `test`:
+# dependencies/ và application/ rỗng = extract hỏng => fail build ngay tại đây,
+# thay vì cho ra image thiếu class mà build vẫn xanh).
 RUN java -Djarmode=tools -jar app.jar extract \
         --layers --destination extracted \
         --application-filename app.jar --force \
- && mkdir -p extracted/dependencies extracted/snapshot-dependencies extracted/application \
- && touch extracted/dependencies/.keep extracted/snapshot-dependencies/.keep
+ && test -n "$(ls -A extracted/dependencies 2>/dev/null)" \
+ && test -n "$(ls -A extracted/application 2>/dev/null)" \
+ && mkdir -p extracted/snapshot-dependencies \
+ && touch extracted/snapshot-dependencies/.keep
 
 # -----------------------------------------------------------------------------
 # STAGE 2 — RUNTIME
@@ -56,7 +59,7 @@ LABEL org.opencontainers.image.title="vmarket-${SERVICE_NAME}" \
 
 ENV SERVICE_NAME=${SERVICE_NAME} \
     SERVER_PORT=${SERVICE_PORT} \
-    JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+    JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
 WORKDIR /app
 RUN addgroup -S vmarket && adduser -S vmarket -G vmarket

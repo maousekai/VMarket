@@ -61,6 +61,7 @@ VMarket/
 | JDK      | 17+       | Eclipse Temurin khuyến nghị              |
 | Node.js  | 20+       | Cho frontend                             |
 | Docker   | mới nhất  | Docker Desktop (WSL2 backend)            |
+| Docker Compose | **≥ v2.24** | Bắt buộc: compose dùng `env_file` dạng dài (`- path:` + `required:`). Kiểm tra: `docker compose version` |
 | Python   | 3.12+     | Chỉ khi chạy AI service ngoài Docker     |
 | Git      | mới nhất  | —                                        |
 

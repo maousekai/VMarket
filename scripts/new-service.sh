@@ -35,6 +35,15 @@ fi
 DEFAULT_DB="vmarket_$(echo "${NAME%-service}" | tr '-' '_')"
 DB_NAME="${3:-$DEFAULT_DB}"
 
+# Phải validate như $NAME và $PORT: $DB_NAME được nhét thẳng vào phần thay thế
+# của `sed` bên dưới, nên ký tự `/` hoặc `&` sẽ phá cú pháp lệnh sed (hoặc chèn
+# nội dung ngoài ý muốn vào file sinh ra). Đây cũng là tên database thật nên
+# giới hạn theo đúng quy tắc định danh của PostgreSQL.
+if ! [[ "$DB_NAME" =~ ^[a-z][a-z0-9_]*$ ]]; then
+  echo "Lỗi: tên database phải viết thường, bắt đầu bằng chữ cái, chỉ gồm [a-z0-9_] (vd: vmarket_order)" >&2
+  exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TPL_DIR="$REPO_ROOT/templates"
 ENV_DIR="$REPO_ROOT/services/$NAME/env"

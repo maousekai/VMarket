@@ -58,7 +58,7 @@ auth-service.yml                   ← ~20 dòng, path filter riêng
 Bốn job: `build-test` → `image` → `smoke-test` → `deploy`.
 
 - `build-test`: `./mvnw -pl <service> -am verify` — **chỉ** build module đó, không kéo theo 10 service khác. Đọc `jacoco.xml`, fail nếu coverage dưới ngưỡng.
-- `image`: build từ Dockerfile mẫu, cache layer `type=gha`, push lên `ghcr.io` với tag `sha-<7 ký tự>` / `<branch>` / `latest`.
+- `image`: build từ Dockerfile mẫu, cache layer `type=gha`, push lên `ghcr.io` với tag `sha-<7 ký tự>` / `<branch>` / `latest`. Chỉ chạy khi thật sự push image (`if: inputs.push-image`) — với PR thì job này bị skip và `smoke-test` tự build lấy, tránh build thừa một lượt. Lưu ý `latest` bám **nhánh mặc định của repo** (`dev`) nên **không dùng để deploy prod**; prod mặc định tag `product`.
 - `smoke-test`: chạy container **thật** cùng PostgreSQL/MongoDB/Redis/RabbitMQ (service containers của GitHub Actions), chờ `/actuator/health` trả `UP`. Đây là bằng chứng tự động cho DoD; bắt được lỗi mà unit test không thấy.
 - `deploy`: SSH + `docker compose up -d --no-deps <service>` — cờ `--no-deps` đảm bảo **chỉ service này** restart. Mặc định `deploy: false` vì nhóm chưa có VPS.
 
@@ -107,7 +107,7 @@ Khai một lần ở `services/pom.xml` (`prepare-agent` + `report` phase `verif
 | 11 | Compose dev hợp lệ | `docker compose config --quiet` | ✅ OK |
 | 12 | Compose prod hợp lệ | `docker compose -f docker-compose.prod.yml config --quiet` | ✅ OK, `SPRING_PROFILES_ACTIVE=prod` |
 | 13 | JaCoCo chạy & sinh report | `./mvnw -pl auth-service -am verify` | ✅ 2 test pass, `jacoco.xml` sinh ra |
-| 14 | Độ phủ tầng nghiệp vụ | đọc `jacoco.xml` | ✅ **100 % (12/12 dòng)** → đặt `coverage-min: 60` ngay |
+| 14 | Độ phủ tầng nghiệp vụ | đọc `jacoco.xml` | ✅ **100 % (12/12 dòng)** — nhưng lúc đó auth-service mới có `HealthService`; xem mục 6 về việc để `coverage-min: 0` |
 | 15 | `.env.prod` bị git chặn | `git check-ignore -v` | ✅ Bị chặn; `.env.dev`/`.env.prod.example` vẫn được commit |
 | 16 | Script scaffold | `.\scripts\new-service.ps1 -Name demo-service -Port 8199` | ✅ Sinh 4 file, không còn placeholder (đã xoá demo sau khi thử) |
 | 17 | YAML workflow hợp lệ | parse bằng PyYAML | ✅ 4 job: build-test, image, smoke-test, deploy |
@@ -145,3 +145,37 @@ Khai một lần ở `services/pom.xml` (`prepare-agent` + `report` phase `verif
 4. **Nâng `coverage-min` lên 60** cho từng service khi có unit test nghiệp vụ.
 5. **Template cho 3 service Python/FastAPI** (ai-search, recommendation, chatbot).
 6. **Mâu thuẫn trong SRS cần chốt:** §2.5 ghi CI/CD bằng **Jenkins** "thay cho GitHub Actions", nhưng §6.5 NFR-MAI-02 ghi **GitHub Actions**. Ticket này làm theo GitHub Actions (khớp NFR-MAI-02, miễn phí với repo GitHub, không cần dựng server Jenkins riêng). Cần sửa §2.5 cho khớp — nếu nhóm/GVHD quyết định giữ Jenkins thì phải làm lại phần pipeline.
+
+## 6. Xử lý review PR
+
+Vòng review đầu tiên nêu 3 điểm chặn merge, 4 điểm nên sửa và 8 điểm nhỏ. Tất cả đã được xử lý:
+
+### Chặn merge
+
+| # | Vấn đề | Cách xử lý |
+| --: | --- | --- |
+| 1 | PR dựa trên base cũ (`c542b88`, trước PBL6-41/42) → chắc chắn conflict ở `services/pom.xml`, `docker-compose.yml`, `auth-service/README.md`, `.gitignore` | Nhánh đã được **rebase lên `dev` hiện tại** (đã có PBL6-41 merged + PBL6-42 merged). Conflict xử lý tại chỗ, không còn chồng lấn |
+| 2 | Tên biến JWT không khớp `application.yml` mà PBL6-41 đã merge: dùng `JWT_SECRET` / `JWT_ACCESS_TTL_MINUTES=30` / `JWT_REFRESH_TTL_DAYS=7` | Đổi đúng tên **và** đúng kiểu: `AUTH_JWT_SECRET`, `AUTH_JWT_ACCESS_TTL=15m`, `AUTH_JWT_REFRESH_TTL=30d` (Duration của Spring) trong cả 3 file `env/` và `CONTRIBUTING.md`. Thêm quy tắc "tên biến phải khớp `application.yml`" kèm lệnh `grep` đối chiếu vào `CONTRIBUTING.md` mục 6, `docs/CICD-TEMPLATE.md` mục 5 và `.env.dev.tpl` |
+| 3 | Hai nguồn cấu hình chồng nhau: PBL6-41 khai `AUTH_JWT_*` ở `.env.example` gốc + `docker-compose.yml`, PR này khai ở `services/<service>/env/` | Chọn hướng **per-service** của PR này. Đã gỡ `AUTH_JWT_*` khỏi `.env.example` gốc và khỏi khối `environment:` của auth-service trong `docker-compose.yml`, để lại comment trỏ sang nguồn mới |
+
+### Nên sửa
+
+| # | Vấn đề | Cách xử lý |
+| --: | --- | --- |
+| 4 | `docker-compose.prod.yml` mặc định tag `latest`, mà `latest` gắn với `is_default_branch` = nhánh `dev` → deploy prod ra HEAD của dev | Đổi mặc định thành `${AUTH_SERVICE_TAG:-product}` (cả khối auth-service lẫn khối mẫu). Comment sai ở dòng 146 đã viết lại; `docs/CICD-TEMPLATE.md` thêm cảnh báo và ví dụ ghim `sha-` |
+| 5 | `coverage-min: 60` là sớm, mâu thuẫn với chính `caller-workflow.yml.tpl` (ghi `0`) | Hạ về `coverage-min: 0` (chỉ in báo cáo). Ghi rõ lý do tại chỗ trong `auth-service.yml` và trong `docs/CICD-TEMPLATE.md`: 100 % đo được là khi service mới có `HealthService`, PBL6-42 vừa thêm `service/`/`controller/`/`exception/` nên chưa có số liệu thật |
+| 6 | Job `image` build xong rồi bỏ khi `push-image: false` (PR), `smoke-test` build lại từ đầu | Thêm `if: ${{ inputs.push-image }}` cho job `image`; `smoke-test` chuyển sang phụ thuộc **mềm** (`needs: [build-test, image]` + `always()` chấp nhận `image` bị skip) và tự build + load khi cần |
+| 7 | `Dockerfile.springboot` `mkdir -p` + `.keep` cho cả 3 thư mục layer che lỗi `jarmode=tools extract` | Chỉ `snapshot-dependencies` (hợp lệ khi rỗng) được tạo sẵn. Thêm 2 chốt `test -n "$(ls -A ...)"` bắt buộc `dependencies/` và `application/` có nội dung — extract hỏng là **fail build ngay**, không ra image thiếu class. Áp dụng cho cả biến thể Gradle |
+
+### Nhỏ
+
+| Vấn đề | Cách xử lý |
+| --- | --- |
+| Job `deploy` nội suy `${{ secrets.* }}` / `${{ github.actor }}` thẳng vào `script:` của `appleboy/ssh-action` | Chuyển sang `env:` + `envs:` — secret đi vào phiên SSH dưới dạng biến môi trường, không nằm nguyên văn trên dòng lệnh chạy ở server. Áp dụng cho cả 2 step SSH |
+| `-Djava.security.egd=file:/dev/./urandom` là workaround của JDK 8 | Bỏ khỏi `JAVA_OPTS` ở cả 2 Dockerfile mẫu |
+| `# syntax=docker/dockerfile:1.7` khai nhưng không dùng tính năng nào | Bỏ khỏi cả 2 Dockerfile mẫu |
+| `smoke-test` dùng `rabbitmq:4.1-alpine`, compose dùng `4.1-management` | Thống nhất `4.1-management` để CI chạy đúng broker của dev/prod |
+| `new-service.sh`: `$3` (tên DB) không validate trước khi vào `sed` — ký tự `/` hoặc `&` phá cú pháp | Thêm validate `^[a-z][a-z0-9_]*$` (cũng đúng quy tắc định danh PostgreSQL). Bản `.ps1` thêm `[ValidatePattern]` tương ứng |
+| `env_file` dạng dài cần Docker Compose ≥ v2.24 | Ghi vào bảng "Yêu cầu môi trường" của `README.md` và mục 5 của `docs/CICD-TEMPLATE.md` |
+| `DB_*` / `RABBITMQ_*` trong `.env.dev` bị `environment:` của compose ghi đè | Không đổi hành vi (đúng thiết kế), nhưng ghi rõ hệ quả này ở đầu `.env.dev`, `.env.prod.example`, `.env.dev.tpl` và mục "Ba lớp cấu hình" của tài liệu |
+| `dependency:go-offline` không đủ 100 %, stage `package` vẫn có thể tải mạng | Sửa lại comment trong Dockerfile mẫu cho đúng: mục tiêu là *cache phần lớn*, không phải build offline tuyệt đối |

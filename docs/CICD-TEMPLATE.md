@@ -228,16 +228,24 @@ Sửa `services/order-service/**` → pipeline auth-service **không chạy**. �
 
 `build-test` đọc `target/site/jacoco/jacoco.xml` và fail nếu độ phủ dòng dưới ngưỡng `coverage-min` của service đó. JaCoCo khai một lần ở `services/pom.xml` nên mọi module đều được đo; các package `config`, `dto`, `entity` và `*Application.class` bị loại trừ để con số phản ánh đúng tầng nghiệp vụ (NFR-MAI-02).
 
-auth-service đang đặt `coverage-min: 60`. Service mới nên khởi đầu `0`, nâng lên `60` ngay khi có unit test nghiệp vụ đầu tiên.
+auth-service hiện đặt `coverage-min: 0` — **chỉ in báo cáo, chưa chặn build**. Con số 100 % đo được lúc thử nghiệm là khi auth-service mới có `HealthService`; PBL6-41/42 vừa thêm `service/`, `controller/`, `exception/` nên độ phủ thật chưa được đo lại. Bật ngưỡng 60 ngay bây giờ có thể chặn PR của người khác trước khi có số liệu thật.
+
+Service mới cũng khởi đầu `0`. Nâng lên `60` (NFR-MAI-02) khi service đã có mốc coverage nghiệp vụ ổn định — sửa đúng một dòng trong workflow của service đó.
 
 ### Quy ước tag image
 
 | Tag | Khi nào | Dùng để |
 | --- | --- | --- |
 | `sha-a1b2c3d` | Mọi lần push | **Tag bất biến** — deploy và rollback chính xác |
-| `dev` / `release` / `product` | Theo nhánh | Xem nhánh đó đang ở bản nào |
-| `latest` | Chỉ nhánh mặc định | Mặc định của `docker-compose.prod.yml` |
+| `dev` / `release` / `product` | Theo nhánh | Xem nhánh đó đang ở bản nào. **`product` là mặc định của `docker-compose.prod.yml`** |
+| `latest` | Chỉ **nhánh mặc định của repo** (= `dev`) | Tiện tay khi thử ở local. **KHÔNG dùng để deploy prod** |
 | `pr-42` | Pull request | Chỉ build kiểm tra, **không push** |
+
+> ⚠️ **Đừng deploy prod bằng `latest`.** `docker/metadata-action` gắn `latest` theo `is_default_branch`, mà nhánh mặc định của repo là `dev` — deploy prod bằng `latest` nghĩa là đưa HEAD của `dev` lên production. Vì vậy `docker-compose.prod.yml` mặc định `${AUTH_SERVICE_TAG:-product}`. Muốn chắc chắn hơn nữa thì ghim tag bất biến:
+>
+> ```bash
+> AUTH_SERVICE_TAG=sha-a1b2c3d docker compose -f docker-compose.prod.yml up -d --no-deps auth-service
+> ```
 
 ---
 
@@ -260,6 +268,18 @@ services/<service>/env/
 1. `environment:` trong `docker-compose*.yml` — giá trị hạ tầng dùng chung
 2. `env_file:` trỏ tới `.env.dev` / `.env.prod` — cấu hình riêng của service
 3. Giá trị mặc định `${BIẾN:mặc-định}` trong `application.yml` — để chạy được bằng `mvnw` không cần Docker
+
+**Hệ quả dễ nhầm:** vì lớp 1 thắng lớp 2, các biến `DB_*` / `RABBITMQ_*` viết trong `env/.env.dev` **không có tác dụng khi chạy bằng compose** — khối service đã nhận chúng qua `<<: *common-environment`. Chúng chỉ dùng khi chạy `docker run --env-file`. Muốn đổi host/port/mật khẩu hạ tầng cho compose thì sửa `.env` ở thư mục gốc.
+
+Ngược lại, các biến **riêng của service** (`AUTH_JWT_*`, `MAIL_*`, `LOG_LEVEL`...) cố ý **không** khai trong `docker-compose.yml`, để `env/.env.dev` là nguồn duy nhất. Khai lại ở `environment:` sẽ âm thầm ghi đè và tạo ra hai nguồn cho cùng một biến.
+
+**Tên biến phải khớp `application.yml`.** Đây là lỗi tốn thời gian nhất khi thêm service: đặt sai tên thì Spring không thấy biến, và với placeholder không có mặc định (`secret: ${AUTH_JWT_SECRET}`) container **chết ngay lúc khởi động**, log chỉ báo `Could not resolve placeholder`. Đối chiếu trước khi commit:
+
+```bash
+grep -oh '\${[A-Z_]*' services/<service>/src/main/resources/application*.yml | tr -d '${' | sort -u
+```
+
+> **Yêu cầu phiên bản:** compose dùng `env_file` dạng dài (`- path:` + `required:`) nên cần **Docker Compose ≥ v2.24**. Bản cũ hơn sẽ báo lỗi parse. Kiểm tra bằng `docker compose version`.
 
 ### Khác biệt dev ↔ prod
 

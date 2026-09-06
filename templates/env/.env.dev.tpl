@@ -10,6 +10,17 @@
 #
 # Chạy bằng mvnw TRÊN MÁY HOST thì đổi: DB_HOST=localhost, DB_PORT=5433,
 # MONGO_PORT=27018, RABBITMQ_HOST=localhost.
+#
+# THỨ TỰ ƯU TIÊN: `environment:` trong compose > `env_file` (file này) > default.
+# Khối service trong docker-compose.yml đã đặt DB_* / RABBITMQ_* qua
+# `<<: *common-environment`, nên KHI CHẠY BẰNG COMPOSE các dòng DB_* /
+# RABBITMQ_* dưới đây bị ghi đè; chúng chỉ có tác dụng với `docker run
+# --env-file`. Biến RIÊNG của service thì ngược lại — file này là nguồn duy
+# nhất, ĐỪNG khai lại chúng trong docker-compose.yml.
+#
+# TÊN BIẾN phải khớp đúng application.yml của service, nếu không Spring không
+# đọc ra (placeholder không có default => container chết lúc khởi động):
+#   grep -oh '\${[A-Z_]*' services/__SERVICE_NAME__/src/main/resources/application*.yml
 # =============================================================================
 
 SPRING_PROFILES_ACTIVE=dev

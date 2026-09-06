@@ -111,13 +111,17 @@ Mỗi service có 3 file cấu hình trong `services/<tên>/env/`:
 
 Quy tắc bắt buộc:
 
-1. Bí mật thật (`JWT_SECRET`, `MAIL_PASSWORD`, `PAYOS_CHECKSUM_KEY`...) chỉ nằm ở
-   **GitHub Secrets** hoặc **`.env.prod` trên server**. Không bao giờ trong git.
+1. Bí mật thật (`AUTH_JWT_SECRET`, `MAIL_PASSWORD`, `PAYOS_CHECKSUM_KEY`...) chỉ
+   nằm ở **GitHub Secrets** hoặc **`.env.prod` trên server**. Không bao giờ trong git.
 2. Thêm biến mới: khai vào `.env.example` **trước**, rồi mới tới `.env.dev` và
    `.env.prod.example`.
-3. `application.yml` không hard-code host/port/mật khẩu — luôn dùng
-   `${BIẾN:giá-trị-mặc-định}`.
-4. Nếu lỡ commit bí mật: **đổi ngay giá trị đó**, đừng chỉ xoá khỏi file — nó vẫn
+3. **Tên biến trong `env/` phải khớp đúng tên `application.yml` đang đọc.** Đặt
+   sai tên thì Spring không thấy biến; với placeholder không có giá trị mặc định
+   (vd `secret: ${AUTH_JWT_SECRET}` của auth-service) container sẽ **chết ngay
+   lúc khởi động**. Kiểm tra bằng `grep -o '\${[A-Z_]*' src/main/resources/application.yml`.
+4. `application.yml` không hard-code host/port/mật khẩu — luôn dùng
+   `${BIẾN:giá-trị-mặc-định}`, trừ bí mật bắt buộc thì cố ý **không** đặt mặc định.
+5. Nếu lỡ commit bí mật: **đổi ngay giá trị đó**, đừng chỉ xoá khỏi file — nó vẫn
    nằm trong lịch sử git.
 
 ## 7. Checklist trước khi mở PR cho một service

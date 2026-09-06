@@ -143,16 +143,21 @@ services:
   # BUSINESS SERVICE - image do CI build, server chi keo ve chay
   # ==========================================================
   auth-service:
-    # Tag mac dinh `latest` (nhanh product). Dat AUTH_SERVICE_TAG=sha-xxxxxxx
-    # de ghim mot ban cu the hoac rollback.
-    image: ${AUTH_SERVICE_IMAGE:-ghcr.io/maousekai/vmarket-auth-service}:${AUTH_SERVICE_TAG:-latest}
+    # Tag mac dinh `product` = tag theo NHANH product (type=ref,event=branch).
+    # KHONG dung `latest`: metadata-action gan `latest` cho NHANH MAC DINH cua
+    # repo, ma nhanh mac dinh la `dev` -> deploy prod bang `latest` se deploy
+    # nham HEAD cua dev. Dat AUTH_SERVICE_TAG=sha-xxxxxxx de ghim mot ban cu
+    # the hoac rollback.
+    image: ${AUTH_SERVICE_IMAGE:-ghcr.io/maousekai/vmarket-auth-service}:${AUTH_SERVICE_TAG:-product}
     container_name: vmarket-auth-service
     restart: unless-stopped
     networks: [vmarket-network]
     mem_limit: 512m
     logging: *default-logging
-    # Bi mat that (JWT_SECRET, MAIL_PASSWORD...) nam trong file nay tren server,
-    # KHONG nam trong git.
+    # Bi mat that (AUTH_JWT_SECRET, MAIL_PASSWORD...) nam trong file nay tren
+    # server, KHONG nam trong git. Ten bien phai khop application.yml cua
+    # auth-service: AUTH_JWT_SECRET khong co gia tri mac dinh o profile prod nen
+    # thieu no la container chet ngay luc khoi dong.
     env_file:
       - services/auth-service/env/.env.prod
     environment:
@@ -173,7 +178,7 @@ services:
   # MAU BLOCK cho service tiep theo - bo comment va dien ten
   # ----------------------------------------------------------
   #  <service-name>:
-  #    image: ${<SERVICE>_IMAGE:-ghcr.io/maousekai/vmarket-<service-name>}:${<SERVICE>_TAG:-latest}
+  #    image: ${<SERVICE>_IMAGE:-ghcr.io/maousekai/vmarket-<service-name>}:${<SERVICE>_TAG:-product}
   #    container_name: vmarket-<ten>
   #    restart: unless-stopped
   #    networks: [vmarket-network]
