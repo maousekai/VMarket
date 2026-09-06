@@ -7,6 +7,12 @@ spring:
     gateway:
       server:
         webmvc:
+          # Preflight OPTIONS duoc tra loi boi corsPreflightFilter bean trong
+          # com.vmarket.gateway.config.CorsConfig (ban WebMVC cua gateway
+          # khong ho tro property globalcors nhu ban WebFlux).
+          #
+          # CORS header cho response THAT do tung service tu them - gateway
+          # khong them de tranh bi trung gia tri ("multiple values").
           routes:
             - id: auth-service
               uri: ${AUTH_SERVICE_URL:http://localhost:8081}

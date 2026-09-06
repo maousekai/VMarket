@@ -1,0 +1,23 @@
+# Bo thu muc khong can thiet khi build image frontend
+node_modules
+dist
+
+# Git & hooks (hooks khong chay trong container, da dat HUSKY=0)
+.git
+.husky
+
+# Env local (API URL truyen qua build-arg VITE_API_BASE_URL)
+.env
+.env.local
+.env.*.local
+
+# Log, file editor, tai lieu
+logs
+*.log
+.vscode
+.idea
+README.md
+
+# Chinh no (khong can trong build context)
+Dockerfile
+.dockerignore
