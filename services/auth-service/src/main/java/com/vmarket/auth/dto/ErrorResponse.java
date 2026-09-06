@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * Body lỗi chuẩn của mọi service VMarket (root CLAUDE.md):
+ * Body lỗi chuẩn dùng chung cho mọi endpoint:
  * {@code { "error": { "code": "...", "message": "..." } }}.
  * {@code details} là phần mở rộng tuỳ chọn cho lỗi validate từng trường.
  */

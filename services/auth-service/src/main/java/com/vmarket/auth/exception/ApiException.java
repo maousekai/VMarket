@@ -6,7 +6,7 @@ import lombok.Getter;
 
 /**
  * Lỗi nghiệp vụ có mã máy đọc được ổn định. {@link GlobalExceptionHandler} chuyển
- * thành body chuẩn {@code { "error": { "code", "message" } }} (root CLAUDE.md).
+ * thành body chuẩn {@code { "error": { "code", "message" } }} của dự án.
  */
 @Getter
 public class ApiException extends RuntimeException {

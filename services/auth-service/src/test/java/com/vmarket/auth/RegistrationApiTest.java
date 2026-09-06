@@ -1,6 +1,7 @@
 package com.vmarket.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -115,5 +116,38 @@ class RegistrationApiTest {
 		mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content("{ not json "))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("MALFORMED_REQUEST"));
+	}
+
+	@Test
+	void register_emailTooLong_returns400() throws Exception {
+		String longLocal = "a".repeat(310);
+		String body = "{\"email\":\"" + longLocal + "@ex.com\",\"username\":\"ok.user\",\"password\":\"Abcd1234@\"}";
+		mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void register_usernameTooShort_returns400() throws Exception {
+		String body = """
+				{"email":"short@example.com","username":"ab","password":"Abcd1234@"}
+				""";
+		mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void wrongMethod_returns405_withErrorBody() throws Exception {
+		mockMvc.perform(get("/api/auth/register"))
+				.andExpect(status().isMethodNotAllowed())
+				.andExpect(jsonPath("$.error.code").value("METHOD_NOT_ALLOWED"));
+	}
+
+	@Test
+	void unsupportedMediaType_returns415_withErrorBody() throws Exception {
+		mockMvc.perform(post("/api/auth/register").contentType(MediaType.TEXT_PLAIN).content("hi"))
+				.andExpect(status().isUnsupportedMediaType())
+				.andExpect(jsonPath("$.error.code").value("UNSUPPORTED_MEDIA_TYPE"));
 	}
 }

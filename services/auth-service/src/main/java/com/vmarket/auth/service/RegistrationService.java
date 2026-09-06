@@ -46,7 +46,7 @@ public class RegistrationService {
 	@Transactional
 	public RegisterResponse register(RegisterRequest request) {
 		String email = request.email().trim().toLowerCase(Locale.ROOT);
-		String username = request.username();
+		String username = request.username().trim();
 
 		if (userRepository.existsByEmail(email)) {
 			throw ApiException.conflict("EMAIL_ALREADY_EXISTS", "Email đã được sử dụng");

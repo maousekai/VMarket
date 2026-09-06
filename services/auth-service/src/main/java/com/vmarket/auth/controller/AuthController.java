@@ -32,11 +32,16 @@ public class AuthController {
 			description = "Tạo tài khoản mới với vai trò BUYER. Tài khoản ở trạng thái PENDING "
 					+ "cho tới khi xác thực email. Chưa trả JWT — dùng /api/auth/login để đăng nhập.")
 	@ApiResponses({
-			@ApiResponse(responseCode = "201", description = "Đăng ký thành công"),
-			@ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ (code VALIDATION_ERROR)",
+			@ApiResponse(responseCode = "201", description = "Đăng ký thành công",
+					content = @Content(schema = @Schema(implementation = RegisterResponse.class))),
+			@ApiResponse(responseCode = "400",
+					description = "Dữ liệu không hợp lệ (VALIDATION_ERROR) hoặc body sai JSON (MALFORMED_REQUEST)",
 					content = @Content(schema = @Schema(implementation = com.vmarket.auth.dto.ErrorResponse.class))),
 			@ApiResponse(responseCode = "409",
-					description = "Trùng email (EMAIL_ALREADY_EXISTS) hoặc username (USERNAME_ALREADY_EXISTS)",
+					description = "Trùng email (EMAIL_ALREADY_EXISTS), username (USERNAME_ALREADY_EXISTS), "
+							+ "hoặc trùng do race (REGISTRATION_CONFLICT)",
+					content = @Content(schema = @Schema(implementation = com.vmarket.auth.dto.ErrorResponse.class))),
+			@ApiResponse(responseCode = "500", description = "Lỗi máy chủ (INTERNAL_ERROR)",
 					content = @Content(schema = @Schema(implementation = com.vmarket.auth.dto.ErrorResponse.class))),
 	})
 	@PostMapping("/register")
