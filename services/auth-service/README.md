@@ -65,8 +65,10 @@ các subtask sau bổ sung theo expand–contract.
 ## Profile và biến môi trường
 
 - `dev` (mặc định): PostgreSQL local, Flyway migrate, `ddl-auto: validate`, bật SQL log.
+  Giá trị giả cho `AUTH_JWT_SECRET` nằm ở `application-dev.yml` (chỉ profile này).
 - `prod`: cấu hình hoàn toàn qua biến môi trường, `ddl-auto: none` (⚠️ cần xác minh lại
-  khi có quyền đọc `application-prod.yml`).
+  khi có quyền đọc `application-prod.yml`). `application.yml` base không đặt default cho
+  `auth.jwt.secret` → thiếu `AUTH_JWT_SECRET` là fail ngay lúc khởi động.
 
 | Biến                     | Mặc định (dev)   | Ý nghĩa                              |
 | ------------------------ | ---------------- | ----------------------------------- |
@@ -77,7 +79,7 @@ các subtask sau bổ sung theo expand–contract.
 | `DB_USERNAME`            | `vmarket`        | User database                       |
 | `DB_PASSWORD`            | `vmarket`        | Mật khẩu database                   |
 | `RABBITMQ_HOST`          | `localhost`      | Host RabbitMQ                       |
-| `AUTH_JWT_SECRET`        | *(giá trị giả)*  | Khóa ký JWT HS256 (≥ 32 byte)       |
+| `AUTH_JWT_SECRET`        | *(giả, ở dev yml)* | Khóa ký JWT HS256 (≥ 32 byte); prod bắt buộc set |
 | `AUTH_JWT_ACCESS_TTL`    | `15m`            | Thời hạn access token               |
 | `AUTH_JWT_REFRESH_TTL`   | `30d`            | Thời hạn refresh token              |
 

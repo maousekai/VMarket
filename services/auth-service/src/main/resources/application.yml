@@ -46,10 +46,12 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
 
 # JWT - doc tu bien moi truong, KHONG hardcode secret that vao repo.
-# Dev dung gia tri gia ro rang; prod BAT BUOC set AUTH_JWT_SECRET (>= 32 byte),
-# dung chung secret nay voi API Gateway khi gateway verify JWT.
+# secret KHONG co gia tri mac dinh o file base -> moi moi truong (ke ca prod)
+# thieu AUTH_JWT_SECRET se fail ngay luc khoi dong (placeholder khong resolve +
+# @Validated @NotBlank tren AuthJwtProperties). Gia tri gia cho local dev nam o
+# application-dev.yml. Secret nay dung chung voi API Gateway khi gateway verify JWT.
 auth:
   jwt:
-    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
+    secret: ${AUTH_JWT_SECRET}
     access-ttl: ${AUTH_JWT_ACCESS_TTL:15m}
     refresh-ttl: ${AUTH_JWT_REFRESH_TTL:30d}

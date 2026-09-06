@@ -1,0 +1,6 @@
+# Cau hinh chi cho profile 'dev' (local). Khong dung o prod.
+# Gia tri gia ro rang de chay 'mvnw spring-boot:run' khong can set bien moi truong.
+# Khi chay qua docker compose, bien AUTH_JWT_SECRET trong .env se ghi de gia tri nay.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}

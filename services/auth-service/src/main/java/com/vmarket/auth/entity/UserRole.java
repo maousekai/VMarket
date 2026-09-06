@@ -27,6 +27,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
+@EqualsAndHashCode(of = { "userId", "roleId" })
 public class UserRole {
 
 	@Id
