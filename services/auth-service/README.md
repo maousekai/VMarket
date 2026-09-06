@@ -5,7 +5,10 @@ Service xác thực và phân quyền RBAC của VMarket (Spring Boot, kiến tr
 ## Công nghệ
 
 - Java 17, Spring Boot 4.x
-- Spring Web (REST), Spring Data JPA, Validation, Lombok
+- Spring Web (REST), Spring Data JPA, Spring Security, Validation, Lombok
+- Flyway (migration schema PostgreSQL)
+- springdoc-openapi 3.x (Swagger UI)
+- jjwt 0.12.x (JWT HS256 — dùng từ PBL6-43), ulid-creator (khóa chính ULID)
 - Spring AMQP (RabbitMQ — sẵn sàng cho event bus)
 - Spring Boot Actuator (health-check)
 - PostgreSQL (dev/prod), H2 in-memory (chỉ cho test)
@@ -40,20 +43,43 @@ Service chạy tại cổng **8081**.
 
 Qua API Gateway (cổng 8080): `curl http://localhost:8080/api/auth/health`
 
+## Data model & migration (PBL6-41)
+
+Schema do **Flyway** quản lý — file trong `src/main/resources/db/migration/`.
+`V1__init_auth_schema.sql` tạo 4 bảng lõi và seed 5 vai trò RBAC:
+
+| Bảng             | Vai trò                                                    |
+| ---------------- | --------------------------------------------------------- |
+| `users`          | Tài khoản (id ULID, email, username, password_hash, ...) |
+| `roles`          | 5 vai trò cố định: GUEST / BUYER / SELLER / SHIPPER / ADMIN |
+| `user_roles`     | Bảng nối many-to-many User–Role                          |
+| `refresh_tokens` | Refresh token đã phát (chỉ lưu hash)                     |
+
+V1 **chỉ chứa cột lõi**. Các cột nghiệp vụ (khóa tài khoản, xác thực email,
+provider OAuth, xoay vòng refresh token...) sẽ do migration `V2`, `V3`... của
+các subtask sau bổ sung theo expand–contract.
+
+- `ddl-auto`: `validate` ở `dev` (Hibernate chỉ đối chiếu, không sửa DDL), `none` ở `prod`.
+- Khóa chính: ULID (Crockford base32, 26 ký tự) sinh ở tầng app (`entity/BaseEntity`).
+
 ## Profile và biến môi trường
 
-- `dev` (mặc định): PostgreSQL local, `ddl-auto: update`, bật SQL log.
-- `prod`: cấu hình hoàn toàn qua biến môi trường, `ddl-auto: validate`.
+- `dev` (mặc định): PostgreSQL local, Flyway migrate, `ddl-auto: validate`, bật SQL log.
+- `prod`: cấu hình hoàn toàn qua biến môi trường, `ddl-auto: none` (⚠️ cần xác minh lại
+  khi có quyền đọc `application-prod.yml`).
 
-| Biến                     | Mặc định (dev)   | Ý nghĩa           |
-| ------------------------ | ---------------- | ----------------- |
-| `SERVER_PORT`            | `8081`           | Cổng service      |
-| `DB_HOST`                | `localhost`      | Host PostgreSQL   |
-| `DB_PORT`                | `5432`           | Port PostgreSQL   |
-| `DB_NAME`                | `vmarket_auth`   | Tên database      |
-| `DB_USERNAME`            | `vmarket`        | User database     |
-| `DB_PASSWORD`            | `vmarket`        | Mật khẩu database |
-| `RABBITMQ_HOST`          | `localhost`      | Host RabbitMQ     |
+| Biến                     | Mặc định (dev)   | Ý nghĩa                              |
+| ------------------------ | ---------------- | ----------------------------------- |
+| `SERVER_PORT`            | `8081`           | Cổng service                        |
+| `DB_HOST`                | `localhost`      | Host PostgreSQL                     |
+| `DB_PORT`                | `5432`           | Port PostgreSQL (Docker host: 5433) |
+| `DB_NAME`                | `vmarket_auth`   | Tên database                        |
+| `DB_USERNAME`            | `vmarket`        | User database                       |
+| `DB_PASSWORD`            | `vmarket`        | Mật khẩu database                   |
+| `RABBITMQ_HOST`          | `localhost`      | Host RabbitMQ                       |
+| `AUTH_JWT_SECRET`        | *(giá trị giả)*  | Khóa ký JWT HS256 (≥ 32 byte)       |
+| `AUTH_JWT_ACCESS_TTL`    | `15m`            | Thời hạn access token               |
+| `AUTH_JWT_REFRESH_TTL`   | `30d`            | Thời hạn refresh token              |
 
 Chạy với profile khác:
 
@@ -78,23 +104,28 @@ Test dùng H2 in-memory (MODE PostgreSQL) nên không cần PostgreSQL thật:
 ..\mvnw.cmd test
 ```
 
+Swagger UI: `http://localhost:8081/swagger-ui.html` — spec JSON: `/v3/api-docs`.
+
 ## Cấu trúc thư mục (kiến trúc phân lớp)
 
 ```
 src/main/java/com/vmarket/auth/
 ├── AuthServiceApplication.java   # Entry point
-├── config/       # Cấu hình (CORS...)
+├── config/       # Cấu hình (Security, CORS, OpenAPI, AuthJwtProperties)
 ├── controller/   # REST controller (/api/auth/**)
 ├── service/      # Business logic
-├── repository/   # Spring Data repository
+├── repository/   # Spring Data repository (User/Role/UserRole/RefreshToken)
+├── entity/       # JPA entity + BaseEntity (ULID) + RoleName
 └── dto/          # Đối tượng truyền dữ liệu
+src/main/resources/db/migration/   # Flyway (V1__init_auth_schema.sql, ...)
 ```
 
 ## Roadmap nghiệp vụ (theo SRS)
 
-- FR-AUTH-01: Đăng ký tài khoản (email + OTP kích hoạt)
-- FR-AUTH-02: Đăng nhập JWT access/refresh token
-- FR-AUTH-03: Đăng nhập Google OAuth 2.0
-- FR-AUTH-04: Quên mật khẩu
-- FR-AUTH-05: Phân quyền RBAC (Guest/Buyer/Seller/Shipper/Admin)
-- FR-AUTH-06: Quản lý phiên (refresh/thu hồi token)
+- [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
+- [ ] FR-AUTH-01 (PBL6-42): Đăng ký tài khoản
+- [ ] FR-AUTH-02 (PBL6-43): Đăng nhập JWT access/refresh token + khóa sau 5 lần sai
+- [ ] FR-AUTH-03 (PBL6-44): Đăng nhập Google OAuth 2.0
+- [ ] FR-AUTH-04 (PBL6-45): Quên mật khẩu
+- [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
+- [ ] PBL6-47: Testing, Swagger & PR review
