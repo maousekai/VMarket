@@ -1,0 +1,177 @@
+# =============================================================================
+# VMarket - CI/CD MAU DUNG CHUNG cho MOI microservice Spring Boot
+# =============================================================================
+# Day la "reusable workflow": khong tu chay, ma duoc goi lai boi workflow rieng
+# cua tung service (.github/workflows/<ten-service>.yml). Nho vay logic
+# build/test/dong goi chi viet MOT LAN o day; them service moi chi can them
+# mot file goi ~15 dong (mau: docs/templates/ci-service.yml).
+#
+# LUONG:
+#   test  -> chay unit/integration test cua RIENG service do (mvnw -pl <svc> -am)
+#   image -> build Docker image cua RIENG service do + smoke test
+#            (push len registry: TAT mac dinh, xem input push-image ben duoi)
+#
+# DOC LAP GIUA CAC SERVICE: moi service co workflow rieng + trigger theo
+# duong dan (paths) nen sua auth-service KHONG lam chay CI cua order-service,
+# va CI cua service nay hong KHONG chan service khac.
+# =============================================================================
+name: Service CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Ten thu muc service trong services/ (vd: auth-service)"
+        required: true
+        type: string
+      java-version:
+        description: "Phien ban JDK dung de chay test"
+        required: false
+        type: string
+        default: "17"
+      run-tests:
+        description: "Chay test hay khong (service moi tao chua co test co the tat)"
+        required: false
+        type: boolean
+        default: true
+      push-image:
+        description: >-
+          Push image len registry. MAC DINH false = chi build de xac nhan
+          Dockerfile dung. Khi nhom da chot registry: dat true trong file goi
+          va khai bao secret registry-username / registry-password.
+        required: false
+        type: boolean
+        default: false
+      registry:
+        description: "Registry khi push-image=true (vd: ghcr.io, docker.io)"
+        required: false
+        type: string
+        default: "ghcr.io"
+    secrets:
+      registry-username:
+        required: false
+      registry-password:
+        required: false
+
+# Chi can quyen doc code; khi bat push len GHCR thi them 'packages: write'
+# o file goi (xem docs/templates/ci-service.yml).
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. TEST - chay test cua rieng service nay
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test ${{ inputs.service }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          # Cache ~/.m2 theo hash cac file pom -> lan sau khong tai lai dependency
+          cache: maven
+
+      # File mvnw trong repo khong co co executable (commit tu Windows),
+      # runner Linux can cap quyen chay.
+      - name: Cho phep chay Maven Wrapper
+        run: chmod +x ./mvnw
+        working-directory: services
+
+      # -pl <service> : CHI build module cua service nay
+      # -am           : kem cac module ma no phu thuoc (o day la parent POM)
+      # => test doc lap, khong keo theo 10 service con lai.
+      - name: Test
+        if: ${{ inputs.run-tests }}
+        run: ./mvnw -B --no-transfer-progress -pl ${{ inputs.service }} -am test
+        working-directory: services
+
+      # Giu lai bao cao khi test hong de mo ra xem chi tiet trong tab Actions.
+      - name: Luu bao cao test
+        if: ${{ always() && inputs.run-tests }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-${{ inputs.service }}
+          path: services/${{ inputs.service }}/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 2. IMAGE - build Docker image cua rieng service nay
+  # ---------------------------------------------------------------------------
+  image:
+    name: Build image ${{ inputs.service }}
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Chi dang nhap khi that su push. Mac dinh buoc nay bi bo qua.
+      - name: Dang nhap registry
+        if: ${{ inputs.push-image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+
+      # Tag: <registry>/<owner>/vmarket-<service>:<sha> va :<ten-nhanh>
+      # (tinh bang shell de khong phu thuoc them action ngoai).
+      - name: Tinh tag image
+        id: meta
+        run: |
+          repo_owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          base="vmarket-${{ inputs.service }}"
+          if [ "${{ inputs.push-image }}" = "true" ]; then
+            base="${{ inputs.registry }}/${repo_owner}/${base}"
+          fi
+          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          {
+            echo "tags=${base}:${branch},${base}:${GITHUB_SHA::7}"
+            echo "smoke_tag=${base}:${GITHUB_SHA::7}"
+          } >> "$GITHUB_OUTPUT"
+
+      # context: . -> thu muc goc repo (Dockerfile can services/pom.xml).
+      # load: chi nap image vao docker local khi KHONG push, de con smoke test.
+      # cache-from/to gha: tai su dung layer 'deps' giua cac lan chay CI
+      # -> build lai chi vai chuc giay thay vi tai lai toan bo dependency.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ inputs.service }}/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          push: ${{ inputs.push-image }}
+          load: ${{ !inputs.push-image }}
+          cache-from: type=gha,scope=${{ inputs.service }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.service }}
+
+      # Smoke test khong can DB/RabbitMQ: xac nhan image co JRE chay duoc,
+      # co file jar va KHONG chay bang root.
+      - name: Smoke test image
+        if: ${{ !inputs.push-image }}
+        run: |
+          docker run --rm --entrypoint sh "${{ steps.meta.outputs.smoke_tag }}" -c '
+            set -e
+            java -version
+            test -s /app/app.jar || { echo "THIEU /app/app.jar"; exit 1; }
+            [ "$(id -u)" -ne 0 ] || { echo "Image dang chay bang root"; exit 1; }
+            echo "OK: jar=$(du -h /app/app.jar | cut -f1) user=$(id -un)"
+          '
+
+      - name: Tom tat
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### ${{ inputs.service }}"
+            echo ""
+            echo "- Image: \`${{ steps.meta.outputs.smoke_tag }}\`"
+            echo "- Push len registry: \`${{ inputs.push-image }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

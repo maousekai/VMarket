@@ -39,12 +39,21 @@ VMarket/
 │   ├── recommendation-service/# Gợi ý sản phẩm (8101, FastAPI + PostgreSQL + Redis)
 │   └── chatbot-service/       # Chatbot RAG (8102, FastAPI + MongoDB)
 ├── frontend/                  # Web end-user (React + Vite, cổng 5173)
-├── scripts/                   # Script quản lý dự án (vmarket.cmd)
+├── .github/workflows/         # CI/CD - mỗi service một workflow riêng
+│   ├── service-ci.yml         # Reusable workflow: test + build image (dùng chung)
+│   └── <ten-service>.yml      # File gọi, trigger theo thư mục của service đó
+├── scripts/                   # Script quản lý dự án (vmarket.cmd, new-service.cmd)
 ├── infra/                     # Cấu hình hạ tầng (init script PostgreSQL...)
-├── docs/                      # SRS và tài liệu dự án
+├── docs/
+│   ├── SRS-VMarket.md         # Đặc tả yêu cầu
+│   └── templates/             # Template Dockerfile + CI/CD + .env cho service mới
 ├── docker-compose.yml         # Hạ tầng dùng chung cho dev
 └── CONTRIBUTING.md            # Quy ước branch/commit/PR
 ```
+
+Mỗi service trong `services/` là một đơn vị **độc lập**: có `Dockerfile`,
+`.env.example` / `.env.prod.example` và workflow CI riêng — build, test, đóng gói
+tách rời với các service khác.
 
 > Web Admin và Mobile (React Native) sẽ được thêm vào ở các sprint tiếp theo, cùng nằm ở thư mục gốc (`admin/`, `mobile/`).
 
@@ -132,6 +141,46 @@ Build context là **thư mục gốc repo** (Dockerfile cần parent POM):
 docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
 ```
 
+Dockerfile của mọi service sinh ra từ cùng một template
+([`docs/templates/Dockerfile.springboot`](docs/templates/Dockerfile.springboot)):
+3 stage — tải dependency (cache riêng theo `pom.xml`) → build jar bằng Maven →
+chạy bằng JRE slim với user thường. Sửa code Java rồi build lại chỉ mất ~14 giây
+vì layer dependency được dùng lại.
+
+Chạy container riêng lẻ bằng file `.env` của service:
+
+```bash
+cp services/auth-service/.env.example services/auth-service/.env
+docker run --env-file services/auth-service/.env -p 8081:8081 vmarket-auth-service
+```
+
+## CI/CD
+
+Mỗi service có một workflow riêng trong `.github/workflows/`, **trigger theo đường
+dẫn**: sửa `services/auth-service/**` thì chỉ CI của auth-service chạy. Toàn bộ
+logic nằm ở một *reusable workflow* dùng chung (`service-ci.yml`):
+
+| Job     | Làm gì                                                                    |
+| ------- | ------------------------------------------------------------------------- |
+| `test`  | `mvnw -pl <service> -am test` — chỉ test module của service đó             |
+| `image` | Build Docker image của service đó + smoke test (không cần DB/RabbitMQ)     |
+
+Mặc định pipeline **chỉ build image, chưa push lên registry** nên chưa cần khai báo
+secret nào. Khi nhóm chốt registry thì bật bằng cách bỏ comment vài dòng — xem
+[`docs/templates/README.md`](docs/templates/README.md).
+
+## Thêm service mới
+
+```powershell
+# Sau khi tạo skeleton Spring Boot trong services/<tên-service>:
+scripts\new-service.cmd -Name order-service -Port 8086            # PostgreSQL
+scripts\new-service.cmd -Name product-service -Port 8084 -Store mongo
+scripts\new-service.cmd -Name cart-service -Port 8085 -Store redis
+```
+
+Script gắn sẵn Dockerfile, workflow CI và file `.env` dev/prod theo đúng chuẩn
+chung. Chi tiết: [`docs/templates/README.md`](docs/templates/README.md).
+
 ## Chạy frontend
 
 ```bash
@@ -165,4 +214,5 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 
 - [SRS — Đặc tả yêu cầu](docs/SRS-VMarket.md)
 - [Quy ước git/commit/PR](CONTRIBUTING.md)
+- [Template Dockerfile + CI/CD cho service mới](docs/templates/README.md)
 - [README Auth Service](services/auth-service/README.md)
