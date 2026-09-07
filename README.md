@@ -157,6 +157,8 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | Hạ tầng   | `docker compose ps`                                   | các container healthy       |
 | Gateway   | `curl http://localhost:8080/actuator/health`          | `{"status":"UP"}`           |
 | Auth      | `curl http://localhost:8081/api/auth/health`          | `{"status":"UP",...}`       |
+| User      | `curl http://localhost:8082/api/users/health`         | `{"status":"UP",...}`       |
+| User (cần token) | `curl http://localhost:8082/api/users/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
 | Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |
 | RabbitMQ  | mở `http://localhost:15672`                           | đăng nhập guest/guest       |

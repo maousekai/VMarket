@@ -10,8 +10,16 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      # Schema do Flyway quan ly. 'validate' de Hibernate chi doi chieu mapping voi
+      # schema thuc te, khong tu sua DDL (giong auth-service).
+      ddl-auto: validate
     show-sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Cho phep migrate tren DB da co bang (vmarket_user duoc tao san boi container)
+    baseline-on-migrate: true
+    baseline-version: 0
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -27,6 +35,23 @@ management:
       exposure:
         include: health,info
 
+# springdoc dung path mac dinh: /swagger-ui.html va /v3/api-docs
+# (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+
+# JWT - user-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
+# hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va
+# chung bien moi truong AUTH_JWT_SECRET voi auth-service; dat ten khac se dan toi
+# canh hai service cung chay ma token ben nay ben kia khong doc duoc.
+#
+# secret KHONG co gia tri mac dinh o file nen -> moi moi truong (ke ca prod) thieu
+# AUTH_JWT_SECRET se fail ngay luc khoi dong (placeholder khong resolve + @NotBlank
+# tren UserJwtProperties). Gia tri gia cho local dev nam o application-dev.yml.
+#
+# KHONG khai access-ttl / refresh-ttl: thoi han la viec cua ben phat hanh token.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
