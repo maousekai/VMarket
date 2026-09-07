@@ -24,4 +24,4 @@ auth:
   jwt:
     secret: test-only-secret-0123456789-0123456789-0123456789
     access-ttl: 15m
-    refresh-ttl: 30d
+    refresh-ttl: 15d

@@ -135,6 +135,21 @@ class RefreshApiTest {
 	}
 
 	@Test
+	void refresh_whenAccountLocked_revokesAllTokens_and423() throws Exception {
+		String rt1 = loginAndGetRefreshToken();
+
+		// Mô phỏng Admin khoá tài khoản thủ công (không qua luồng login sai mật khẩu).
+		user.setLockedUntil(Instant.now().plus(15, ChronoUnit.MINUTES));
+		userRepository.save(user);
+
+		refresh(rt1).andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
+
+		RefreshToken revoked = refreshTokenRepository.findByTokenHash(tokenCodec.hash(rt1)).orElseThrow();
+		assertThat(revoked.getRevokedAt()).isNotNull();
+	}
+
+	@Test
 	void refresh_unknownToken_401() throws Exception {
 		refresh("khong-ton-tai")
 				.andExpect(status().isUnauthorized())
