@@ -128,6 +128,10 @@ public class AuthenticationService {
 				.orElseThrow(() -> new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
 						"Tài khoản không tồn tại"));
 		if (isLocked(user, now)) {
+			// Thu hồi toàn bộ phiên (SRS FR-AUTH-06) — kể cả khi tài khoản bị Admin
+			// khoá thủ công, không đi qua luồng login sai mật khẩu.
+			int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
+			log.warn("Refresh bị từ chối do tài khoản bị khoá (userId={}), thu hồi {} phiên", user.getId(), revoked);
 			throw accountLocked(user.getLockedUntil(), now);
 		}
 

@@ -63,6 +63,7 @@ class JwtServiceTest {
 
 		var wrongKey = Keys.hmacShaKeyFor("another-secret-0123456789-0123456789-0123456789".getBytes(StandardCharsets.UTF_8));
 		org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-				Jwts.parser().verifyWith(wrongKey).build().parseSignedClaims(token));
+				Jwts.parser().verifyWith(wrongKey).build().parseSignedClaims(token))
+				.isInstanceOf(io.jsonwebtoken.JwtException.class);
 	}
 }
