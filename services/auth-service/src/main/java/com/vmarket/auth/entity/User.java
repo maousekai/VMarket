@@ -16,12 +16,10 @@ import lombok.Setter;
  * Tài khoản người dùng. V1 giữ các cột lõi (định danh + mật khẩu đã hash).
  * Các cột nghiệp vụ bổ sung do migration riêng của từng subtask thêm:
  * <ul>
- *   <li><b>V2 — PBL6-42:</b> {@code email_verified} (kích hoạt tài khoản) — đã có</li>
- *   <li>PBL6-43: {@code failed_login_attempts}, {@code locked_until} (migration V3)</li>
- *   <li>PBL6-44: {@code provider}, {@code provider_user_id} (Google OAuth2)</li>
+ *   <li><b>V2 — PBL6-42:</b> {@code email_verified} (kích hoạt tài khoản)</li>
+ *   <li><b>V3 — PBL6-43:</b> {@code failed_login_attempts}, {@code locked_until}</li>
+ *   <li>PBL6-44: {@code provider}, {@code provider_user_id} (Google OAuth2) — migration V4</li>
  * </ul>
- * (Header của {@code V1__init_auth_schema.sql} có kế hoạch đánh số cũ — nay đã đổi,
- * migration tiếp theo là V3.)
  */
 @Entity
 @Table(name = "users")
@@ -46,6 +44,14 @@ public class User extends BaseEntity {
 	 */
 	@Column(name = "email_verified", nullable = false)
 	private boolean emailVerified;
+
+	/** Số lần đăng nhập sai LIÊN TIẾP (FR-AUTH-02). Reset về 0 khi đăng nhập đúng. */
+	@Column(name = "failed_login_attempts", nullable = false)
+	private int failedLoginAttempts;
+
+	/** Thời điểm hết khoá; {@code null} = không bị khoá. */
+	@Column(name = "locked_until")
+	private Instant lockedUntil;
 
 	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)

@@ -132,22 +132,35 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 
 | Method & path            | Mô tả                                                      |
 | ------------------------ | -------------------------------------------------------- |
-| `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, trạng thái PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
+| `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
+| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
+| `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token (xoay vòng). 200 / 401 (`INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`) |
 | `GET  /api/auth/health`  | Health-check                                              |
 
 Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
 Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 (đều cùng format trên).
 
-Ràng buộc đăng ký: email hợp lệ ≤320 ký tự (lưu lowercase + trim); username 3–50 ký tự
+**Đăng ký:** email hợp lệ ≤320 ký tự (lowercase + trim); username 3–50 ký tự
 `[a-zA-Z0-9._-]` (phân biệt hoa/thường, có trim); mật khẩu 8–32 ký tự, ≥1 chữ hoa +
 ≥1 số + ≥1 ký tự đặc biệt (hash BCrypt).
+
+**Đăng nhập (FR-AUTH-02):**
+- Access token: JWT HS256, `exp` mặc định 15 phút. Claims: `sub` (user id), `email`,
+  `username`, `roles`, `email_verified`, `iss=auth-service`.
+- Refresh token: chuỗi ngẫu nhiên mờ (không phải JWT), sống 15 ngày, DB chỉ lưu SHA-256.
+  `/refresh` xoay vòng: token cũ bị thu hồi; **dùng lại token đã thu hồi → thu hồi
+  toàn bộ phiên của user**.
+- Khoá tài khoản: sai mật khẩu **5 lần liên tiếp** → khoá **15 phút** (423). Đăng nhập
+  đúng → reset bộ đếm.
+- User `email_verified = false` **vẫn đăng nhập được**, response `status = PENDING`
+  (client hiển thị màn hình thông báo, chưa cho vào hệ thống bình thường).
 
 ## Roadmap nghiệp vụ (theo SRS)
 
 - [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
 - [x] FR-AUTH-01 (PBL6-42): tạo tài khoản (`POST /api/auth/register`, migration V2)
   - [ ] gửi email xác thực tài khoản (OTP/link) — chưa có ticket, cần đưa vào backlog
-- [ ] FR-AUTH-02 (PBL6-43): Đăng nhập JWT access/refresh token + khóa sau 5 lần sai
+- [x] FR-AUTH-02 (PBL6-43): đăng nhập JWT + refresh xoay vòng + khoá sau 5 lần sai (migration V3)
 - [ ] FR-AUTH-03 (PBL6-44): Đăng nhập Google OAuth 2.0
 - [ ] FR-AUTH-04 (PBL6-45): Quên mật khẩu
 - [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
