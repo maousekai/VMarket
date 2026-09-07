@@ -11,8 +11,7 @@ import lombok.Setter;
 
 /**
  * Khóa chính dùng chung cho các entity có một cột id: ULID (Crockford base32, 26
- * ký tự) sinh ở tầng ứng dụng theo quy ước repo (root CLAUDE.md — "ULIDs for
- * primary keys, sortable, unique across services").
+ * ký tự) sinh ở tầng ứng dụng — sortable theo thời gian, không trùng giữa các service.
  */
 @MappedSuperclass
 @Getter

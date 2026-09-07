@@ -11,7 +11,7 @@
 -- Khoa chinh: ULID (Crockford base32, 26 ky tu), sinh o tang app (BaseEntity).
 -- Kieu cot dinh danh: VARCHAR(26) (khop mapping mac dinh cua Hibernate cho String
 -- -> tranh loi 'ddl-auto: validate' giua char/varchar va ngu nghia padding cua
--- bpchar). Thoi gian: TIMESTAMPTZ, luu UTC (root CLAUDE.md).
+-- bpchar). Thoi gian: TIMESTAMPTZ, luu UTC.
 -- =============================================================================
 
 CREATE TABLE roles (
