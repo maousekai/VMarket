@@ -214,6 +214,15 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
       AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
       AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-15d}
+      # OTP xac thuc email (PBL6-44). provider=log khong gui email that.
+      AUTH_EMAIL_PROVIDER: ${AUTH_EMAIL_PROVIDER:-log}
+      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-no-reply@vmarket.local}
+      AUTH_EMAIL_FROM_NAME: ${AUTH_EMAIL_FROM_NAME:-VMarket}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      AUTH_OTP_TTL: ${AUTH_OTP_TTL:-5m}
+      AUTH_OTP_MAX_ATTEMPTS: ${AUTH_OTP_MAX_ATTEMPTS:-5}
+      AUTH_OTP_RESEND_COOLDOWN: ${AUTH_OTP_RESEND_COOLDOWN:-60s}
+      AUTH_OTP_HOURLY_LIMIT: ${AUTH_OTP_HOURLY_LIMIT:-5}
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"
