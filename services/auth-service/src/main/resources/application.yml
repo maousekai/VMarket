@@ -51,4 +51,4 @@ auth:
   jwt:
     secret: ${AUTH_JWT_SECRET}
     access-ttl: ${AUTH_JWT_ACCESS_TTL:15m}
-    refresh-ttl: ${AUTH_JWT_REFRESH_TTL:30d}
+    refresh-ttl: ${AUTH_JWT_REFRESH_TTL:15d}

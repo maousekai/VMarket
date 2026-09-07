@@ -12,12 +12,14 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * Refresh token đã phát cho một phiên đăng nhập. V1 chỉ có cột lõi; cột phục vụ
- * thu hồi / xoay vòng token ({@code revoked_at}, {@code replaced_by}...) sẽ do
- * migration của PBL6-43 / PBL6-46 bổ sung.
+ * Refresh token đã phát cho một phiên đăng nhập.
  *
  * <p>Chỉ lưu <b>hash</b> của token (SHA-256), không lưu giá trị gốc — log và DB
  * không được chứa token (NFR-SEC-06).
+ *
+ * <p>Xoay vòng (FR-AUTH-02): mỗi lần {@code /refresh} thu hồi token hiện tại
+ * ({@code revoked_at}) và trỏ {@code replaced_by} sang token mới. Dùng lại một
+ * token đã {@code revoked_at} = dấu hiệu bị đánh cắp → thu hồi toàn bộ phiên.
  */
 @Entity
 @Table(name = "refresh_tokens")
@@ -34,6 +36,14 @@ public class RefreshToken extends BaseEntity {
 
 	@Column(name = "expires_at", nullable = false)
 	private Instant expiresAt;
+
+	/** Thời điểm token bị thu hồi (rotate / logout / phát hiện reuse). {@code null} = còn hiệu lực. */
+	@Column(name = "revoked_at")
+	private Instant revokedAt;
+
+	/** Id của refresh token thay thế token này khi xoay vòng (audit). */
+	@Column(name = "replaced_by", length = BaseEntity.ID_LENGTH)
+	private String replacedBy;
 
 	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)

@@ -213,7 +213,7 @@ services:
       # JWT (PBL6-41) - PROD phai override AUTH_JWT_SECRET bang chuoi ngau nhien manh.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
       AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
-      AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-30d}
+      AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-15d}
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"
