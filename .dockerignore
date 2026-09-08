@@ -1,0 +1,37 @@
+# ============================================================
+# VMarket - .dockerignore cho BUILD CONTEXT = THU MUC GOC REPO
+# ============================================================
+# Cac Dockerfile cua service Spring Boot deu build tu goc repo
+# (vi can services/pom.xml - parent POM), vi du:
+#   docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
+#
+# Vi context la ca repo, mac dinh Docker se gui TOAN BO thu muc (ke ca
+# .git, frontend/node_modules, target/...) cho daemon -> cham va lam hong
+# cache. File nay dung kieu ALLOWLIST: chan het, chi mo lai phan can thiet.
+#
+# LUU Y khi them thu muc dung chung moi (vd libs/common) ma service can
+# build: PHAI them mot dong "!<duong-dan>" ben duoi, neu khong COPY trong
+# Dockerfile se bao "file not found".
+#
+# frontend/ va cac AI service (Python) build voi context rieng cua chung
+# nen KHONG dung file nay (moi thu muc co .dockerignore cua rieng no).
+# ============================================================
+
+# 1. Chan tat ca
+*
+
+# 2. Mo lai dung thu muc services/ (pom + source cua microservice)
+!services
+
+# 3. Trong services/: bo build artifact va file khong lien quan den build
+services/**/target
+services/**/.mvn
+services/**/.git*
+services/**/.env*
+services/**/*.md
+services/**/HELP.md
+
+# 4. AI service (Python) co Dockerfile + context rieng, khong can o day
+services/ai-search-service
+services/chatbot-service
+services/recommendation-service

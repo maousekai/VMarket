@@ -1,10 +1,13 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# VMarket - Dockerfile cho auth-service (port 8081)
+# VMarket - Dockerfile MAU (template) cho MOI service Spring Boot
 # =============================================================================
-# File nay sinh ra tu template dung chung: docs/templates/Dockerfile.springboot
-# Than file GIONG HET moi service, chi khac 2 dong ARG SERVICE_NAME/SERVICE_PORT.
-# => Sua logic build thi sua TEMPLATE truoc roi dong bo lai cho cac service.
+# CACH DUNG cho service moi:
+#   1. Copy file nay thanh services/<ten-service>/Dockerfile
+#   2. Sua DUNG 2 dong ARG ben duoi (SERVICE_NAME + SERVICE_PORT)
+#   3. Xong. Phan than file giu nguyen cho moi service.
+# Hoac chay script tu dong: scripts\new-service.ps1 -Name <ten> -Port <port>
+#
 # BUILD (context BAT BUOC la thu muc goc repo vi can services/pom.xml):
 #   docker build -f services/<ten-service>/Dockerfile -t vmarket-<ten-service> .
 #
@@ -19,8 +22,8 @@
 # =============================================================================
 
 # --- THAM SO RIENG CUA SERVICE: copy template xong chi can sua 2 dong nay ---
-ARG SERVICE_NAME=auth-service
-ARG SERVICE_PORT=8081
+ARG SERVICE_NAME=__SERVICE_NAME__
+ARG SERVICE_PORT=__SERVICE_PORT__
 
 # --- Base image dung chung (nang version tap trung o day) ---
 # JAVA_VERSION la MOT CHO DUY NHAT khai bao JDK cho ca build lan runtime.

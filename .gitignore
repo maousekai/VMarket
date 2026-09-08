@@ -25,11 +25,13 @@ Thumbs.db
 log_*_*.txt
 logs_*.txt
 
-# Environment variables (giu .env.example trong repo)
+# Environment variables (giu cac file *.example trong repo)
+# Chan CA .env.prod / .env.staging... de khong lo commit secret that;
+# chi cac file .example (khong chua gia tri that) moi duoc commit.
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+!.env.*.example
 
 # Docker
 docker-compose.override.yml

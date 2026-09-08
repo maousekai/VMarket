@@ -1,0 +1,59 @@
+# =============================================================================
+# VMarket - Workflow CI MAU cho MOT service (file goi)
+# =============================================================================
+# CACH DUNG:
+#   1. Copy file nay thanh .github/workflows/<ten-service>.yml
+#   2. Thay het __SERVICE__ bang ten thu muc service (vd: order-service)
+#   3. Xong - toan bo logic build/test nam o service-ci.yml dung chung.
+# Hoac chay: scripts\new-service.ps1 -Name <ten-service> -Port <port>
+#
+# TRIGGER THEO DUONG DAN (monorepo): workflow nay CHI chay khi co thay doi
+# trong services/__SERVICE__/ (hoac parent POM / chinh file CI). Nho vay
+# sua auth-service khong lam chay CI cua 10 service con lai.
+# =============================================================================
+name: __SERVICE__
+
+on:
+  push:
+    branches: [dev, release, product]
+    paths:
+      - "services/__SERVICE__/**"
+      # Parent POM doi (nang version Spring Boot...) anh huong moi service
+      - "services/pom.xml"
+      - "services/mvnw"
+      # Sua chinh CI thi cung phai chay lai de kiem chung
+      - ".github/workflows/__SERVICE__.yml"
+      - ".github/workflows/service-ci.yml"
+  pull_request:
+    branches: [dev, release, product]
+    paths:
+      - "services/__SERVICE__/**"
+      - "services/pom.xml"
+      - "services/mvnw"
+      - ".github/workflows/__SERVICE__.yml"
+      - ".github/workflows/service-ci.yml"
+  # Cho phep bam chay tay trong tab Actions
+  workflow_dispatch:
+
+# Push lien tiep vao cung nhanh: huy lan chay cu, chi giu lan moi nhat.
+concurrency:
+  group: ci-__SERVICE__-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/service-ci.yml
+    with:
+      service: __SERVICE__
+    # ---- KHI NHOM DA CO REGISTRY thi bo comment khoi duoi ----
+    # Mac dinh pipeline CHI BUILD image (khong push) nen chua can secret nao.
+    #   with:
+    #     service: __SERVICE__
+    #     push-image: true
+    #     registry: ghcr.io
+    #   permissions:
+    #     contents: read
+    #     packages: write        # bat buoc de push len GHCR
+    #   secrets:
+    #     registry-username: ${{ github.actor }}
+    #     registry-password: ${{ secrets.GITHUB_TOKEN }}
