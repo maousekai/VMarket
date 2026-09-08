@@ -1,6 +1,9 @@
 # VMarket - khoi tao file ha tang (Dockerfile + CI + .env) cho MOT service moi
 # tu cac template dung chung trong docs/templates/.
 #
+# Sinh xong nen chay scripts\check-env.cmd: file .env cua service moi phai
+# khop gia tri dung chung (mat khau DB/RabbitMQ, CORS...) voi .env o goc repo.
+#
 # Cach dung:
 #   scripts\new-service.cmd -Name shop-service -Port 8083
 #   scripts\new-service.cmd -Name product-service -Port 8084 -Store mongo
@@ -113,3 +116,4 @@ Write-Output ""
 Write-Output ">> Kiem tra ngay:"
 Write-Output "   cd services; .\mvnw.cmd -pl $Name -am test"
 Write-Output "   docker build -f services/$Name/Dockerfile -t vmarket-$Name ."
+Write-Output "   scripts\check-env.cmd   # doi chieu .env service moi voi .env goc"

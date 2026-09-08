@@ -1,0 +1,58 @@
+# =============================================================================
+# VMarket - Kiem tra cac he file env khong lech nhau
+# =============================================================================
+# Repo CO Y giu 2 he file env cho 2 cach chay khac nhau:
+#   - .env O GOC          -> `docker compose up`
+#   - services/<svc>/.env -> chay rieng le (docker run --env-file / IDE)
+# Mot so gia tri buoc phai trung o ca hai he (mat khau DB, RabbitMQ, CORS,
+# JWT secret). Doi mot ben ma quen ben kia thi khong co gi bao loi -> job nay
+# la cai bao loi do. Kem theo: doi chieu gia tri mac dinh ${VAR:-...} trong
+# docker-compose.yml, va kiem cac file .env.prod.example khong lo dien secret.
+#
+# CO Y TACH KHOI service-ci.yml: day la kiem tra CAP REPO, chay MOT LAN cho
+# ca monorepo - khong phai kiem tra cua rieng service nao, va khong duoc
+# chan CI cua 11 service.
+# =============================================================================
+name: env-consistency
+
+on:
+  push:
+    branches: [dev, release, product]
+    paths:
+      - ".env.example"
+      - "services/**/.env.example"
+      - "services/**/.env.prod.example"
+      - "docker-compose.yml"
+      - "scripts/check-env.ps1"
+      - ".github/workflows/env-consistency.yml"
+  pull_request:
+    branches: [dev, release, product]
+    paths:
+      - ".env.example"
+      - "services/**/.env.example"
+      - "services/**/.env.prod.example"
+      - "docker-compose.yml"
+      - "scripts/check-env.ps1"
+      - ".github/workflows/env-consistency.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-env-consistency-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Doi chieu file env
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # pwsh (PowerShell 7) co san tren runner ubuntu-latest - dung chung
+      # dung mot script voi may cua thanh vien (scripts\check-env.cmd).
+      - name: Chay scripts/check-env.ps1
+        shell: pwsh
+        run: ./scripts/check-env.ps1

@@ -42,6 +42,7 @@ Kiểm tra ngay:
 ```powershell
 cd services; .\mvnw.cmd -pl order-service -am test
 docker build -f services/order-service/Dockerfile -t vmarket-order-service .
+cd ..; scripts\check-env.cmd     # đối chiếu .env service mới với .env gốc
 ```
 
 ## 2. Khởi tạo service mới (cách thủ công)
@@ -72,7 +73,7 @@ ARG SERVICE_PORT=8086
 | --------- | -------------------------------------------------- | ------------------------------------------------------------------------- |
 | `deps`    | Chỉ COPY `pom.xml` rồi `mvn dependency:go-offline`  | Layer này **chỉ đổi khi pom đổi** → sửa code Java không phải tải lại `.m2` |
 | `build`   | COPY `src` rồi `mvn package -DskipTests`            | Test chạy ở job riêng trong CI (nhanh hơn, báo lỗi rõ hơn)                 |
-| `runtime` | `eclipse-temurin:17-jre-alpine` + đúng file jar     | Không có Maven/source/`.m2` → image nhỏ, ít bề mặt tấn công                |
+| `runtime` | `eclipse-temurin:${JAVA_VERSION}-jre-alpine` + jar   | Không có Maven/source/`.m2` → image nhỏ, ít bề mặt tấn công                |
 
 Đo thực tế trên auth-service: build nguội **2 phút 38 giây**, build lại sau khi sửa
 code **13,6 giây** (layer `deps` được cache).
@@ -96,6 +97,9 @@ code **13,6 giây** (layer `deps` được cache).
   endpoint đó còn **treo đến hết timeout** (đã đo thực tế). Muốn kiểm cả phụ thuộc
   thì đổi biến: `-e HEALTHCHECK_PATH=/actuator/health`.
 - Đổi JVM options lúc chạy bằng biến `JAVA_OPTS`, không cần build lại image.
+- Phiên bản JDK khai báo **một chỗ duy nhất**: `ARG JAVA_VERSION=17`. Cả Maven image
+  (stage build) lẫn JRE runtime đều dẫn xuất từ nó, và CI truyền lại giá trị này qua
+  `build-args` — xem mục 6.
 
 ---
 
@@ -125,6 +129,25 @@ Job `test` dùng `mvnw -pl <svc> -am`:
 
 Job `image` build image rồi **smoke test** không cần DB/RabbitMQ: xác nhận image có
 JRE chạy được, có file jar, và **không chạy bằng root**.
+
+Smoke test tìm jar ở `/app/app.jar` — đúng quy ước của `Dockerfile.springboot`. Service
+nào dùng Dockerfile khác chuẩn (Gradle, tên jar khác) thì truyền lại đường dẫn thật:
+
+```yaml
+with:
+  service: order-service
+  jar-path: /opt/app/order.jar
+```
+
+Cả hai job đều có `timeout-minutes` (test 20, image 30) để lần chạy bị treo bị cắt sớm
+thay vì chạy hết timeout mặc định 6 tiếng của GitHub.
+
+Tag nhánh lấy từ `github.head_ref` khi chạy trên pull request, nên tag là tên nhánh
+nguồn (`PBL6-2`) chứ không phải `123-merge`.
+
+> **PR từ fork:** khi nhóm bật `push-image: true` sau này, PR từ fork không được cấp
+> secret và `GITHUB_TOKEN` chỉ có quyền đọc → bước push sẽ hỏng. Đó là hành vi đúng
+> (không cho PR lạ đẩy image lên registry của nhóm).
 
 ### Push image lên registry
 
@@ -175,24 +198,67 @@ Nguyên tắc tách dev/prod trong repo này (đã áp dụng ở auth-service):
   là service **fail ngay lúc khởi động**. Cố ý như vậy, để không bao giờ chạy prod
   bằng mật khẩu dev
 
-Ba nguồn biến môi trường, đừng nhầm:
+### Nguồn sự thật — file nào cho cách chạy nào
 
-| Nguồn                        | Ai đọc                                                              |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `.env` ở **gốc repo**        | `docker-compose.yml` (hạ tầng chung, anchor `x-common-environment`)  |
-| `services/<svc>/.env`        | Khi chạy container **riêng lẻ** bằng `--env-file`                    |
-| `application-{dev,prod}.yml` | Giá trị mặc định trong ảnh, bị biến môi trường ghi đè                |
+Repo **cố ý** giữ hai hệ file env, vì hai cách chạy có topology mạng khác nhau
+(chạy lẻ thì trỏ `localhost:<port publish>`, chạy compose thì trỏ
+`<tên-service>:<port nội bộ>`). Mỗi file là nguồn sự thật cho **đúng một** cách chạy:
+
+| Nguồn                        | Là nguồn sự thật cho             | Ai đọc                                                      |
+| ---------------------------- | -------------------------------- | ------------------------------------------------------------ |
+| `.env` ở **gốc repo**        | `docker compose up`              | `docker-compose.yml` (anchor `x-common-environment`)         |
+| `services/<svc>/.env`        | Chạy lẻ 1 service                | `docker run --env-file`, plugin `.env` của IDE               |
+| `application-{dev,prod}.yml` | Giá trị mặc định trong ảnh       | Spring Boot — biến môi trường luôn ghi đè                    |
+
+Compose **không bao giờ** đọc `services/<svc>/.env`. Sửa cấu hình cho cách chạy nào
+thì sửa đúng file của cách chạy đó.
+
+**Vấn đề đi kèm:** một số giá trị buộc phải trùng ở cả hai hệ — mật khẩu Postgres /
+RabbitMQ, `CORS_ALLOWED_ORIGINS`, `AUTH_JWT_*`. Đổi một bên mà quên bên kia thì không
+có gì báo lỗi. Nên có script đối chiếu:
+
+```powershell
+scripts\check-env.cmd
+```
+
+Script kiểm 3 việc và **exit code 1 nếu lệch**:
+
+1. `.env.example` gốc ↔ `services/*/.env.example` — các giá trị bắt buộc trùng
+2. `.env.example` gốc ↔ giá trị mặc định `${VAR:-...}` viết thẳng trong
+   `docker-compose.yml` (nơi thứ ba dễ lệch — máy chưa copy `.env` sẽ chạy bằng nó)
+3. `services/*/.env.prod.example` — secret phải để trống, `SPRING_PROFILES_ACTIVE=prod`
+
+Workflow `.github/workflows/env-consistency.yml` chạy đúng script này trên CI khi có
+thay đổi ở file env hoặc `docker-compose.yml`, nên drift không thể lọt im lặng. Job này
+tách riêng khỏi `service-ci.yml` vì là kiểm tra **cấp repo**, chạy một lần cho cả
+monorepo và không được chặn CI của 11 service.
+
+Đầu mỗi file `.env.example` đều có khối `NGUON SU THAT` liệt kê biến nào trùng với
+`.env` gốc và biến nào **cố ý khác** (host/port hạ tầng).
 
 ---
 
 ## 6. Sửa template thì làm gì
 
-Thân Dockerfile và workflow **giống hệt nhau ở mọi service**. Khi cần đổi (ví dụ
-nâng JDK 17 → 21):
+Thân Dockerfile và workflow **giống hệt nhau ở mọi service**. Khi cần đổi:
 
 1. Sửa `docs/templates/Dockerfile.springboot` trước
-2. Đồng bộ lại cho các service (2 dòng `ARG` của từng service giữ nguyên)
+2. Đồng bộ lại cho các service (2 dòng `ARG SERVICE_*` của từng service giữ nguyên)
 3. Chạy lại CI của một service để kiểm chứng
+
+**Riêng nâng JDK (17 → 21) thì không phải sửa Dockerfile:** đặt `java-version` ở file
+gọi CI là xong — job `test` dùng nó cho `setup-java`, job `image` truyền nó vào
+Dockerfile qua `build-args: JAVA_VERSION=...`, và Dockerfile dẫn xuất cả Maven image
+lẫn JRE runtime từ `ARG JAVA_VERSION`.
+
+```yaml
+jobs:
+  ci:
+    uses: ./.github/workflows/service-ci.yml
+    with:
+      service: order-service
+      java-version: "21" # áp cho CẢ test lẫn image
+```
 
 Với pipeline thì dễ hơn: sửa `.github/workflows/service-ci.yml` là **tất cả** service
 nhận thay đổi ngay, không phải sửa 11 file.

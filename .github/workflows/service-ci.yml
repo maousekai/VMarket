@@ -14,6 +14,14 @@
 # DOC LAP GIUA CAC SERVICE: moi service co workflow rieng + trigger theo
 # duong dan (paths) nen sua auth-service KHONG lam chay CI cua order-service,
 # va CI cua service nay hong KHONG chan service khac.
+#
+# GIA DINH VE DOCKERFILE: workflow nay bam theo Dockerfile mau
+# (docs/templates/Dockerfile.springboot):
+#   - build context la THU MUC GOC repo (Dockerfile can services/pom.xml)
+#   - jar nam o /app/app.jar trong image   -> doi bang input jar-path
+#   - co ARG JAVA_VERSION de chon JDK      -> truyen qua input java-version
+# Service dung Dockerfile khac chuan (Gradle, ten jar khac) van chay duoc,
+# chi can truyen lai jar-path o file goi.
 # =============================================================================
 name: Service CI (reusable)
 
@@ -25,10 +33,21 @@ on:
         required: true
         type: string
       java-version:
-        description: "Phien ban JDK dung de chay test"
+        description: >-
+          Phien ban JDK. Dung cho CA HAI job: setup-java o job test, va
+          build-arg JAVA_VERSION cua Dockerfile o job image -> chi khai bao
+          MOT CHO, khong lo nang JDK mot noi quen noi kia.
         required: false
         type: string
         default: "17"
+      jar-path:
+        description: >-
+          Duong dan file jar BEN TRONG image, dung cho smoke test. Mac dinh
+          khop Dockerfile mau (copy jar ve /app/app.jar). Service dung
+          Dockerfile khac chuan thi truyen lai duong dan that o file goi.
+        required: false
+        type: string
+        default: "/app/app.jar"
       run-tests:
         description: "Chay test hay khong (service moi tao chua co test co the tat)"
         required: false
@@ -65,6 +84,9 @@ jobs:
   test:
     name: Test ${{ inputs.service }}
     runs-on: ubuntu-latest
+    # Chan job treo: mvnw doi dependency / test khong bao gio ket thuc se bi
+    # cat sau 20 phut thay vi chay het timeout mac dinh cua GitHub (6 gio).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +98,8 @@ jobs:
           # Cache ~/.m2 theo hash cac file pom -> lan sau khong tai lai dependency
           cache: maven
 
-      # File mvnw trong repo khong co co executable (commit tu Windows),
-      # runner Linux can cap quyen chay.
+      # mvnw da duoc commit voi co executable (mode 100755). Buoc nay giu lai
+      # cho chac: neu ai do commit lai tu Windows lam mat co, CI van chay duoc.
       - name: Cho phep chay Maven Wrapper
         run: chmod +x ./mvnw
         working-directory: services
@@ -107,6 +129,9 @@ jobs:
     name: Build image ${{ inputs.service }}
     runs-on: ubuntu-latest
     needs: test
+    # Rong hon job test: lan chay dau (cache gha con trong) phai tai toan bo
+    # dependency Maven BEN TRONG docker build, cham hon chay tren runner.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -114,6 +139,12 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # Chi dang nhap khi that su push. Mac dinh buoc nay bi bo qua.
+      #
+      # LUU Y VOI PR TU FORK: khi nhom bat push-image=true sau nay, PR tu fork
+      # KHONG duoc cap secrets.registry-* va GITHUB_TOKEN chi co quyen doc
+      # -> buoc login/push se hong. Day la hanh vi DUNG (khong cho PR la day
+      # image len registry cua nhom); muon fork van xanh thi de push-image=false
+      # cho pull_request va chi bat khi push vao nhanh chinh.
       - name: Dang nhap registry
         if: ${{ inputs.push-image }}
         uses: docker/login-action@v3
@@ -124,15 +155,28 @@ jobs:
 
       # Tag: <registry>/<owner>/vmarket-<service>:<sha> va :<ten-nhanh>
       # (tinh bang shell de khong phu thuoc them action ngoai).
+      #
+      # head_ref || ref_name: tren pull_request thi GITHUB_REF_NAME la
+      # "<so-pr>/merge" -> tag xau kieu ":123-merge". head_ref cho ra ten nhanh
+      # nguon that su. Gia tri di qua bien moi truong (khong noi thang vao
+      # script) vi ten nhanh cua PR tu fork la chuoi nguoi ngoai dat duoc.
       - name: Tinh tag image
         id: meta
+        env:
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          SERVICE: ${{ inputs.service }}
+          REGISTRY: ${{ inputs.registry }}
+          PUSH: ${{ inputs.push-image }}
         run: |
-          repo_owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          base="vmarket-${{ inputs.service }}"
-          if [ "${{ inputs.push-image }}" = "true" ]; then
-            base="${{ inputs.registry }}/${repo_owner}/${base}"
+          repo_owner=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          base="vmarket-${SERVICE}"
+          if [ "$PUSH" = "true" ]; then
+            base="${REGISTRY}/${repo_owner}/${base}"
           fi
-          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          # Docker tag chi nhan [a-zA-Z0-9._-]; ky tu khac (dau '/' trong
+          # "feat/abc", dau tieng Viet...) doi thanh '-'.
+          branch=$(echo "$REF_NAME" | sed 's#[^a-zA-Z0-9._-]#-#g' | cut -c1-100)
           {
             echo "tags=${base}:${branch},${base}:${GITHUB_SHA::7}"
             echo "smoke_tag=${base}:${GITHUB_SHA::7}"
@@ -142,11 +186,15 @@ jobs:
       # load: chi nap image vao docker local khi KHONG push, de con smoke test.
       # cache-from/to gha: tai su dung layer 'deps' giua cac lan chay CI
       # -> build lai chi vai chuc giay thay vi tai lai toan bo dependency.
+      # build-args JAVA_VERSION: dong bo JDK cua image voi JDK chay test
+      # (Dockerfile mau dung ARG nay cho ca maven image lan JRE runtime).
       - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: services/${{ inputs.service }}/Dockerfile
+          build-args: |
+            JAVA_VERSION=${{ inputs.java-version }}
           tags: ${{ steps.meta.outputs.tags }}
           push: ${{ inputs.push-image }}
           load: ${{ !inputs.push-image }}
@@ -154,16 +202,19 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ inputs.service }}
 
       # Smoke test khong can DB/RabbitMQ: xac nhan image co JRE chay duoc,
-      # co file jar va KHONG chay bang root.
+      # co file jar (dung duong dan inputs.jar-path) va KHONG chay bang root.
       - name: Smoke test image
         if: ${{ !inputs.push-image }}
+        env:
+          SMOKE_TAG: ${{ steps.meta.outputs.smoke_tag }}
+          JAR_PATH: ${{ inputs.jar-path }}
         run: |
-          docker run --rm --entrypoint sh "${{ steps.meta.outputs.smoke_tag }}" -c '
+          docker run --rm --entrypoint sh -e "JAR_PATH=$JAR_PATH" "$SMOKE_TAG" -c '
             set -e
             java -version
-            test -s /app/app.jar || { echo "THIEU /app/app.jar"; exit 1; }
+            test -s "$JAR_PATH" || { echo "THIEU $JAR_PATH trong image"; exit 1; }
             [ "$(id -u)" -ne 0 ] || { echo "Image dang chay bang root"; exit 1; }
-            echo "OK: jar=$(du -h /app/app.jar | cut -f1) user=$(id -un)"
+            echo "OK: jar=$(du -h "$JAR_PATH" | cut -f1) user=$(id -un)"
           '
 
       - name: Tom tat
@@ -173,5 +224,6 @@ jobs:
             echo "### ${{ inputs.service }}"
             echo ""
             echo "- Image: \`${{ steps.meta.outputs.smoke_tag }}\`"
+            echo "- JDK: \`${{ inputs.java-version }}\`"
             echo "- Push len registry: \`${{ inputs.push-image }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

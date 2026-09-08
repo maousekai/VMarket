@@ -23,10 +23,15 @@ ARG SERVICE_NAME=product-service
 ARG SERVICE_PORT=8084
 
 # --- Base image dung chung (nang version tap trung o day) ---
+# JAVA_VERSION la MOT CHO DUY NHAT khai bao JDK cho ca build lan runtime.
+# CI truyen lai gia tri nay qua build-args, lay tu input java-version cua
+# .github/workflows/service-ci.yml -> doi JDK o file goi CI thi image di theo,
+# khong con canh "test chay JDK 21 ma image van JDK 17".
+ARG JAVA_VERSION=17
 # maven:3.9-* khop voi Maven Wrapper cua repo (services/.mvn -> 3.9.x)
-ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-17
+ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-${JAVA_VERSION}
 # JRE slim: chi co moi truong chay, khong kem JDK/compiler
-ARG RUNTIME_IMAGE=eclipse-temurin:17-jre-alpine
+ARG RUNTIME_IMAGE=eclipse-temurin:${JAVA_VERSION}-jre-alpine
 # Profile mac dinh bake vao image. Runtime van ghi de duoc bang bien
 # SPRING_PROFILES_ACTIVE (xem .env.example / .env.prod.example cua service).
 ARG SPRING_PROFILE=dev
