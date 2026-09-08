@@ -20,33 +20,58 @@ Frontend mẫu (React + Vite) làm khung cho Web end-user / Web Admin của dự
 # 1. Cài dependencies
 npm install
 
-# 2. Tạo file môi trường từ mẫu
-cp .env.example .env      # Windows: copy .env.example .env
-
-# 3. Chạy dev server
+# 2. Chạy dev server
 npm run dev
 ```
 
-Mở `http://localhost:5173`. Trang chủ sẽ gọi thử API health-check của backend — nếu backend đang chạy ở `http://localhost:8080` bạn sẽ thấy thông báo **kết nối API thành công** (đã cấu hình CORS ở backend cho phép `localhost:5173` và `localhost:3000`).
+Mở `http://localhost:5173`. Trang chủ gọi API health-check qua đường dẫn tương
+đối `/api/auth/health`; dev server proxy tiếp sang API Gateway
+`http://localhost:8080` (xem `vite.config.js`) nên request **cùng origin**,
+không dính CORS. Chỉ cần tạo `.env` từ `.env.example` khi muốn đổi mặc định.
 
 ## Scripts
 
-| Lệnh                 | Chức năng                        |
-| -------------------- | -------------------------------- |
-| `npm run dev`        | Chạy dev server (hot reload)     |
-| `npm run build`      | Build production vào `dist/`     |
-| `npm run preview`    | Xem thử bản build                |
-| `npm run lint`       | Kiểm tra code bằng ESLint        |
-| `npm run format`     | Format code bằng Prettier        |
-| `npm run format:check` | Kiểm tra format (dùng cho CI)  |
+| Lệnh                   | Chức năng                     |
+| ---------------------- | ----------------------------- |
+| `npm run dev`          | Chạy dev server (hot reload)  |
+| `npm run build`        | Build production vào `dist/`  |
+| `npm run preview`      | Xem thử bản build             |
+| `npm run lint`         | Kiểm tra code bằng ESLint     |
+| `npm run format`       | Format code bằng Prettier     |
+| `npm run format:check` | Kiểm tra format (dùng cho CI) |
 
 ## Biến môi trường
 
-| Biến               | Mặc định                 | Ý nghĩa                        |
-| ------------------ | ------------------------ | ------------------------------ |
-| `VITE_API_BASE_URL` | `http://localhost:8080` | Base URL của API Gateway/BE    |
+| Biến                  | Mặc định                | Ý nghĩa                                                                                                                                                                        |
+| --------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VITE_DEV_API_TARGET` | `http://localhost:8080` | Đích proxy `/api` của dev server (chỉ dùng khi `npm run dev`)                                                                                                                  |
+| `VITE_API_BASE_URL`   | _(rỗng)_                | Base URL API bake vào bundle. Rỗng = gọi tương đối `/api` cùng origin (khuyến nghị). Chỉ điền khi cố ý gọi thẳng Gateway ở origin khác — khi đó BE phải bật CORS cho origin FE |
 
 > File `.env` không được commit (đã gitignore). Chỉ commit `.env.example` làm mẫu.
+
+## Chạy bằng Docker
+
+```bash
+docker compose up -d --build frontend    # http://localhost:5173
+```
+
+Image multi-stage: build bằng `node:22-alpine`, phục vụ `dist/` bằng
+`nginx:1.28-alpine` (chạy non-root). nginx đảm nhiệm 2 việc:
+
+- **SPA routing** — route của react-router không trùng file tĩnh đều fallback về
+  `index.html` (không 404), asset có hash được cache 1 năm.
+- **Reverse proxy** `/api/*` sang API Gateway → browser gọi cùng origin nên
+  **không dính CORS/preflight**.
+
+Đích proxy đổi được lúc runtime bằng biến `API_GATEWAY_URL`
+(mặc định `http://api-gateway:8080`) — **không cần build lại image**, vì
+`default.conf.template` được envsubst lúc container khởi động.
+
+| File                    | Vai trò                                                    |
+| ----------------------- | ---------------------------------------------------------- |
+| `Dockerfile`            | Multi-stage build → image nginx tĩnh                       |
+| `nginx.conf`            | Cấu hình mức `http` (gzip, temp path cho non-root, map WS) |
+| `default.conf.template` | `server` block: SPA fallback + reverse proxy `/api`        |
 
 ## Cấu trúc thư mục
 
