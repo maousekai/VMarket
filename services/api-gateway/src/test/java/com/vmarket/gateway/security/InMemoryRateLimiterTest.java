@@ -28,4 +28,17 @@ class InMemoryRateLimiterTest {
 		org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> new InMemoryRateLimiter(0, 60));
 		org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> new InMemoryRateLimiter(10, 0));
 	}
+
+	@Test
+	void evictsStaleBucketsWhenWindowAdvances() {
+		InMemoryRateLimiter limiter = new InMemoryRateLimiter(5, 60);
+		limiter.tryAcquire("ip-1");
+		limiter.tryAcquire("ip-2");
+		assertThat(limiter.bucketCount()).isEqualTo(2);
+
+		// Khi cửa sổ trôi sang tương lai, các bucket cũ bị dọn dẹp
+		long futureWindow = (System.currentTimeMillis() / 1000 / 60) + 10;
+		limiter.evictStaleBuckets(futureWindow);
+		assertThat(limiter.bucketCount()).isEqualTo(0);
+	}
 }

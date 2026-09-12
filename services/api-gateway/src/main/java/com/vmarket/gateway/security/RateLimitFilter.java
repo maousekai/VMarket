@@ -22,17 +22,25 @@ import jakarta.servlet.http.HttpServletResponse;
  * Rate limit cơ bản (fixed-window theo IP) chạy trước tầng xác thực để che luôn
  * các endpoint public (vd đăng nhập) khỏi bị brute-force.
  *
- * <p>Khoá đếm là client IP: ưu tiên {@code X-Forwarded-For} (phần tử đầu tiên),
- * fallback {@code getRemoteAddr()}. Preflight OPTIONS được bỏ qua để không làm hỏng
- * CORS (do {@code CorsConfig} xử lý).
+ * <p>Khoá đếm là địa chỉ client THỰC: {@code getRemoteAddr()} — KHÔNG dùng
+ * {@code X-Forwarded-For} vì gateway là điểm biên (network edge), header này do
+ * client tự đặt được, kẻ tấn công chỉ cần xoay XFF là né per-IP limit. Khi tương
+ * lai đặt reverse-proxy đáng tin trước gateway mới bật tin cậy XFF (kèm cơ chế
+ * trusted-proxy). Preflight OPTIONS được bỏ qua để không làm hỏng CORS (do
+ * {@code CorsConfig} xử lý).
+ *
+ * <p><b>Miễn trừ rate limit (L-2):</b> {@code /actuator/**} và {@code /error} được bỏ
+ * qua để không làm gián đoạn health check và giám sát hệ thống.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class RateLimitFilter extends OncePerRequestFilter {
 
 	private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
+	private static final java.util.List<String> EXEMPT_PATHS = java.util.List.of("/actuator/**", "/error");
 
 	private final InMemoryRateLimiter limiter;
+	private final org.springframework.util.AntPathMatcher pathMatcher = new org.springframework.util.AntPathMatcher();
 
 	public RateLimitFilter(RateLimitProperties properties) {
 		this.limiter = properties.isEnabled()
@@ -43,7 +51,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
-		if (limiter == null || CorsUtils.isPreFlightRequest(request)) {
+		if (limiter == null || CorsUtils.isPreFlightRequest(request) || isExempt(request)) {
 			filterChain.doFilter(request, response);
 			return;
 		}
@@ -57,12 +65,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
 		filterChain.doFilter(request, response);
 	}
 
-	private String resolveClientIp(HttpServletRequest request) {
-		String forwardedFor = request.getHeader("X-Forwarded-For");
-		if (forwardedFor != null && !forwardedFor.isBlank()) {
-			int comma = forwardedFor.indexOf(',');
-			return comma > 0 ? forwardedFor.substring(0, comma).trim() : forwardedFor.trim();
+	private boolean isExempt(HttpServletRequest request) {
+		String path = request.getRequestURI();
+		for (String pattern : EXEMPT_PATHS) {
+			if (pathMatcher.match(pattern, path)) {
+				return true;
+			}
 		}
+		return false;
+	}
+
+	private String resolveClientIp(HttpServletRequest request) {
 		return request.getRemoteAddr();
 	}
 

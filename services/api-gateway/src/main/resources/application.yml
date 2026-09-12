@@ -89,7 +89,10 @@ app:
   security:
     # Public moi HTTP method (dang ky/dang nhap, health, swagger, error)
     public-paths:
-      - /api/auth/**
+      - /api/auth/login
+      - /api/auth/register
+      - /api/auth/refresh
+      - /api/auth/health
       - /actuator/**
       - /v3/api-docs/**
       - /v3/api-docs.yaml

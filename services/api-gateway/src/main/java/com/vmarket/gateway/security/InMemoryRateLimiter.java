@@ -11,6 +11,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Mỗi khoá giữ một "bucket" gồm {@code window} (định danh cửa sổ hiện tại) và
  * bộ đếm. Khi cửa sổ trôi sang mới thì reset đếm về 0. Thao tác trên một bucket
  * được {@code synchronized} để tránh race trong cùng một khoá.
+ *
+ * <p><b>Dọn dẹp bộ nhớ (M-2):</b> Khi cửa sổ thời gian chuyển sang mới, các bucket
+ * thuộc cửa sổ cũ được dọn dẹp (evict) để tránh rò rỉ bộ nhớ vô hạn theo thời gian.
  */
 public class InMemoryRateLimiter {
 
@@ -26,6 +29,7 @@ public class InMemoryRateLimiter {
 	private final int capacity;
 	private final long windowSeconds;
 	private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
+	private final java.util.concurrent.atomic.AtomicLong lastCleanupWindow = new java.util.concurrent.atomic.AtomicLong(0);
 
 	public InMemoryRateLimiter(int capacity, int windowSeconds) {
 		if (capacity <= 0) {
@@ -47,6 +51,8 @@ public class InMemoryRateLimiter {
 		long now = System.currentTimeMillis() / 1000;
 		long windowId = now / windowSeconds;
 
+		evictIfWindowChanged(windowId);
+
 		Bucket bucket = buckets.computeIfAbsent(key, k -> new Bucket(windowId));
 		synchronized (bucket) {
 			if (bucket.window != windowId) {
@@ -55,5 +61,28 @@ public class InMemoryRateLimiter {
 			}
 			return bucket.count.incrementAndGet() <= capacity;
 		}
+	}
+
+	private void evictIfWindowChanged(long currentWindowId) {
+		long last = lastCleanupWindow.get();
+		if (currentWindowId > last && lastCleanupWindow.compareAndSet(last, currentWindowId)) {
+			evictStaleBuckets(currentWindowId);
+		}
+	}
+
+	/**
+	 * Dọn dẹp các bucket của các cửa sổ cũ hơn {@code currentWindowId} (M-2).
+	 */
+	public void evictStaleBuckets(long currentWindowId) {
+		buckets.entrySet().removeIf(entry -> {
+			Bucket b = entry.getValue();
+			synchronized (b) {
+				return b.window < currentWindowId;
+			}
+		});
+	}
+
+	int bucketCount() {
+		return buckets.size();
 	}
 }

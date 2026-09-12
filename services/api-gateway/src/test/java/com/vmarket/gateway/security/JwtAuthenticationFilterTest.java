@@ -35,7 +35,12 @@ class JwtAuthenticationFilterTest {
 		jwtProps.setSecret(SECRET);
 
 		GatewaySecurityProperties security = new GatewaySecurityProperties();
-		security.setPublicPaths(List.of("/api/auth/**", "/actuator/**"));
+		security.setPublicPaths(List.of(
+				"/api/auth/login",
+				"/api/auth/register",
+				"/api/auth/refresh",
+				"/api/auth/health",
+				"/actuator/**"));
 		security.setPublicGetPaths(List.of("/api/products/**"));
 
 		filter = new JwtAuthenticationFilter(new JwtService(jwtProps), security);
@@ -48,6 +53,7 @@ class JwtAuthenticationFilterTest {
 				.claim("email", "an@example.com")
 				.claim("username", "an.nguyen")
 				.claim("roles", List.of("BUYER", "SELLER"))
+				.claim("email_verified", true)
 				.issuedAt(Date.from(issuedAt))
 				.expiration(Date.from(expiresAt))
 				.signWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8)), Jwts.SIG.HS256)
@@ -124,5 +130,56 @@ class JwtAuthenticationFilterTest {
 				.isEqualTo("an@example.com");
 		assertThat(downstream.get().getHeader(JwtAuthenticationFilter.HEADER_USER_USERNAME))
 				.isEqualTo("an.nguyen");
+		assertThat(downstream.get().getHeader(JwtAuthenticationFilter.HEADER_USER_EMAIL_VERIFIED))
+				.isEqualTo("true");
+	}
+
+	@Test
+	void publicPath_stripsClientSuppliedXUserHeaders() throws Exception {
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		AtomicReference<HttpServletRequest> downstream = new AtomicReference<>();
+		FilterChain chain = (req, resp) -> downstream.set((HttpServletRequest) req);
+
+		// Client gửi request public nhưng cố gắng spoof X-User-Id
+		MockHttpServletRequest req = request("POST", "/api/auth/login", null);
+		req.addHeader(JwtAuthenticationFilter.HEADER_USER_ID, "spoofed-user-id");
+		req.addHeader(JwtAuthenticationFilter.HEADER_USER_ROLES, "ADMIN");
+
+		filter.doFilter(req, new MockHttpServletResponse(), chain);
+
+		assertThat(res.getStatus()).isEqualTo(200);
+		// Header spoofed phải bị strip hoàn toàn (identity map rỗng)
+		assertThat(downstream.get().getHeader(JwtAuthenticationFilter.HEADER_USER_ID)).isNull();
+		assertThat(downstream.get().getHeader(JwtAuthenticationFilter.HEADER_USER_ROLES)).isNull();
+	}
+
+	@Test
+	void protectedPath_validToken_overridesSpoofedHeaders() throws Exception {
+		String valid = token(Instant.now(), Instant.now().plusSeconds(60));
+
+		AtomicReference<HttpServletRequest> downstream = new AtomicReference<>();
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		FilterChain chain = (req, resp) -> downstream.set((HttpServletRequest) req);
+
+		MockHttpServletRequest req = request("GET", "/api/orders/123", "Bearer " + valid);
+		// Client cố gắng spoof header khi có token hợp lệ
+		req.addHeader(JwtAuthenticationFilter.HEADER_USER_ID, "spoofed-user-id");
+		req.addHeader(JwtAuthenticationFilter.HEADER_USER_ROLES, "ADMIN");
+
+		filter.doFilter(req, res, chain);
+
+		assertThat(res.getStatus()).isEqualTo(200);
+		// Header phải là giá trị từ JWT, không phải spoof
+		assertThat(downstream.get().getHeader(JwtAuthenticationFilter.HEADER_USER_ID))
+				.isEqualTo("01JRX8Z0M0P8QF3W9K2T7Y6C4B");
+		assertThat(downstream.get().getHeader(JwtAuthenticationFilter.HEADER_USER_ROLES))
+				.isEqualTo("BUYER,SELLER");
+	}
+
+	@Test
+	void authProtectedEndpoint_withoutToken_rejected() throws Exception {
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		filter.doFilter(request("GET", "/api/auth/me", null), res, new MockFilterChain());
+		assertThat(res.getStatus()).isEqualTo(401);
 	}
 }

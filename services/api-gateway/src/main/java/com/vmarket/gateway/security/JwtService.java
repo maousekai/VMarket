@@ -36,6 +36,9 @@ public class JwtService {
 	/**
 	 * Parse + xác minh chữ ký, issuer và thời hạn của token.
 	 *
+	 * <p>Cho phép lệch đồng hồ 30 giây ({@code clockSkewSeconds}) để tránh 401 oan
+	 * cho token còn hợp lệ khi đồng hồ giữa auth-service và gateway lệch nhẹ.
+	 *
 	 * @return claims của token hợp lệ
 	 * @throws io.jsonwebtoken.JwtException       signature sai / hết hạn / sai issuer
 	 * @throws IllegalArgumentException           token rỗng / không parse được
@@ -44,6 +47,7 @@ public class JwtService {
 		return Jwts.parser()
 				.verifyWith(key)
 				.requireIssuer(ISSUER)
+				.clockSkewSeconds(30)
 				.build()
 				.parseSignedClaims(token)
 				.getPayload();
