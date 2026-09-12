@@ -9,8 +9,9 @@
 #       business service chay local qua scripts/vmarket - mvnw).
 #       Doi host dich vu bang bien BACKEND_SERVICES_HOST trong .env
 #       (vd container hoa service thi dat la ten service trong network).
-#     + frontend (localhost:5173): SPA nginx; bundle duoc bake
-#       VITE_API_BASE_URL (bien .env) de browser goi truc tiep Gateway.
+#     + frontend (localhost:5173): SPA nginx; browser goi /api/... cung
+#       origin, nginx reverse proxy sang api-gateway trong network (PBL6-3)
+#       nen khong dinh CORS.
 # - Business service van them block rieng khi can, DUNG CHUNG config qua
 #   anchor `*common-environment` (xem mau block ben duoi).
 # - Tat ca service cung nam trong network chung "vmarket-network" (PBL6-9),
@@ -258,19 +259,24 @@ services:
       - "host.docker.internal:host-gateway"
 
   # Frontend - React + Vite (SPA tinh phuc vu bang nginx; mo: http://localhost:5173).
-  # Browser tren may host goi truc tiep Gateway qua VITE_API_BASE_URL
-  # (bake vao bundle luc build); frontend van nam trong vmarket-network
-  # de dong nhat voi cac service khac (khong bat buoc cho luong chinh).
+  # Browser goi duong dan tuong doi /api/... ve chinh origin cua FE, nginx
+  # trong container reverse proxy tiep sang api-gateway qua vmarket-network
+  # => cung origin, khong dinh CORS/preflight (PBL6-3).
   frontend:
     build:
       context: ./frontend
       args:
-        # URL Gateway ma trinh duyet goi truc tiep (Vite bake vao bundle luc build)
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+        # De RONG: bundle goi /api tuong doi (di qua nginx proxy o tren).
+        # Chi dien URL khi co chu dinh cho browser goi THANG Gateway o origin
+        # khac - luc do BE phai cho phep origin FE trong CORS_ALLOWED_ORIGINS.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     container_name: vmarket-frontend
     networks:
       - vmarket-network
     mem_limit: 64m
+    environment:
+      # Dich den cua reverse proxy /api/* - doi duoc luc runtime, khong build lai
+      API_GATEWAY_URL: ${API_GATEWAY_URL:-http://api-gateway:8080}
     ports:
       - "${FRONTEND_PORT:-5173}:8080"
     depends_on:

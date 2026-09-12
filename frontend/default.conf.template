@@ -1,0 +1,71 @@
+# Server block cua frontend. File nay la TEMPLATE: entrypoint cua image nginx
+# chay envsubst thay ${API_GATEWAY_URL} va ${NGINX_RESOLVER} (dat trong
+# Dockerfile / docker-compose.yml) roi ghi ra /etc/nginx/conf.d/default.conf.
+# Nho vay doi dia chi Gateway chi can sua bien moi truong, KHONG build lai image.
+
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Endpoint noi bo cho HEALTHCHECK cua container (khong dung index.html)
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # ---- Reverse proxy: /api/* -> API Gateway ----
+    # Browser goi cung origin voi FE (http://localhost:5173/api/...) nen KHONG
+    # co cross-origin => khong dinh CORS/preflight. nginx chuyen tiep sang
+    # Gateway trong network noi bo cua docker.
+    location /api/ {
+        # DNS noi bo cua Docker. Resolve TUNG REQUEST (nho bien $gateway ben
+        # duoi) thay vi resolve mot lan luc khoi dong:
+        #   - Gateway chua chay thi nginx van start duoc (tra 502, khong crash).
+        #   - Gateway recreate doi IP thi nginx bat duoc IP moi, khong can restart.
+        resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+        resolver_timeout 5s;
+
+        set $gateway "${API_GATEWAY_URL}";
+        # proxy_pass co bien thi nginx KHONG tu gan URI -> phai noi $request_uri
+        # (giu nguyen ca duong dan /api/... lan query string).
+        proxy_pass $gateway$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+
+        # Nang cap WebSocket/SSE khi client yeu cau (map o nginx.conf)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # ---- File tinh ----
+    # JS/CSS do Vite build co hash trong ten file => cache dai
+    location /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # index.html khong cache de phien ban moi duoc nap ngay
+    location = /index.html {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache";
+    }
+
+    # SPA fallback: route cua react-router (vd /about) khong trung file tinh
+    # deu tra index.html de client-side routing tu xu ly, khong 404.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

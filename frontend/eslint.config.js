@@ -28,5 +28,13 @@ export default [
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  // File cau hinh chay bang Node (vite.config.js dung process.cwd()), khong
+  // phai code chay tren browser -> mo them bo global cua Node.
+  {
+    files: ['*.config.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
   eslintConfigPrettier,
 ]
