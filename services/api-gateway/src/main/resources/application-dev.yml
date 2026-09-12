@@ -1,0 +1,7 @@
+# Cấu hình chỉ cho profile 'dev' (local). Không dùng ở prod.
+# Giá trị giả rõ ràng để chạy `mvnw spring-boot:run` không cần set biến môi trường.
+# Secret này PHẢI TRÙNG với auth-service (application-dev.yml của auth-service).
+# Khi chạy qua docker compose, biến AUTH_JWT_SECRET từ `.env` gốc sẽ ghi đè.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}

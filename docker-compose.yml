@@ -244,6 +244,9 @@ services:
       <<: *service-urls
       # Override rieng cho auth-service (chay trong network, khong qua host)
       AUTH_SERVICE_URL: http://auth-service:8081
+      # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
+      # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
       # Origin FE duoc phep goi API qua gateway (phai trung voi FRONTEND_PORT).
       # Spring relaxed binding: APP_CORS_ALLOWED_ORIGINS -> app.cors.allowed-origins
       APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}

@@ -76,6 +76,39 @@ management:
       exposure:
         include: health,info
 
+# JWT - doc tu bien moi truong, KHONG hardcode secret that vao repo.
+# Secret nay PHAI TRUNG voi AUTH_JWT_SECRET cua auth-service (cung khoa HS256)
+# de gateway tu verify token auth-service ky. Khong co default o file base:
+# muon chay local mvnw thi set AUTH_JWT_SECRET hoac dung application-dev.yml.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
+
+# Chinh sach route public / protected (xem GatewaySecurityProperties).
+app:
+  security:
+    # Public moi HTTP method (dang ky/dang nhap, health, swagger, error)
+    public-paths:
+      - /api/auth/login
+      - /api/auth/register
+      - /api/auth/refresh
+      - /api/auth/health
+      - /actuator/**
+      - /v3/api-docs/**
+      - /v3/api-docs.yaml
+      - /swagger-ui/**
+      - /swagger-ui.html
+      - /error
+    # Chi public voi GET/HEAD (xem hang khong can dang nhap)
+    public-get-paths:
+      - /api/products/**
+      - /api/shops/**
+  # Rate limit co ban (fixed-window theo IP). Xem RateLimitProperties.
+  rate-limit:
+    enabled: ${APP_RATE_LIMIT_ENABLED:true}
+    capacity: ${APP_RATE_LIMIT_CAPACITY:200}
+    window-seconds: ${APP_RATE_LIMIT_WINDOW_SECONDS:60}
+
 info:
   app:
     name: ${spring.application.name}
