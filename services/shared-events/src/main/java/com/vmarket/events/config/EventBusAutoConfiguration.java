@@ -75,6 +75,7 @@ public class EventBusAutoConfiguration {
 	@Bean
 	@ConditionalOnProperty(prefix = "app.events", name = "listen", havingValue = "true")
 	Declarables eventDeclarables(EventBusProperties properties, TopicExchange exchange) {
+		validateQueueConfigured(properties);
 		Queue queue = new Queue(properties.getQueue(), true, false, false);
 		List<Declarable> declarables = new ArrayList<>();
 		declarables.add(queue);
@@ -89,11 +90,19 @@ public class EventBusAutoConfiguration {
 	@ConditionalOnProperty(prefix = "app.events", name = "listen", havingValue = "true")
 	SimpleMessageListenerContainer eventListenerContainer(ConnectionFactory connectionFactory,
 			EventBusProperties properties, EventConsumerDispatcher dispatcher, EventsJson json) {
+		validateQueueConfigured(properties);
 		SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
 		container.setQueueNames(properties.getQueue());
 		container.setMessageListener((MessageListener) message -> {
 			dispatcher.dispatch(json.readEnvelope(message.getBody()));
 		});
 		return container;
+	}
+
+	private void validateQueueConfigured(EventBusProperties properties) {
+		if (properties.getQueue() == null || properties.getQueue().isBlank()) {
+			throw new IllegalStateException(
+					"app.events.queue không được để trống khi app.events.listen=true (quy ước: <service>.events)");
+		}
 	}
 }

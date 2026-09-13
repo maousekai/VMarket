@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import com.vmarket.events.EventPublisher;
 import com.vmarket.events.EventType;
 import com.vmarket.events.ProductCreated;
+import com.vmarket.events.ProductUpdated;
 
 /**
  * Cổng phát sự kiện sản phẩm của Product Catalog.
@@ -29,7 +30,7 @@ public class ProductEventPublisher {
 	}
 
 	/** Phát sự kiện {@code ProductUpdated}. */
-	public void publishUpdated(ProductCreated payload) {
+	public void publishUpdated(ProductUpdated payload) {
 		eventPublisher.publish(EventType.PRODUCT_UPDATED, payload);
 	}
 }

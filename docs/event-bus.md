@@ -123,6 +123,7 @@ channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_
 | `PaymentSucceeded` / `PaymentFailed` | Payment | Order, Notification |
 | `DeliveryAssigned` | Delivery | Notification |
 | `ReviewCreated` | Review | Notification, Product |
+| `UserBehaviorTracked` | Gateway / Clients | Recommendation |
 
 ## 6. Demo end-to-end (PBL6-39)
 

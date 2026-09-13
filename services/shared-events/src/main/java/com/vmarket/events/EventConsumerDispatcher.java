@@ -1,5 +1,8 @@
 package com.vmarket.events;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Định tuyến một {@link EventEnvelope} đã nhận về tới các {@link EventConsumer}
  * khớp {@code eventType}, đồng thời chuyển payload JSON sang đúng kiểu Java mà
@@ -10,6 +13,8 @@ package com.vmarket.events;
  * retry/DLQ sẽ được bổ sung ở giai đoạn sau.
  */
 public class EventConsumerDispatcher {
+
+	private static final Logger log = LoggerFactory.getLogger(EventConsumerDispatcher.class);
 
 	private final EventConsumerRegistry registry;
 	private final EventsJson json;
@@ -28,7 +33,12 @@ public class EventConsumerDispatcher {
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private <T> void handle(EventConsumer<T> consumer, EventEnvelope envelope) {
-		T payload = json.convert(envelope.payload(), consumer.payloadType());
-		consumer.handle(payload, envelope);
+		try {
+			T payload = json.convert(envelope.payload(), consumer.payloadType());
+			consumer.handle(payload, envelope);
+		} catch (Exception ex) {
+			log.error("Lỗi khi xử lý sự kiện {} trên consumer {}: {}",
+					envelope.eventType(), consumer.getClass().getName(), ex.getMessage(), ex);
+		}
 	}
 }

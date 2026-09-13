@@ -59,4 +59,39 @@ class EventConsumerDispatcherTest {
 
 		assertThat(consumer.received).isEmpty();
 	}
+
+	static class FailingConsumer implements EventConsumer<ProductCreated> {
+		@Override
+		public String eventType() {
+			return EventType.PRODUCT_CREATED;
+		}
+
+		@Override
+		public Class<ProductCreated> payloadType() {
+			return ProductCreated.class;
+		}
+
+		@Override
+		public void handle(ProductCreated payload, EventEnvelope envelope) {
+			throw new RuntimeException("Simulated consumer failure");
+		}
+	}
+
+	@Test
+	void dispatch_failingConsumerDoesNotStopOtherConsumers() {
+		FailingConsumer failingConsumer = new FailingConsumer();
+		RecordingConsumer succeedingConsumer = new RecordingConsumer();
+		EventConsumerRegistry registry = new EventConsumerRegistry(List.of(failingConsumer, succeedingConsumer));
+		EventConsumerDispatcher dispatcher = new EventConsumerDispatcher(registry, json);
+
+		EventEnvelope envelope = new EventEnvelope("evt", EventType.PRODUCT_CREATED, 0L,
+				new ProductCreated("p9", "s9", "Quần", java.math.BigDecimal.valueOf(200000), "ACTIVE", List.of()));
+		EventEnvelope received = json.readEnvelope(json.write(envelope));
+
+		// Dispatch không được ném ngoại lệ và succeedingConsumer vẫn phải nhận được sự kiện (NFR-REL-02)
+		dispatcher.dispatch(received);
+
+		assertThat(succeedingConsumer.received).hasSize(1);
+		assertThat(succeedingConsumer.received.get(0).productId()).isEqualTo("p9");
+	}
 }

@@ -46,10 +46,11 @@ def _on_message(ch, method, _properties, body: bytes) -> None:
             handler(event_type, envelope.get("payload") or {})
         else:
             print(f"[event] bo qua su kien {event_type}", flush=True)
-    except Exception as exc:  # noqa: BLE001 - log rồi vẫn ack để không kẹt queue
-        print(f"[event] loi xu ly thong diep: {exc}", flush=True)
-    finally:
         ch.basic_ack(delivery_tag=method.delivery_tag)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[event] loi xu ly thong diep: {exc}", flush=True)
+        # Nack khong requeue de tranh loop vo tan; san sang cho DLQ (docs/event-bus.md §7)
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
 def _connection_parameters() -> pika.ConnectionParameters:

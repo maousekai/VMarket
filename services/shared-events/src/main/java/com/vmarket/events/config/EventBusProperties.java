@@ -24,7 +24,10 @@ public class EventBusProperties {
 	 */
 	private boolean listen = false;
 
-	/** Tên queue của service khi bật listen (quy ước: {@code <service>.events}). */
+	/**
+	 * Tên queue của service khi bật listen (bắt buộc cấu hình khi {@code listen=true},
+	 * quy ước: {@code <service>.events}).
+	 */
 	private String queue = "";
 
 	/** Danh sách routing key (tên sự kiện) mà queue này bind tới exchange. */
