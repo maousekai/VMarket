@@ -34,3 +34,8 @@ auth:
     max-attempts: 5
     resend-cooldown: 60s
     hourly-limit: 5
+  password-reset:
+    ttl: 5m
+    max-attempts: 5
+    resend-cooldown: 60s
+    hourly-limit: 5
