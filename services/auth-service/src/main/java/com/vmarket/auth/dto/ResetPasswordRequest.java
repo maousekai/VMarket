@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /** Xác nhận mã và đặt mật khẩu mới (FR-AUTH-04). */
 @Schema(name = "ResetPasswordRequest")
@@ -12,6 +13,7 @@ public record ResetPasswordRequest(
 		@Schema(example = "an.nguyen@example.com")
 		@NotBlank(message = "Email không được để trống")
 		@Email(message = "Email không đúng định dạng")
+		@Size(max = 320, message = "Email tối đa 320 ký tự")
 		String email,
 
 		@Schema(example = "482913")
