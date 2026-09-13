@@ -12,6 +12,9 @@ import lombok.extern.slf4j.Slf4j;
  * cần API key.
  *
  * <p>Kích hoạt khi {@code auth.email.provider=log} hoặc không đặt (mặc định).
+ * Ở profile {@code prod}, cấu hình này bị coi là lỗi khởi động (fail-fast) thay
+ * vì chỉ cảnh báo — tránh trường hợp quên set {@code AUTH_EMAIL_PROVIDER=brevo}
+ * khiến OTP bị ghi vào log production thay vì gửi email thật.
  */
 @Slf4j
 @Component
@@ -21,7 +24,8 @@ public class LogEmailSender implements EmailSender {
 	public LogEmailSender(Environment env) {
 		for (String profile : env.getActiveProfiles()) {
 			if ("prod".equalsIgnoreCase(profile)) {
-				log.warn("auth.email.provider=log ở profile 'prod' — email (và mã OTP) chỉ được ghi log, KHÔNG gửi đi!");
+				throw new IllegalStateException(
+						"auth.email.provider=log không được phép ở profile 'prod' — set AUTH_EMAIL_PROVIDER=brevo (và BREVO_API_KEY) trước khi khởi động");
 			}
 		}
 	}
