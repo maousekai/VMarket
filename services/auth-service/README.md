@@ -135,6 +135,8 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
 | `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
 | `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token (xoay vòng). 200 / 401 (`INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`) |
+| `POST /api/auth/otp/request` | FR-AUTH-01 — gửi mã OTP xác thực email. 200 / 400 `VALIDATION_ERROR` / 429 (`OTP_RESEND_TOO_SOON`, `OTP_RATE_LIMITED`) / 502 `EMAIL_SEND_FAILED` |
+| `POST /api/auth/otp/verify`  | FR-AUTH-01 — xác nhận OTP → `email_verified=true` + `TokenResponse`. 200 / 400 (`OTP_NOT_FOUND`, `OTP_EXPIRED`, `OTP_INVALID`, `OTP_TOO_MANY_ATTEMPTS`, `OTP_ALREADY_USED`) |
 | `GET  /api/auth/health`  | Health-check                                              |
 
 Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
@@ -155,13 +157,23 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - User `email_verified = false` **vẫn đăng nhập được**, response `status = PENDING`
   (client hiển thị màn hình thông báo, chưa cho vào hệ thống bình thường).
 
+**Xác thực email bằng OTP (FR-AUTH-01, migration V4):**
+- `otp/request` → mã 6 số (`SecureRandom`), lưu **hash BCrypt** + hạn 5 phút vào
+  bảng `email_otp`; gửi qua `EmailSender` (`auth.email.provider` = `brevo` | `log`).
+- Chặn gửi lại trong **60 giây**; tối đa **5 mã / giờ / email**.
+- `otp/verify` → sai **5 lần** thì mã vô hiệu; đúng thì `email_verified=true`
+  (tạo tài khoản mới **không mật khẩu** nếu email chưa có user) và trả `TokenResponse`
+  (auto-login, dùng chung `TokenIssuer` với `/login`).
+- Tài khoản tạo qua OTP có `password_hash = NULL` → không đăng nhập bằng mật khẩu
+  được (dùng lại OTP để vào).
+
 ## Roadmap nghiệp vụ (theo SRS)
 
 - [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
-- [x] FR-AUTH-01 (PBL6-42): tạo tài khoản (`POST /api/auth/register`, migration V2)
-  - [ ] gửi email xác thực tài khoản (OTP/link) — chưa có ticket, cần đưa vào backlog
+- [x] FR-AUTH-01 (PBL6-42): tạo tài khoản qua form (`POST /api/auth/register`, migration V2)
+- [x] FR-AUTH-01 (PBL6-44): **xác thực email bằng OTP** (`/api/auth/otp/*`, migration V4)
 - [x] FR-AUTH-02 (PBL6-43): đăng nhập JWT + refresh xoay vòng + khoá sau 5 lần sai (migration V3)
-- [ ] FR-AUTH-03 (PBL6-44): Đăng nhập Google OAuth 2.0
-- [ ] FR-AUTH-04 (PBL6-45): Quên mật khẩu
+- [ ] FR-AUTH-03 (Google OAuth 2.0) — chuyển backlog (PBL6-44 đổi phạm vi sang OTP)
+- [ ] FR-AUTH-04 (PBL6-45): Quên mật khẩu (dùng lại `EmailSender`)
 - [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
 - [ ] PBL6-47: Testing, Swagger & PR review

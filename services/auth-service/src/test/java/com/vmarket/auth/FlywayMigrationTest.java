@@ -15,7 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V2 → V3) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V4) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
  *
  * <p>Nếu context khởi động được nghĩa là: (1) các script migration chạy không lỗi,
@@ -41,19 +41,40 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("3");
-		assertThat(flyway.info().applied()).hasSize(3);
+		assertThat(current.getVersion().getVersion()).isEqualTo("4");
+		assertThat(flyway.info().applied()).hasSize(4);
 	}
 
 	@Test
-	void v3_columns_present_and_entitiesValidateAgainstMigratedSchema() throws Exception {
+	void columns_present_and_entitiesValidateAgainstMigratedSchema() throws Exception {
 		try (Connection c = dataSource.getConnection()) {
+			// V3
 			assertThat(columnExists(c, "users", "failed_login_attempts")).isTrue();
 			assertThat(columnExists(c, "users", "locked_until")).isTrue();
 			assertThat(columnExists(c, "refresh_tokens", "revoked_at")).isTrue();
 			assertThat(columnExists(c, "refresh_tokens", "replaced_by")).isTrue();
+			// V4
+			assertThat(columnExists(c, "email_otp", "code_hash")).isTrue();
+			assertThat(columnExists(c, "email_otp", "expires_at")).isTrue();
+			assertThat(columnExists(c, "email_otp", "attempts")).isTrue();
+			assertThat(columnExists(c, "email_otp", "consumed_at")).isTrue();
+			assertThat(passwordHashIsNullable(c)).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
+	}
+
+	private static boolean passwordHashIsNullable(Connection c) throws Exception {
+		DatabaseMetaData meta = c.getMetaData();
+		for (String t : new String[] { "users", "USERS" }) {
+			for (String col : new String[] { "password_hash", "PASSWORD_HASH" }) {
+				try (ResultSet rs = meta.getColumns(null, null, t, col)) {
+					if (rs.next()) {
+						return rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	private static boolean columnExists(Connection c, String table, String column) throws Exception {

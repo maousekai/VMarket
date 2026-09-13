@@ -52,3 +52,16 @@ auth:
     secret: ${AUTH_JWT_SECRET}
     access-ttl: ${AUTH_JWT_ACCESS_TTL:15m}
     refresh-ttl: ${AUTH_JWT_REFRESH_TTL:15d}
+  # Gui email OTP. provider=log (mac dinh) chi ghi log, khong gui that -> chay
+  # local/CI khong can API key. Doi sang 'brevo' + BREVO_API_KEY de gui that.
+  email:
+    provider: ${AUTH_EMAIL_PROVIDER:log}
+    from: ${AUTH_EMAIL_FROM:no-reply@vmarket.local}
+    from-name: ${AUTH_EMAIL_FROM_NAME:VMarket}
+    brevo:
+      api-key: ${BREVO_API_KEY:}
+  otp:
+    ttl: ${AUTH_OTP_TTL:5m}
+    max-attempts: ${AUTH_OTP_MAX_ATTEMPTS:5}
+    resend-cooldown: ${AUTH_OTP_RESEND_COOLDOWN:60s}
+    hourly-limit: ${AUTH_OTP_HOURLY_LIMIT:5}
