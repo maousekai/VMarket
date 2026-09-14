@@ -22,13 +22,17 @@ mục Elasticsearch (FR-SRCH-04), Recommendation nhận để cập nhật đặ
 |---|---|---|
 | Exchange | **1 topic exchange** chung cho cả hệ: `vmarket.events` (durable) | `vmarket.events` |
 | Routing key | `=` **tên sự kiện** (PascalCase, khớp SRS §8.1) | `ProductCreated` |
-| Queue | `{tên-service}.events` (durable, do chính service nhận khai báo) | `ai-search.events` |
+| Queue | `{tên-service}.events.v{n}` (durable, do chính service nhận khai báo) | `product.events.v2` |
 | Binding | Queue bind tới exchange theo từng routing key mà service nhận | `ai-search.events` ← `ProductCreated` |
-| Dead-letter | `{exchange}.dlx` và `{queue}.dead` | `vmarket.events.dlx`, `product.events.dead` |
+| Dead-letter | `{exchange}.dlx` và `{queue}.dead` | `vmarket.events.dlx`, `product.events.v2.dead` |
 
 - Exchange, queue, binding **durable** (không tự xoá) để không mất sự kiện.
 - Service phát sự kiện **không tự khai báo queue** (không cần biết ai nghe).
 - Service nhận tự khai báo queue + binding cho các sự kiện nó quan tâm.
+- Khi bổ sung hoặc thay đổi queue arguments (ví dụ DLX), phải tăng hậu tố phiên
+  bản queue. Không redeclare một durable queue cũ với arguments khác vì RabbitMQ
+  sẽ trả `PRECONDITION_FAILED`. Queue cũ chỉ được xóa sau khi đã drain và rollout
+  consumer phiên bản mới hoàn tất.
 
 ## 3. Lược đồ thông điệp (message schema)
 
@@ -93,7 +97,7 @@ public class ProductIndexConsumer implements EventConsumer<ProductCreated> {
 app:
   events:
     listen: true
-    queue: notification.events            # {tên-service}.events
+    queue: notification.events.v1         # {tên-service}.events.v{n}
     bindings:                             # routing key cần nhận
       - ProductCreated
       - OrderPlaced
@@ -120,12 +124,14 @@ channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_
 | `ProductCreated` / `ProductUpdated` / `ProductDeleted` | Product Catalog | AI Search, Recommendation |
 | `ShopApproved` / `ShopSuspended` | Shop | Auth, Product Catalog, Notification |
 | `OrderPlaced` | Order | Product Catalog, Payment, Notification, Recommendation |
-| `OrderConfirmed` / `OrderCancelled` | Order | Product Catalog |
+| `OrderStatusChanged` | Order | Product Catalog, Notification, Recommendation |
 | `StockReserved` / `StockReleased` / `StockReservationFailed` | Product Catalog | Order |
 | `ProductModerated` | Product Catalog | Notification |
+| `ProductModerationRequested` | Product Catalog | Notification/Admin workflow |
 | `PaymentSucceeded` / `PaymentFailed` | Payment | Order, Notification |
 | `DeliveryAssigned` | Delivery | Notification |
 | `ReviewCreated` | Review | Notification, Product |
+| `ReturnRequested` / `ReturnResolved` | Order | Payment, Product, Notification |
 | `UserBehaviorTracked` | Gateway / Clients | Recommendation |
 
 ## 6. Kiểm thử end-to-end
@@ -135,7 +141,7 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 1. Khởi động RabbitMQ: `docker compose up -d rabbitmq`.
 2. Chạy product-service (`mvnw spring-boot:run`) và ai-search-service (`uvicorn main:app`).
 3. Đồng bộ một `ShopApproved`, sau đó tạo sản phẩm qua API Seller thật.
-4. Quan sát `ProductCreated` schema v2 trong AI Search; event giữ nguyên `eventId`
+4. Quan sát `ProductCreated` schema v3 trong AI Search; event giữ nguyên `eventId`
    khi outbox phải gửi lại.
 
 ## 7. Lưu ý / hướng phát triển sau
@@ -143,7 +149,22 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 - **Retry + DLQ** (NFR-REL-02): listener retry thêm 2 lần với exponential backoff,
   sau đó chuyển thông điệp vào `{queue}.dead` qua exchange `vmarket.events.dlx`.
 - **Transactional outbox**: Product Catalog ghi domain data và outbox trong cùng
-  Mongo transaction; worker gửi lại với exponential backoff khi RabbitMQ lỗi.
+  Mongo transaction; worker atomic-claim từng message, chờ publisher confirm và
+  kiểm tra returned message trước khi đánh dấu đã phát. Lỗi được retry với
+  exponential backoff.
 - **Idempotency**: consumer nên dựa vào `eventId` để tránh xử lý trùng (vd khi retry).
 - **Phá phiên bản schema**: khi payload thay đổi, giữ tương thích ngược hoặc bump
   version và thống nhất với các service nhận trước khi deploy.
+
+## 8. Contract Product Catalog bổ sung
+
+- Product nhận `ReviewCreated(reviewId, productId, ratingAverage, ratingCount)`;
+  payload mang aggregate mới nhất để xử lý lặp không cộng điểm hai lần.
+- Product nhận `OrderStatusChanged`; trạng thái `CANCELLED` hoàn giữ kho, còn đơn
+  COD chuyển sang `CONFIRMED`/`PREPARING` sẽ chốt kho. Thanh toán online tiếp tục
+  chốt qua `PaymentSucceeded` theo FR-PROD-02.
+- Product nhận `ReturnResolved(returnId, orderId, restock, items)` và chỉ nhập lại
+  hàng khi `restock=true`; `returnId` là khóa idempotency.
+- Shop Service bootstrap/reconcile projection qua endpoint nội bộ
+  `POST /api/products/internal/shop-access/reconcile`, tối đa 500 shop mỗi trang.
+  Snapshot cũ hơn `updatedAt` hiện có sẽ bị bỏ qua.

@@ -4,30 +4,19 @@ import java.time.Instant;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.product.exception.ApiException;
-import com.vmarket.product.event.ProductEventFactory;
-import com.vmarket.product.event.ProductEventPublisher;
-import com.vmarket.product.model.Product;
-import com.vmarket.product.model.ProductStatus;
 import com.vmarket.product.model.ShopCatalogAccess;
-import com.vmarket.product.repository.ProductRepository;
 import com.vmarket.product.repository.ShopCatalogAccessRepository;
 
 @Service
 public class ShopAccessService {
 	private final ShopCatalogAccessRepository shopRepository;
-	private final ProductRepository productRepository;
-	private final ProductEventPublisher publisher;
-	private final ProductEventFactory eventFactory;
+	private final CatalogProjectionService projections;
 
-	public ShopAccessService(ShopCatalogAccessRepository shopRepository, ProductRepository productRepository,
-			ProductEventPublisher publisher, ProductEventFactory eventFactory) {
+	public ShopAccessService(ShopCatalogAccessRepository shopRepository, CatalogProjectionService projections) {
 		this.shopRepository = shopRepository;
-		this.productRepository = productRepository;
-		this.publisher = publisher;
-		this.eventFactory = eventFactory;
+		this.projections = projections;
 	}
 
 	public void requireActiveOwner(String shopId, String sellerId) {
@@ -42,38 +31,37 @@ public class ShopAccessService {
 		}
 	}
 
-	@Transactional
 	public void approve(String shopId, String sellerId) {
-		shopRepository.save(new ShopCatalogAccess(shopId, sellerId, true, Instant.now()));
-		for (Product product : productRepository.findAllByShopIdAndDeletedAtIsNull(shopId)) {
-			if (!product.isShopSuspended()) continue;
-			product.setShopSuspended(false);
-			if (!product.isModerationRemoved()) {
-				product.setStatus(product.getStatusBeforeShopSuspension() == null
-						? ProductStatus.DRAFT : product.getStatusBeforeShopSuspension());
-			}
-			product.setStatusBeforeShopSuspension(null);
-			product.setUpdatedAt(Instant.now());
-			Product saved = productRepository.save(product);
-			publisher.publishUpdated(eventFactory.updated(saved));
-		}
+		approve(shopId, sellerId, Instant.now(), false);
 	}
 
-	@Transactional
 	public void suspend(String shopId) {
-		ShopCatalogAccess shop = shopRepository.findById(shopId).orElse(null);
-		if (shop != null) {
-			shop.setActive(false);
-			shop.setUpdatedAt(Instant.now());
-			shopRepository.save(shop);
-		}
-		for (Product product : productRepository.findAllByShopIdAndDeletedAtIsNull(shopId)) {
-			if (!product.isShopSuspended()) product.setStatusBeforeShopSuspension(product.getStatus());
-			product.setShopSuspended(true);
-			product.setStatus(ProductStatus.HIDDEN);
-			product.setUpdatedAt(Instant.now());
-			Product saved = productRepository.save(product);
-			publisher.publishUpdated(eventFactory.updated(saved));
-		}
+		suspend(shopId, Instant.now(), false);
+	}
+
+	public void approve(String shopId, String sellerId, Instant sourceUpdatedAt, boolean reconciliation) {
+		applySnapshot(shopId, sellerId, true, sourceUpdatedAt, reconciliation);
+	}
+
+	public void suspend(String shopId, Instant sourceUpdatedAt, boolean reconciliation) {
+		ShopCatalogAccess existing = shopRepository.findById(shopId).orElse(null);
+		String sellerId = existing == null ? null : existing.getSellerId();
+		applySnapshot(shopId, sellerId, false, sourceUpdatedAt, reconciliation);
+	}
+
+	public void reconcile(String shopId, String sellerId, boolean active, Instant sourceUpdatedAt) {
+		applySnapshot(shopId, sellerId, active, sourceUpdatedAt, true);
+	}
+
+	private void applySnapshot(String shopId, String sellerId, boolean active,
+			Instant sourceUpdatedAt, boolean reconciliation) {
+		Instant sourceTime = sourceUpdatedAt == null ? Instant.now() : sourceUpdatedAt;
+		ShopCatalogAccess current = shopRepository.findById(shopId).orElse(null);
+		if (current != null && current.getUpdatedAt() != null && sourceTime.isBefore(current.getUpdatedAt())) return;
+		String owner = sellerId == null && current != null ? current.getSellerId() : sellerId;
+		ShopCatalogAccess saved = new ShopCatalogAccess(shopId, owner, active, sourceTime,
+				reconciliation ? Instant.now() : current == null ? null : current.getReconciledAt());
+		shopRepository.save(saved);
+		projections.synchronizeShopProducts(shopId, active);
 	}
 }

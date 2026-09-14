@@ -106,4 +106,11 @@ public class ProductController {
 		identity.requireAdmin(roles);
 		return service.moderate(id, request.removed(), request.reason());
 	}
+
+	@PostMapping("/{id}/moderation/resubmit")
+	public ProductResponse resubmitModeration(@PathVariable String id,
+			@RequestHeader(value = "X-User-Id", required = false) String userId,
+			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
+		return service.resubmitModeration(id, identity.requireSeller(userId, roles));
+	}
 }

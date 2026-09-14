@@ -23,11 +23,14 @@ public class CategoryService {
 	private final CategoryRepository categoryRepository;
 	private final ProductRepository productRepository;
 	private final SlugService slugService;
+	private final CatalogProjectionService projections;
 
-	public CategoryService(CategoryRepository categoryRepository, ProductRepository productRepository, SlugService slugService) {
+	public CategoryService(CategoryRepository categoryRepository, ProductRepository productRepository,
+			SlugService slugService, CatalogProjectionService projections) {
 		this.categoryRepository = categoryRepository;
 		this.productRepository = productRepository;
 		this.slugService = slugService;
+		this.projections = projections;
 	}
 
 	public CategoryResponse create(CategoryRequest request) {
@@ -39,7 +42,9 @@ public class CategoryService {
 		Instant now = Instant.now();
 		Category category = new Category(null, request.name().trim(), slug, blankToNull(request.parentId()),
 				request.active(), request.sortOrder(), now, now);
-		return toResponse(categoryRepository.save(category), List.of());
+		Category saved = categoryRepository.save(category);
+		projections.synchronizeCategorySubtree(saved.getId());
+		return toResponse(saved, List.of());
 	}
 
 	public CategoryResponse update(String id, CategoryRequest request) {
@@ -55,14 +60,18 @@ public class CategoryService {
 		category.setSortOrder(request.sortOrder());
 		category.setActive(request.active());
 		category.setUpdatedAt(Instant.now());
-		return toResponse(categoryRepository.save(category), List.of());
+		Category saved = categoryRepository.save(category);
+		projections.synchronizeCategorySubtree(saved.getId());
+		return toResponse(saved, List.of());
 	}
 
 	public CategoryResponse setVisibility(String id, boolean active) {
 		Category category = getRequired(id);
 		category.setActive(active);
 		category.setUpdatedAt(Instant.now());
-		return toResponse(categoryRepository.save(category), List.of());
+		Category saved = categoryRepository.save(category);
+		projections.synchronizeCategorySubtree(saved.getId());
+		return toResponse(saved, List.of());
 	}
 
 	public void delete(String id) {

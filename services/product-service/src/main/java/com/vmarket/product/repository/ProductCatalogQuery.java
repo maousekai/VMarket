@@ -1,7 +1,6 @@
 package com.vmarket.product.repository;
 
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.regex.Pattern;
 
 import org.springframework.data.domain.Page;
@@ -24,13 +23,13 @@ public class ProductCatalogQuery {
 		this.mongoTemplate = mongoTemplate;
 	}
 
-	public Page<Product> search(String keyword, List<String> categoryIds, BigDecimal minPrice, BigDecimal maxPrice,
+	public Page<Product> search(String keyword, String categoryId, BigDecimal minPrice, BigDecimal maxPrice,
 			Double minRating, String shopId, String sort, int page, int size) {
 		Criteria criteria = Criteria.where("status").is(ProductStatus.ACTIVE)
-				.and("moderationRemoved").is(false).and("deletedAt").is(null);
-		if (categoryIds != null) {
-			if (categoryIds.isEmpty()) criteria.and("_id").exists(false);
-			else criteria.and("categoryId").in(categoryIds);
+				.and("moderationRemoved").is(false).and("shopSuspended").is(false)
+				.and("categoryVisible").is(true).and("deletedAt").is(null);
+		if (categoryId != null && !categoryId.isBlank()) {
+			criteria.and("categoryPath").is(categoryId);
 		}
 		if (keyword != null && !keyword.isBlank()) {
 			criteria.and("name").regex(Pattern.compile(Pattern.quote(keyword.trim()), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE));

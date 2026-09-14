@@ -29,9 +29,12 @@ import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
 import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.model.ReservationStatus;
+import com.vmarket.events.StockItem;
 import com.vmarket.product.repository.InventoryReservationRepository;
 import com.vmarket.product.repository.ProductRepository;
+import com.vmarket.product.repository.ReturnRestockRepository;
 import com.vmarket.product.service.InventoryService;
+import com.vmarket.product.service.InventoryInputValidator;
 import com.vmarket.product.service.ProductDerivedFields;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,12 +42,14 @@ class InventoryServiceTest {
 	@Mock ProductRepository productRepository;
 	@Mock InventoryReservationRepository reservationRepository;
 	@Mock ProductEventPublisher publisher;
+	@Mock ReturnRestockRepository returnRestockRepository;
+	@Mock InventoryInputValidator inputValidator;
 	private InventoryService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new InventoryService(productRepository, reservationRepository, publisher,
-				new ProductEventFactory(), new ProductDerivedFields());
+				new ProductEventFactory(), new ProductDerivedFields(), returnRestockRepository, inputValidator);
 	}
 
 	@Test
@@ -74,6 +79,17 @@ class InventoryServiceTest {
 				.hasMessageContaining("Không đủ tồn kho");
 		verify(productRepository, never()).saveAll(any());
 		verify(reservationRepository, never()).save(any());
+	}
+
+	@Test
+	void reserveRejectsProductInHiddenCategory() {
+		Product product = product(10, 0);
+		product.setCategoryVisible(false);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+
+		assertThatThrownBy(() -> service.reserve(request(1)))
+				.isInstanceOf(ApiException.class).hasMessageContaining("không ở trạng thái đang bán");
 	}
 
 	@Test
@@ -142,6 +158,38 @@ class InventoryServiceTest {
 		assertThat(product.getSoldCount()).isZero();
 	}
 
+	@Test
+	void resolvedReturnRestocksOnlyPurchasedQuantityAndIsIdempotent() {
+		Product product = product(7, 0);
+		product.setSoldCount(3);
+		product.getVariants().get(0).setSoldCount(3);
+		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
+		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
+		when(returnRestockRepository.findAllByOrderId("order-1")).thenReturn(List.of());
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
+		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
+
+		service.restockReturn("return-1", "order-1", List.of(new StockItem("product-1", "variant-1", 2)));
+
+		assertThat(product.getVariants().get(0).getStock()).isEqualTo(9);
+		assertThat(product.getVariants().get(0).getSoldCount()).isEqualTo(1);
+		verify(returnRestockRepository).save(any());
+		verify(publisher).publishStockReleased(any());
+	}
+
+	@Test
+	void resolvedReturnCannotRestockMoreThanWasPurchased() {
+		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
+		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
+		when(returnRestockRepository.findAllByOrderId("order-1")).thenReturn(List.of());
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
+
+		assertThatThrownBy(() -> service.restockReturn("return-1", "order-1",
+				List.of(new StockItem("product-1", "variant-1", 4))))
+				.isInstanceOf(ApiException.class).hasMessageContaining("vượt số lượng");
+	}
+
 	private InventoryRequest request(int quantity) {
 		return new InventoryRequest("order-1", List.of(new InventoryRequest.InventoryItem("product-1", "variant-1", quantity)));
 	}
@@ -156,6 +204,7 @@ class InventoryServiceTest {
 		Product product = new Product();
 		product.setId("product-1");
 		product.setStatus(ProductStatus.ACTIVE);
+		product.setCategoryVisible(true);
 		product.setVariants(new ArrayList<>(List.of(new ProductVariant("variant-1", "SKU", new HashMap<>(),
 				BigDecimal.TEN, stock, reserved, 0))));
 		return product;

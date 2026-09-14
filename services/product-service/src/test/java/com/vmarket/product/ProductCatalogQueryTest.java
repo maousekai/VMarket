@@ -28,7 +28,7 @@ class ProductCatalogQueryTest {
 		when(mongoTemplate.find(any(Query.class), eq(Product.class))).thenReturn(List.of());
 		ProductCatalogQuery query = new ProductCatalogQuery(mongoTemplate);
 
-		query.search(null, List.of("cat-1"), null, null, null, null, "PRICE_DESC", 0, 20);
+		query.search(null, "cat-1", null, null, null, null, "PRICE_DESC", 0, 20);
 
 		ArgumentCaptor<Query> dataQuery = ArgumentCaptor.forClass(Query.class);
 		org.mockito.Mockito.verify(mongoTemplate).find(dataQuery.capture(), eq(Product.class));
@@ -36,16 +36,15 @@ class ProductCatalogQueryTest {
 	}
 
 	@Test
-	void emptyPublicCategorySetCannotFallBackToAllProducts() {
+	void publicQueryAlwaysRequiresMaterializedCategoryVisibility() {
 		when(mongoTemplate.count(any(Query.class), eq(Product.class))).thenReturn(0L);
 		when(mongoTemplate.find(any(Query.class), eq(Product.class))).thenReturn(List.of());
 		ProductCatalogQuery query = new ProductCatalogQuery(mongoTemplate);
 
-		query.search(null, List.of(), null, null, null, null, "NEWEST", 0, 20);
+		query.search(null, null, null, null, null, null, "NEWEST", 0, 20);
 
 		ArgumentCaptor<Query> countQuery = ArgumentCaptor.forClass(Query.class);
 		org.mockito.Mockito.verify(mongoTemplate).count(countQuery.capture(), eq(Product.class));
-		org.bson.Document impossibleId = countQuery.getValue().getQueryObject().get("_id", org.bson.Document.class);
-		assertThat(impossibleId.getBoolean("$exists")).isFalse();
+		assertThat(countQuery.getValue().getQueryObject().getBoolean("categoryVisible")).isTrue();
 	}
 }

@@ -24,8 +24,10 @@ import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
 import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.model.ReservationStatus;
+import com.vmarket.product.model.ReturnRestock;
 import com.vmarket.product.repository.InventoryReservationRepository;
 import com.vmarket.product.repository.ProductRepository;
+import com.vmarket.product.repository.ReturnRestockRepository;
 
 @Service
 public class InventoryService {
@@ -34,19 +36,25 @@ public class InventoryService {
 	private final ProductEventPublisher publisher;
 	private final ProductEventFactory eventFactory;
 	private final ProductDerivedFields derivedFields;
+	private final ReturnRestockRepository returnRestockRepository;
+	private final InventoryInputValidator inputValidator;
 
 	public InventoryService(ProductRepository productRepository,
 			InventoryReservationRepository reservationRepository, ProductEventPublisher publisher,
-			ProductEventFactory eventFactory, ProductDerivedFields derivedFields) {
+			ProductEventFactory eventFactory, ProductDerivedFields derivedFields,
+			ReturnRestockRepository returnRestockRepository, InventoryInputValidator inputValidator) {
 		this.productRepository = productRepository;
 		this.reservationRepository = reservationRepository;
 		this.publisher = publisher;
 		this.eventFactory = eventFactory;
 		this.derivedFields = derivedFields;
+		this.returnRestockRepository = returnRestockRepository;
+		this.inputValidator = inputValidator;
 	}
 
 	@Transactional
 	public InventoryResponse reserve(InventoryRequest request) {
+		inputValidator.validate(request);
 		List<InventoryRequest.InventoryItem> items = normalize(request.items());
 		var existing = reservationRepository.findByOrderId(request.orderId());
 		if (existing.isPresent()) {
@@ -140,13 +148,51 @@ public class InventoryService {
 		return toResponse(saved);
 	}
 
+	@Transactional
+	public void restockReturn(String returnId, String orderId, List<StockItem> returnedItems) {
+		InventoryRequest request = new InventoryRequest(orderId, returnedItems == null ? null : returnedItems.stream()
+				.map(item -> new InventoryRequest.InventoryItem(item.productId(), item.variantId(), item.quantity())).toList());
+		inputValidator.validate(request);
+		if (returnId == null || returnId.isBlank()) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_RETURN", "returnId không được để trống");
+		}
+		if (returnRestockRepository.existsByReturnId(returnId)) return;
+		InventoryReservation reservation = getReservation(orderId);
+		if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
+			throw conflict("Chỉ có thể nhập lại hàng từ đơn đã chốt tồn kho");
+		}
+		List<InventoryRequest.InventoryItem> items = normalize(request.items());
+		validateReturnQuantities(reservation, items);
+		Map<String, Product> products = loadAndValidate(items, false);
+		for (InventoryRequest.InventoryItem item : items) {
+			Product product = products.get(item.productId());
+			ProductVariant variant = findVariant(product, item.variantId());
+			try {
+				variant.setStock(Math.addExact(variant.getStock(), item.quantity()));
+			} catch (ArithmeticException ex) {
+				throw new ApiException(HttpStatus.CONFLICT, "STOCK_OVERFLOW",
+						"Tồn kho vượt giới hạn cho phép");
+			}
+			variant.setSoldCount(Math.max(0, variant.getSoldCount() - item.quantity()));
+			product.setSoldCount(Math.max(0, product.getSoldCount() - item.quantity()));
+			derivedFields.refresh(product);
+			product.setUpdatedAt(Instant.now());
+		}
+		List<Product> changedProducts = productRepository.saveAll(products.values());
+		changedProducts.forEach(product -> publisher.publishUpdated(eventFactory.updated(product)));
+		returnRestockRepository.save(new ReturnRestock(null, returnId.trim(), orderId.trim(), items.stream()
+				.map(item -> new ReservationItem(item.productId(), item.variantId(), item.quantity())).toList(), Instant.now()));
+		publisher.publishStockReleased(new StockReleased(orderId, items.stream()
+				.map(item -> new StockItem(item.productId(), item.variantId(), item.quantity())).toList()));
+	}
+
 	private Map<String, Product> loadAndValidate(List<InventoryRequest.InventoryItem> items, boolean checkAvailable) {
 		Map<String, Product> products = new LinkedHashMap<>();
 		for (InventoryRequest.InventoryItem item : items) {
 			Product product = products.computeIfAbsent(item.productId(), id -> productRepository.findById(id)
 					.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Không tìm thấy sản phẩm " + id)));
 			if (checkAvailable && (product.getStatus() != ProductStatus.ACTIVE || product.isModerationRemoved()
-					|| product.getDeletedAt() != null)) {
+					|| product.isShopSuspended() || !product.isCategoryVisible() || product.getDeletedAt() != null)) {
 				throw conflict("Sản phẩm không ở trạng thái đang bán: " + product.getId());
 			}
 			ProductVariant variant = findVariant(product, item.variantId());
@@ -166,12 +212,38 @@ public class InventoryService {
 
 	private List<InventoryRequest.InventoryItem> normalize(List<InventoryRequest.InventoryItem> rawItems) {
 		Map<String, InventoryRequest.InventoryItem> normalized = new LinkedHashMap<>();
-		for (InventoryRequest.InventoryItem item : rawItems) {
-			String key = item.productId() + "\u0000" + item.variantId();
-			normalized.merge(key, item, (left, right) -> new InventoryRequest.InventoryItem(
-					left.productId(), left.variantId(), Math.addExact(left.quantity(), right.quantity())));
+		try {
+			for (InventoryRequest.InventoryItem item : rawItems) {
+				String key = item.productId() + "\u0000" + item.variantId();
+				normalized.merge(key, item, (left, right) -> new InventoryRequest.InventoryItem(
+						left.productId(), left.variantId(), Math.addExact(left.quantity(), right.quantity())));
+			}
+		} catch (ArithmeticException ex) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_INVENTORY_REQUEST",
+					"Tổng số lượng vượt giới hạn cho phép");
 		}
 		return new ArrayList<>(normalized.values());
+	}
+
+	private void validateReturnQuantities(InventoryReservation reservation,
+			List<InventoryRequest.InventoryItem> requested) {
+		Map<String, Long> purchased = new LinkedHashMap<>();
+		for (ReservationItem item : reservation.getItems()) {
+			purchased.put(item.getProductId() + "\u0000" + item.getVariantId(), (long) item.getQuantity());
+		}
+		for (ReturnRestock previous : returnRestockRepository.findAllByOrderId(reservation.getOrderId())) {
+			for (ReservationItem item : previous.getItems()) {
+				String key = item.getProductId() + "\u0000" + item.getVariantId();
+				purchased.computeIfPresent(key, (ignored, remaining) -> remaining - item.getQuantity());
+			}
+		}
+		for (InventoryRequest.InventoryItem item : requested) {
+			String key = item.productId() + "\u0000" + item.variantId();
+			if (purchased.getOrDefault(key, 0L) < item.quantity()) {
+				throw new ApiException(HttpStatus.CONFLICT, "INVALID_RETURN_QUANTITY",
+						"Số lượng trả vượt số lượng đã mua hoặc đã được nhập lại");
+			}
+		}
 	}
 
 	private InventoryReservation getReservation(String orderId) {

@@ -27,7 +27,7 @@ public class OrderPlacedInventoryConsumer implements EventConsumer<OrderPlaced> 
 	@Override
 	public void handle(OrderPlaced payload, EventEnvelope envelope) {
 		try {
-			inventoryService.reserve(new InventoryRequest(payload.orderId(), payload.items().stream()
+			inventoryService.reserve(new InventoryRequest(payload.orderId(), payload.items() == null ? null : payload.items().stream()
 					.map(item -> new InventoryRequest.InventoryItem(
 							item.productId(), item.variantId(), item.quantity())).toList()));
 		} catch (ApiException ex) {

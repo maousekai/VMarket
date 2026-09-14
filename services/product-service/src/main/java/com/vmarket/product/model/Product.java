@@ -33,6 +33,9 @@ public class Product {
 	private List<String> imageUrls = new ArrayList<>();
 	@Indexed
 	private String categoryId;
+	private List<String> categoryPath = new ArrayList<>();
+	@Indexed
+	private boolean categoryVisible = true;
 	private String brandId;
 	@Indexed
 	private ProductStatus status;
@@ -43,9 +46,11 @@ public class Product {
 	private long availableStock;
 	private double ratingAverage;
 	private long ratingCount;
+	private Instant ratingUpdatedAt;
 	private long soldCount;
 	private boolean moderationRemoved;
 	private String moderationReason;
+	private Instant moderationResubmittedAt;
 	private ProductStatus statusBeforeModeration;
 	private boolean shopSuspended;
 	private ProductStatus statusBeforeShopSuspension;

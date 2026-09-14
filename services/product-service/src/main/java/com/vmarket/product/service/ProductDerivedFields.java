@@ -1,6 +1,7 @@
 package com.vmarket.product.service;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import org.springframework.stereotype.Component;
 
@@ -10,11 +11,12 @@ import com.vmarket.product.model.ProductVariant;
 @Component
 public class ProductDerivedFields {
 	public void refresh(Product product) {
-		product.setMinPrice(product.getVariants().stream().map(ProductVariant::getPrice)
+		List<ProductVariant> variants = product.getVariants() == null ? List.of() : product.getVariants();
+		product.setMinPrice(variants.stream().map(ProductVariant::getPrice)
 				.min(BigDecimal::compareTo).orElse(null));
-		product.setMaxPrice(product.getVariants().stream().map(ProductVariant::getPrice)
+		product.setMaxPrice(variants.stream().map(ProductVariant::getPrice)
 				.max(BigDecimal::compareTo).orElse(null));
-		product.setAvailableStock(product.getVariants().stream()
+		product.setAvailableStock(variants.stream()
 				.mapToLong(variant -> Math.max(0, variant.getStock() - variant.getReservedStock())).sum());
 	}
 }

@@ -15,10 +15,14 @@ import org.springframework.http.HttpStatus;
 
 import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.OrderPlaced;
+import com.vmarket.events.OrderStatusChanged;
+import com.vmarket.events.ReturnResolved;
 import com.vmarket.events.StockItem;
 import com.vmarket.events.StockReservationFailed;
 import com.vmarket.product.dto.InventoryRequest;
 import com.vmarket.product.event.OrderPlacedInventoryConsumer;
+import com.vmarket.product.event.OrderStatusChangedInventoryConsumer;
+import com.vmarket.product.event.ReturnResolvedInventoryConsumer;
 import com.vmarket.product.event.ProductEventPublisher;
 import com.vmarket.product.exception.ApiException;
 import com.vmarket.product.service.InventoryService;
@@ -56,5 +60,29 @@ class InventoryEventConsumerTest {
 		ArgumentCaptor<StockReservationFailed> failed = ArgumentCaptor.forClass(StockReservationFailed.class);
 		verify(publisher).publishStockReservationFailed(failed.capture());
 		assertThat(failed.getValue().code()).isEqualTo("INSUFFICIENT_STOCK");
+	}
+
+	@Test
+	void orderStatusUsesSrsContractForCodConfirmationAndCancellation() {
+		OrderStatusChangedInventoryConsumer consumer = new OrderStatusChangedInventoryConsumer(inventoryService);
+
+		consumer.handle(new OrderStatusChanged("order-1", "PENDING_CONFIRMATION", "PREPARING", "COD"),
+				new EventEnvelope("event-1", "OrderStatusChanged", 0, null));
+		consumer.handle(new OrderStatusChanged("order-1", "PREPARING", "CANCELLED", "COD"),
+				new EventEnvelope("event-2", "OrderStatusChanged", 0, null));
+
+		verify(inventoryService).confirm("order-1");
+		verify(inventoryService).release("order-1");
+	}
+
+	@Test
+	void acceptedReturnRestocksReturnedItems() {
+		ReturnResolvedInventoryConsumer consumer = new ReturnResolvedInventoryConsumer(inventoryService);
+		List<StockItem> items = List.of(new StockItem("product-1", "variant-1", 1));
+
+		consumer.handle(new ReturnResolved("return-1", "order-1", true, items),
+				new EventEnvelope("event-1", "ReturnResolved", 0, null));
+
+		verify(inventoryService).restockReturn("return-1", "order-1", items);
 	}
 }

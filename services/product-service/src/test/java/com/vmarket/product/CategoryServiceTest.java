@@ -23,17 +23,19 @@ import com.vmarket.product.model.Category;
 import com.vmarket.product.repository.CategoryRepository;
 import com.vmarket.product.repository.ProductRepository;
 import com.vmarket.product.service.CategoryService;
+import com.vmarket.product.service.CatalogProjectionService;
 import com.vmarket.product.service.SlugService;
 
 @ExtendWith(MockitoExtension.class)
 class CategoryServiceTest {
 	@Mock CategoryRepository categoryRepository;
 	@Mock ProductRepository productRepository;
+	@Mock CatalogProjectionService projections;
 	private CategoryService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new CategoryService(categoryRepository, productRepository, new SlugService());
+		service = new CategoryService(categoryRepository, productRepository, new SlugService(), projections);
 	}
 
 	@Test

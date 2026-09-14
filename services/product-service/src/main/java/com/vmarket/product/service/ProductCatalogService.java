@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.events.ProductDeleted;
 import com.vmarket.events.ProductModerated;
+import com.vmarket.events.ProductModerationRequested;
 import com.vmarket.product.dto.PageResponse;
 import com.vmarket.product.dto.ProductDetailResponse;
 import com.vmarket.product.dto.ProductRequest;
@@ -43,11 +44,13 @@ public class ProductCatalogService {
 	private final ProductEventFactory eventFactory;
 	private final ProductDerivedFields derivedFields;
 	private final ShopAccessService shopAccessService;
+	private final CatalogProjectionService projections;
 
 	public ProductCatalogService(ProductRepository repository, ProductCatalogQuery query,
 			CategoryService categoryService, BrandService brandService, ProductMapper mapper,
 			ProductEventPublisher publisher, ProductEventFactory eventFactory,
-			ProductDerivedFields derivedFields, ShopAccessService shopAccessService) {
+			ProductDerivedFields derivedFields, ShopAccessService shopAccessService,
+			CatalogProjectionService projections) {
 		this.repository = repository;
 		this.query = query;
 		this.categoryService = categoryService;
@@ -57,6 +60,7 @@ public class ProductCatalogService {
 		this.eventFactory = eventFactory;
 		this.derivedFields = derivedFields;
 		this.shopAccessService = shopAccessService;
+		this.projections = projections;
 	}
 
 	@Transactional
@@ -86,10 +90,6 @@ public class ProductCatalogService {
 		if (!product.getShopId().equals(request.shopId().trim())) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "SHOP_IMMUTABLE", "Không thể chuyển sản phẩm sang gian hàng khác");
 		}
-		if (product.isModerationRemoved()) {
-			throw new ApiException(HttpStatus.CONFLICT, "PRODUCT_MODERATED",
-					"Sản phẩm đang bị quản trị viên gỡ; không thể tự khôi phục");
-		}
 		validateReferences(request.categoryId(), request.brandId(), request.status());
 		validateVariants(request.variants());
 		Map<String, ProductVariant> existing = new HashMap<>();
@@ -102,6 +102,11 @@ public class ProductCatalogService {
 		}
 		ensureReservedVariantsAreKept(request, existing);
 		applyRequest(product, request, existing);
+		if (product.isModerationRemoved()) {
+			product.setStatusBeforeModeration(request.status());
+			product.setStatus(ProductStatus.HIDDEN);
+			product.setModerationResubmittedAt(null);
+		}
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
 		publisher.publishUpdated(eventFactory.updated(saved));
@@ -129,9 +134,14 @@ public class ProductCatalogService {
 			if (reason == null || reason.isBlank()) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "MODERATION_REASON_REQUIRED", "Phải nhập lý do gỡ sản phẩm");
 			}
-			if (!product.isModerationRemoved()) product.setStatusBeforeModeration(product.getStatus());
+			if (!product.isModerationRemoved()) {
+				ProductStatus desired = product.isShopSuspended() && product.getStatusBeforeShopSuspension() != null
+						? product.getStatusBeforeShopSuspension() : product.getStatus();
+				product.setStatusBeforeModeration(desired);
+			}
 			product.setModerationRemoved(true);
 			product.setModerationReason(reason.trim());
+			product.setModerationResubmittedAt(null);
 			product.setStatus(ProductStatus.HIDDEN);
 		} else {
 			product.setModerationRemoved(false);
@@ -140,17 +150,36 @@ public class ProductCatalogService {
 					? ProductStatus.DRAFT : product.getStatusBeforeModeration();
 			if (product.isShopSuspended()) {
 				product.setStatus(ProductStatus.HIDDEN);
-				product.setStatusBeforeShopSuspension(restoredStatus);
+				if (product.getStatusBeforeShopSuspension() == null) {
+					product.setStatusBeforeShopSuspension(restoredStatus);
+				}
 			} else {
 				product.setStatus(restoredStatus);
 			}
 			product.setStatusBeforeModeration(null);
+			product.setModerationResubmittedAt(null);
 		}
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
 		publisher.publishUpdated(eventFactory.updated(saved));
 		publisher.publishModerated(new ProductModerated(saved.getId(), saved.getShopId(), saved.getSellerId(),
 				removed, saved.getModerationReason()));
+		return mapper.toResponse(saved);
+	}
+
+	@Transactional
+	public ProductResponse resubmitModeration(String id, String sellerId) {
+		Product product = getOwned(id, sellerId);
+		shopAccessService.requireActiveOwner(product.getShopId(), sellerId);
+		if (!product.isModerationRemoved()) {
+			throw new ApiException(HttpStatus.CONFLICT, "PRODUCT_NOT_MODERATED",
+					"Sản phẩm không ở trạng thái chờ chỉnh sửa sau kiểm duyệt");
+		}
+		product.setModerationResubmittedAt(Instant.now());
+		product.setUpdatedAt(product.getModerationResubmittedAt());
+		Product saved = repository.save(product);
+		publisher.publishModerationRequested(new ProductModerationRequested(saved.getId(), saved.getShopId(),
+				saved.getSellerId()));
 		return mapper.toResponse(saved);
 	}
 
@@ -165,20 +194,20 @@ public class ProductCatalogService {
 		if (minRating != null && (minRating < 0 || minRating > 5)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_RATING", "Điểm đánh giá phải nằm trong khoảng 0 đến 5");
 		}
-		List<String> categories = categoryId == null || categoryId.isBlank()
-				? categoryService.publicIds() : categoryService.descendantIds(categoryId);
-		Page<ProductResponse> result = query.search(keyword, categories, minPrice, maxPrice, minRating, shopId, sort,
+		String categoryFilter = categoryId == null || categoryId.isBlank() ? null : categoryId.trim();
+		if (categoryFilter != null) categoryService.getPublicRequired(categoryFilter);
+		Page<ProductResponse> result = query.search(keyword, categoryFilter, minPrice, maxPrice, minRating, shopId, sort,
 				Math.max(page, 0), Math.min(Math.max(size, 1), 100)).map(mapper::toResponse);
 		return PageResponse.from(result);
 	}
 
 	public ProductDetailResponse detail(String id) {
 		Product product = getRequired(id);
-		if (product.getDeletedAt() != null || product.getStatus() != ProductStatus.ACTIVE || product.isModerationRemoved()) {
+		if (product.getDeletedAt() != null || product.getStatus() != ProductStatus.ACTIVE || product.isModerationRemoved()
+				|| product.isShopSuspended() || !product.isCategoryVisible()) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Không tìm thấy sản phẩm");
 		}
-		categoryService.getPublicRequired(product.getCategoryId());
-		List<ProductResponse> similar = query.search(null, List.of(product.getCategoryId()), null, null, null, null,
+		List<ProductResponse> similar = query.search(null, product.getCategoryId(), null, null, null, null,
 				"BEST_SELLING", 0, 7).getContent().stream()
 				.filter(item -> !item.getId().equals(product.getId())).limit(6).map(mapper::toResponse).toList();
 		return new ProductDetailResponse(mapper.toResponse(product), similar);
@@ -211,6 +240,7 @@ public class ProductCatalogService {
 		product.setDescription(request.description().trim());
 		product.setImageUrls(new ArrayList<>(request.imageUrls()));
 		product.setCategoryId(request.categoryId());
+		projections.applyCategory(product);
 		product.setBrandId(blankToNull(request.brandId()));
 		product.setStatus(request.status());
 		List<ProductVariant> variants = request.variants().stream().map(item -> {

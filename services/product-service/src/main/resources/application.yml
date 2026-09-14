@@ -3,15 +3,18 @@ spring:
     name: product-service
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  mongodb:
+    uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${DB_NAME:vmarket_product}?replicaSet=${MONGO_REPLICA_SET:rs0}&directConnection=${MONGO_DIRECT_CONNECTION:true}
   data:
     mongodb:
-      uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${DB_NAME:vmarket_product}?replicaSet=${MONGO_REPLICA_SET:rs0}&directConnection=${MONGO_DIRECT_CONNECTION:true}
       auto-index-creation: true
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
 
 server:
   port: ${SERVER_PORT:8084}
@@ -28,17 +31,25 @@ app:
   internal-api-key: ${INTERNAL_API_KEY:dev-only-product-internal-key}
   events:
     listen: ${EVENTS_LISTEN:true}
-    queue: ${EVENTS_QUEUE:product.events}
+    # v2 avoids redeclaring the legacy durable queue with incompatible DLX arguments.
+    queue: ${EVENTS_QUEUE:product.events.v2}
     bindings:
       - OrderPlaced
-      - OrderConfirmed
-      - OrderCancelled
+      - OrderStatusChanged
       - PaymentSucceeded
       - ShopApproved
       - ShopSuspended
+      - ReviewCreated
+      - ReturnResolved
   outbox:
     enabled: ${OUTBOX_ENABLED:true}
     poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:1000}
+    batch-size: ${OUTBOX_BATCH_SIZE:50}
+    lease-seconds: ${OUTBOX_LEASE_SECONDS:30}
+    confirm-timeout-seconds: ${OUTBOX_CONFIRM_TIMEOUT_SECONDS:10}
+  catalog-migration:
+    enabled: ${CATALOG_MIGRATION_ENABLED:true}
+    reconcile-interval-ms: ${CATALOG_RECONCILE_INTERVAL_MS:3600000}
 
 springdoc:
   swagger-ui:

@@ -1,9 +1,10 @@
 spring:
   application:
     name: product-service
+  mongodb:
+    uri: mongodb://localhost:27017/vmarket_product_test
   data:
     mongodb:
-      uri: mongodb://localhost:27017/vmarket_product_test
       auto-index-creation: false
 
 app:
@@ -11,4 +12,6 @@ app:
   events:
     listen: false
   outbox:
+    enabled: false
+  catalog-migration:
     enabled: false

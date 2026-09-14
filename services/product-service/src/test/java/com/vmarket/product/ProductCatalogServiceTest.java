@@ -37,6 +37,7 @@ import com.vmarket.product.service.ProductCatalogService;
 import com.vmarket.product.service.ProductMapper;
 import com.vmarket.product.service.ProductDerivedFields;
 import com.vmarket.product.service.ShopAccessService;
+import com.vmarket.product.service.CatalogProjectionService;
 
 @ExtendWith(MockitoExtension.class)
 class ProductCatalogServiceTest {
@@ -46,13 +47,14 @@ class ProductCatalogServiceTest {
 	@Mock BrandService brandService;
 	@Mock ProductEventPublisher publisher;
 	@Mock ShopAccessService shopAccessService;
+	@Mock CatalogProjectionService projections;
 	private ProductCatalogService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new ProductCatalogService(repository, query, categoryService, brandService,
 				new ProductMapper(), publisher, new ProductEventFactory(),
-				new ProductDerivedFields(), shopAccessService);
+				new ProductDerivedFields(), shopAccessService, projections);
 	}
 
 	@Test
@@ -72,7 +74,7 @@ class ProductCatalogServiceTest {
 		verify(shopAccessService).requireActiveOwner("shop-1", "seller-1");
 		ArgumentCaptor<ProductCreated> event = ArgumentCaptor.forClass(ProductCreated.class);
 		verify(publisher).publishCreated(event.capture());
-		assertThat(event.getValue().schemaVersion()).isEqualTo(2);
+		assertThat(event.getValue().schemaVersion()).isEqualTo(3);
 		assertThat(event.getValue().description()).isEqualTo("Mô tả");
 		assertThat(event.getValue().categoryId()).isEqualTo("cat-1");
 		assertThat(event.getValue().availableStock()).isEqualTo(12);
@@ -112,6 +114,52 @@ class ProductCatalogServiceTest {
 		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
 		assertThat(product.getDeletedAt()).isNotNull();
 		verify(publisher).publishDeleted(any());
+	}
+
+	@Test
+	void sellerCanEditModeratedProductButItRemainsHiddenUntilAdminRestoresIt() {
+		Product product = product("seller-1", 0);
+		product.setModerationRemoved(true);
+		product.setModerationReason("Vi phạm mô tả");
+		product.setStatus(ProductStatus.HIDDEN);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
+		when(repository.save(product)).thenReturn(product);
+
+		service.update("product-1", "seller-1", request("variant-1", 10));
+
+		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
+		assertThat(product.getStatusBeforeModeration()).isEqualTo(ProductStatus.ACTIVE);
+	}
+
+	@Test
+	void sellerCanResubmitEditedModeratedProduct() {
+		Product product = product("seller-1", 0);
+		product.setModerationRemoved(true);
+		product.setStatus(ProductStatus.HIDDEN);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		when(repository.save(product)).thenReturn(product);
+
+		service.resubmitModeration("product-1", "seller-1");
+
+		assertThat(product.getModerationResubmittedAt()).isNotNull();
+		verify(publisher).publishModerationRequested(any());
+	}
+
+	@Test
+	void moderationRestoreDoesNotOverwriteStatusSavedBeforeShopSuspension() {
+		Product product = product("seller-1", 0);
+		product.setShopSuspended(true);
+		product.setStatus(ProductStatus.HIDDEN);
+		product.setStatusBeforeShopSuspension(ProductStatus.ACTIVE);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		when(repository.save(product)).thenReturn(product);
+
+		service.moderate("product-1", true, "Vi phạm");
+		service.moderate("product-1", false, null);
+
+		assertThat(product.getStatusBeforeShopSuspension()).isEqualTo(ProductStatus.ACTIVE);
+		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
 	}
 
 	private ProductRequest request(String variantId, long stock) {

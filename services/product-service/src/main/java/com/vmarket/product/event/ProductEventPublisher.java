@@ -6,6 +6,7 @@ import com.vmarket.events.EventType;
 import com.vmarket.events.ProductCreated;
 import com.vmarket.events.ProductDeleted;
 import com.vmarket.events.ProductModerated;
+import com.vmarket.events.ProductModerationRequested;
 import com.vmarket.events.ProductUpdated;
 import com.vmarket.events.StockReservationFailed;
 import com.vmarket.events.StockReleased;
@@ -54,5 +55,9 @@ public class ProductEventPublisher {
 
 	public void publishModerated(ProductModerated payload) {
 		outbox.enqueue(EventType.PRODUCT_MODERATED, payload);
+	}
+
+	public void publishModerationRequested(ProductModerationRequested payload) {
+		outbox.enqueue(EventType.PRODUCT_MODERATION_REQUESTED, payload);
 	}
 }

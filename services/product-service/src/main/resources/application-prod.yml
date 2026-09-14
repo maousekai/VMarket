@@ -1,13 +1,14 @@
 # Profile PROD - cau hinh qua bien moi truong
 spring:
-  data:
-    mongodb:
-      uri: mongodb://${MONGO_HOST}:${MONGO_PORT:27017}/${DB_NAME}?replicaSet=${MONGO_REPLICA_SET:rs0}&directConnection=${MONGO_DIRECT_CONNECTION:false}
+  mongodb:
+    uri: mongodb://${MONGO_HOST}:${MONGO_PORT:27017}/${DB_NAME}?replicaSet=${MONGO_REPLICA_SET:rs0}&directConnection=${MONGO_DIRECT_CONNECTION:false}
   rabbitmq:
     host: ${RABBITMQ_HOST}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME}
     password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
 
 app:
   cors:
