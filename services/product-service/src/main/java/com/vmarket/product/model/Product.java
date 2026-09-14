@@ -1,0 +1,50 @@
+package com.vmarket.product.model;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Document("products")
+@CompoundIndex(name = "catalog_filter_idx", def = "{'status': 1, 'categoryId': 1, 'shopId': 1}")
+public class Product {
+	@Id
+	private String id;
+	@Indexed
+	private String shopId;
+	@Indexed
+	private String sellerId;
+	@Indexed
+	private String name;
+	private String description;
+	private List<String> imageUrls = new ArrayList<>();
+	@Indexed
+	private String categoryId;
+	private String brandId;
+	@Indexed
+	private ProductStatus status;
+	private List<ProductVariant> variants = new ArrayList<>();
+	private double ratingAverage;
+	private long ratingCount;
+	private long soldCount;
+	private boolean moderationRemoved;
+	private String moderationReason;
+	private ProductStatus statusBeforeModeration;
+	private Instant createdAt;
+	private Instant updatedAt;
+	private Instant deletedAt;
+	@Version
+	private Long version;
+}
