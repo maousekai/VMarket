@@ -1,10 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from event_consumer import start_event_consumer_thread
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # PBL6-39: bật consumer RabbitMQ (ProductCreated...) trong luồng nền.
+    start_event_consumer_thread()
+    yield
+
 
 app = FastAPI(
     title="VMarket AI Search Service",
     description="Tim kiem thong minh: full-text tieng Viet, tim kiem bang hinh anh (CNN), dong bo chi muc Elasticsearch",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS cho response that (preflight OPTIONS da duoc api-gateway tra loi).

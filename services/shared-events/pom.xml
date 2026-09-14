@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.vmarket</groupId>
+		<artifactId>vmarket-services</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+		<relativePath>../pom.xml</relativePath>
+	</parent>
+	<groupId>com.vmarket</groupId>
+	<artifactId>shared-events</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>shared-events</name>
+	<description>VMarket - Thu vien event bus dung chung (publish/subscribe qua RabbitMQ)</description>
+
+	<dependencies>
+		<!--
+		  PHAI la starter-amqp (khong phai amqp-core tran):
+		  mang lai RabbitTemplate, connection factory, Message/MessageProperties
+		  va cac listener container. Khong tu dong ket noi o giai doan startup.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-amqp</artifactId>
+		</dependency>
+		<!-- Can cho @AutoConfiguration, @EnableConfigurationProperties, @ConditionalOnProperty -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-autoconfigure</artifactId>
+		</dependency>
+		<!--
+		  Jackson 3 (tools.jackson.core) - JSON duy nhat cua Spring Boot 4.1.
+		  Version do parent (spring-boot-dependencies) quan ly.
+		-->
+		<dependency>
+			<groupId>tools.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+		</dependency>
+
+		<!-- Lombok: KHONG dung o module nay (ban ghi = Java record) de giam phu thuoc
+			 truyen sang cac service tieu thu. -->
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+</project>

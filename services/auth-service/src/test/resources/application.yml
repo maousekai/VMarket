@@ -25,3 +25,12 @@ auth:
     secret: test-only-secret-0123456789-0123456789-0123456789
     access-ttl: 15m
     refresh-ttl: 15d
+  email:
+    provider: log
+    from: no-reply@vmarket.local
+    from-name: VMarket
+  otp:
+    ttl: 5m
+    max-attempts: 5
+    resend-cooldown: 60s
+    hourly-limit: 5

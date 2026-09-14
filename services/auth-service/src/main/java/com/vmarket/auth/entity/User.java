@@ -18,8 +18,10 @@ import lombok.Setter;
  * <ul>
  *   <li><b>V2 — PBL6-42:</b> {@code email_verified} (kích hoạt tài khoản)</li>
  *   <li><b>V3 — PBL6-43:</b> {@code failed_login_attempts}, {@code locked_until}</li>
- *   <li>PBL6-44: {@code provider}, {@code provider_user_id} (Google OAuth2) — migration V4</li>
+ *   <li><b>V4 — PBL6-44:</b> {@code password_hash} chuyển nullable (user tạo qua OTP
+ *       không có mật khẩu); thêm bảng {@code email_otp}</li>
  * </ul>
+ * (Migration tiếp theo: V5.)
  */
 @Entity
 @Table(name = "users")
@@ -34,8 +36,11 @@ public class User extends BaseEntity {
 	@Column(nullable = false, unique = true, length = 50)
 	private String username;
 
-	/** Băm BCrypt — không bao giờ lưu/log mật khẩu dạng rõ (NFR-SEC-01/06). */
-	@Column(name = "password_hash", nullable = false, length = 100)
+	/**
+	 * Băm BCrypt — không bao giờ lưu/log mật khẩu dạng rõ (NFR-SEC-01/06).
+	 * {@code null} với tài khoản tạo qua luồng OTP (chưa đặt mật khẩu).
+	 */
+	@Column(name = "password_hash", length = 100)
 	private String passwordHash;
 
 	/**

@@ -2,35 +2,30 @@ package com.vmarket.auth.service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import com.vmarket.auth.config.AuthJwtProperties;
-import com.vmarket.auth.dto.AccountStatus;
 import com.vmarket.auth.dto.LoginRequest;
 import com.vmarket.auth.dto.RefreshRequest;
 import com.vmarket.auth.dto.TokenResponse;
 import com.vmarket.auth.entity.RefreshToken;
 import com.vmarket.auth.entity.User;
-import com.vmarket.auth.entity.UserRole;
 import com.vmarket.auth.exception.ApiException;
 import com.vmarket.auth.repository.RefreshTokenRepository;
-import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
-import com.vmarket.auth.repository.UserRoleRepository;
-import com.vmarket.auth.security.JwtService;
 import com.vmarket.auth.security.OpaqueTokenCodec;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * FR-AUTH-02 — Đăng nhập (JWT) và làm mới access token.
+ * FR-AUTH-02 — Đăng nhập bằng mật khẩu (JWT) và làm mới access token.
  *
  * <ul>
  *   <li>Đăng nhập bằng email. Sai 5 lần liên tiếp → khoá tài khoản 15 phút và thu
@@ -40,6 +35,8 @@ import lombok.extern.slf4j.Slf4j;
  *       hạn → coi là bị đánh cắp → thu hồi toàn bộ phiên. Dùng lại trong khoảng ân
  *       hạn (retry mạng / race) → chỉ từ chối, không thu hồi.</li>
  * </ul>
+ *
+ * <p>Phát token dùng chung qua {@link TokenIssuer}.
  *
  * <p>{@code noRollbackFor = ApiException}: các nhánh "ghi rồi ném" (tăng bộ đếm
  * sai, thu hồi phiên khi phát hiện reuse) phải được commit dù request kết thúc
@@ -55,26 +52,25 @@ public class AuthenticationService {
 	/** Trong khoảng này sau khi xoay vòng, dùng lại token cũ = retry vô hại, không thu hồi phiên. */
 	static final Duration ROTATION_GRACE = Duration.ofSeconds(30);
 
-	/** BCrypt hash hợp lệ (không ứng với mật khẩu nào dùng được) — so sánh giả để cân bằng thời gian phản hồi khi email không tồn tại. */
+	/** BCrypt hash hợp lệ (không ứng với mật khẩu nào dùng được) — so sánh giả để cân bằng thời gian phản hồi khi email/mật khẩu không có. */
 	private static final String DUMMY_HASH =
 			"$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
 	private final UserRepository userRepository;
-	private final RoleRepository roleRepository;
-	private final UserRoleRepository userRoleRepository;
 	private final RefreshTokenRepository refreshTokenRepository;
 	private final PasswordEncoder passwordEncoder;
-	private final JwtService jwtService;
 	private final OpaqueTokenCodec tokenCodec;
 	private final AuthJwtProperties jwtProps;
+	private final TokenIssuer tokenIssuer;
 
 	@Transactional(noRollbackFor = ApiException.class)
 	public TokenResponse login(LoginRequest request) {
 		String email = request.email().trim().toLowerCase(Locale.ROOT);
 		User user = userRepository.findByEmail(email).orElse(null);
 
-		if (user == null) {
+		if (user == null || !StringUtils.hasText(user.getPasswordHash())) {
 			// So sánh giả để thời gian phản hồi giống nhánh có user (chống timing oracle).
+			// user == null: email chưa đăng ký. passwordHash rỗng: tài khoản tạo qua OTP, chưa đặt mật khẩu.
 			passwordEncoder.matches(request.password(), DUMMY_HASH);
 			throw invalidCredentials();
 		}
@@ -95,7 +91,8 @@ public class AuthenticationService {
 		if (user.getFailedLoginAttempts() != 0 || user.getLockedUntil() != null) {
 			userRepository.clearLock(user.getId());
 		}
-		return issueTokens(user, now);
+		log.info("Đăng nhập thành công userId={}", user.getId());
+		return tokenIssuer.issue(user);
 	}
 
 	@Transactional(noRollbackFor = ApiException.class)
@@ -148,26 +145,10 @@ public class AuthenticationService {
 					"Refresh token không hợp lệ");
 		}
 
-		List<String> roles = roleNamesOf(user.getId());
-		return TokenResponse.bearer(jwtService.createAccessToken(user, roles), rawNew,
-				jwtService.getAccessTtlSeconds(), AccountStatus.of(user.isEmailVerified()), roles);
+		return tokenIssuer.responseFor(user, rawNew);
 	}
 
 	// --- helpers -------------------------------------------------------------
-
-	private TokenResponse issueTokens(User user, Instant now) {
-		List<String> roles = roleNamesOf(user.getId());
-		String rawRefresh = tokenCodec.generate();
-		RefreshToken token = new RefreshToken();
-		token.setUserId(user.getId());
-		token.setTokenHash(tokenCodec.hash(rawRefresh));
-		token.setExpiresAt(now.plus(jwtProps.getRefreshTtl()));
-		refreshTokenRepository.save(token);
-
-		log.info("Đăng nhập thành công userId={}", user.getId());
-		return TokenResponse.bearer(jwtService.createAccessToken(user, roles), rawRefresh,
-				jwtService.getAccessTtlSeconds(), AccountStatus.of(user.isEmailVerified()), roles);
-	}
 
 	private boolean isLocked(User user, Instant now) {
 		return user.getLockedUntil() != null && user.getLockedUntil().isAfter(now);
@@ -191,19 +172,6 @@ public class AuthenticationService {
 		log.warn("Khoá tài khoản userId={} do {} lần đăng nhập sai; thu hồi {} phiên",
 				user.getId(), MAX_FAILED_ATTEMPTS, revoked);
 		return lockedUntil;
-	}
-
-	private List<String> roleNamesOf(String userId) {
-		List<String> roleIds = userRoleRepository.findByUserId(userId).stream()
-				.map(UserRole::getRoleId)
-				.toList();
-		if (roleIds.isEmpty()) {
-			return List.of();
-		}
-		return roleRepository.findAllById(roleIds).stream()
-				.map(role -> role.getName().name())
-				.sorted()
-				.toList();
 	}
 
 	private ApiException invalidCredentials() {

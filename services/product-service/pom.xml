@@ -25,6 +25,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-amqp</artifactId>
 		</dependency>
+		<!-- PBL6-39: thu vien event bus dung chung (publish ProductCreated...) -->
+		<dependency>
+			<groupId>com.vmarket</groupId>
+			<artifactId>shared-events</artifactId>
+			<version>0.0.1-SNAPSHOT</version>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
