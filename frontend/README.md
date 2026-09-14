@@ -65,13 +65,16 @@ Image multi-stage: build bằng `node:22-alpine`, phục vụ `dist/` bằng
 
 Đích proxy đổi được lúc runtime bằng biến `API_GATEWAY_URL`
 (mặc định `http://api-gateway:8080`) — **không cần build lại image**, vì
-`default.conf.template` được envsubst lúc container khởi động.
+`default.conf.template` được envsubst lúc container khởi động. Dấu `/` ở cuối
+(vd `http://api-gateway:8080/`) được tự bỏ trước khi render, nên không sinh ra
+`//api/...` làm Gateway trả 404.
 
-| File                    | Vai trò                                                    |
-| ----------------------- | ---------------------------------------------------------- |
-| `Dockerfile`            | Multi-stage build → image nginx tĩnh                       |
-| `nginx.conf`            | Cấu hình mức `http` (gzip, temp path cho non-root, map WS) |
-| `default.conf.template` | `server` block: SPA fallback + reverse proxy `/api`        |
+| File                                 | Vai trò                                                    |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `Dockerfile`                         | Multi-stage build → image nginx tĩnh                       |
+| `nginx.conf`                         | Cấu hình mức `http` (gzip, temp path cho non-root, map WS) |
+| `default.conf.template`              | `server` block: SPA fallback + reverse proxy `/api`        |
+| `18-normalize-api-gateway-url.envsh` | Entrypoint bỏ `/` ở cuối `API_GATEWAY_URL` trước envsubst  |
 
 ## Cấu trúc thư mục
 

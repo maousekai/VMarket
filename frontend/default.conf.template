@@ -31,7 +31,9 @@ server {
 
         set $gateway "${API_GATEWAY_URL}";
         # proxy_pass co bien thi nginx KHONG tu gan URI -> phai noi $request_uri
-        # (giu nguyen ca duong dan /api/... lan query string).
+        # (giu nguyen ca duong dan /api/... lan query string). $request_uri luon
+        # bat dau bang "/" nen API_GATEWAY_URL KHONG duoc co "/" o cuoi - da duoc
+        # 18-normalize-api-gateway-url.envsh bo di truoc khi render template nay.
         proxy_pass $gateway$request_uri;
 
         proxy_http_version 1.1;

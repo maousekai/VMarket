@@ -188,3 +188,57 @@ Môi trường: `docker compose up -d` (không có file `.env` → chạy bằng
    dùng `* text=auto` (checkout thành CRLF trên Windows) trong khi `.prettierrc`
    đặt `endOfLine: "lf"`. Không sửa trong ticket này để tránh diff rác toàn repo;
    nên xử lý riêng (thêm `*.{js,jsx,json,css,md} text eol=lf` vào `.gitattributes`).
+
+## 6. Xử lý rà soát — dấu `/` ở cuối `API_GATEWAY_URL`
+
+**Vấn đề:** `proxy_pass $gateway$request_uri;` ghép thẳng hai chuỗi, mà
+`$request_uri` luôn bắt đầu bằng `/`. Nếu `API_GATEWAY_URL` được đặt có `/` ở cuối
+(`http://api-gateway:8080/`) thì `/api/auth/health` thành
+`http://api-gateway:8080//api/auth/health` → có thể trượt predicate
+`Path=/api/auth/**` của Gateway và trả 404. Giá trị mặc định (không có `/` cuối)
+vẫn đúng nên không phải blocker, nhưng rất dễ gõ nhầm khi sửa `.env`.
+
+**Cách xử lý:** chuẩn hóa ở entrypoint thay vì chỉ ghi chú trong tài liệu, để giá
+trị nào cũng chạy đúng:
+
+- Thêm `frontend/18-normalize-api-gateway-url.envsh`, copy vào
+  `/docker-entrypoint.d/`. Entrypoint của image nginx **source** file `.envsh`
+  (không chạy thành tiến trình con) theo thứ tự `sort -V`, nên biến đã chuẩn hóa
+  được `export` tới `20-envsubst-on-templates.sh` chạy ngay sau. Script bỏ **mọi**
+  dấu `/` ở cuối và ghi một dòng log khi có thay đổi.
+- Chỉ bỏ `/` ở cuối, không đụng phần path: `http://gw:8080/prefix/` →
+  `http://gw:8080/prefix` (vẫn ghép được `/prefix/api/...` nếu cố ý dùng prefix).
+- Vì bị source nên script dùng `return` thay cho `exit` (exit sẽ dừng cả
+  entrypoint), và đọc biến qua `${VAR:-}` vì `15-local-resolvers.envsh` chạy trước
+  đã bật `set -u`.
+- `Dockerfile`: `COPY` script + `chmod 755` (entrypoint bỏ qua file không có bit
+  thực thi; checkout trên Windows không giữ được bit này). File cũng được commit
+  với mode `100755`.
+- `.gitattributes`: thêm `*.envsh text eol=lf` — với `core.autocrlf=true` script sẽ
+  bị checkout thành CRLF và `sh` trong container báo lỗi.
+- Ghi chú ràng buộc trong `default.conf.template`, `.env.example`, `frontend/README.md`.
+
+**Kiểm chứng** (mô phỏng đúng ngữ cảnh entrypoint: vòng `while` trong subshell,
+`set -eu`, source file):
+
+| `API_GATEWAY_URL` đầu vào    | Sau chuẩn hóa             | URL gửi sang Gateway                         |
+| ---------------------------- | ------------------------- | -------------------------------------------- |
+| `http://api-gateway:8080`    | giữ nguyên, không log     | `http://api-gateway:8080/api/auth/health` ✅ |
+| `http://api-gateway:8080/`   | `http://api-gateway:8080` | `http://api-gateway:8080/api/auth/health` ✅ |
+| `http://api-gateway:8080///` | `http://api-gateway:8080` | `http://api-gateway:8080/api/auth/health` ✅ |
+| `http://gw:8080/prefix/`     | `http://gw:8080/prefix`   | `http://gw:8080/prefix/api/auth/health` ✅   |
+| không đặt / rỗng             | giữ nguyên, không crash   | (hành vi như trước)                          |
+
+Tiến trình con chạy sau (vai trò của `envsubst`) nhận đúng giá trị đã chuẩn hóa, biến
+tạm không bị rò ra. Đã đối chiếu entrypoint của tag `nginx/docker-nginx` `1.28.0`: có
+nhánh `*.envsh` và chính image cũng dùng `15-local-resolvers.envsh` theo cách này.
+`scripts/check-env.ps1` vẫn OK.
+
+> **Chưa chạy lại trong container thật** (Docker daemon không bật lúc làm). Cần test
+> tay: đặt `API_GATEWAY_URL=http://api-gateway:8080/` trong `.env` rồi
+> `docker compose up -d --build frontend`, sau đó kiểm tra:
+>
+> - log container có dòng `API_GATEWAY_URL co '/' o cuoi...`;
+> - `docker exec vmarket-frontend cat /etc/nginx/conf.d/default.conf` có
+>   `set $gateway "http://api-gateway:8080";`;
+> - `curl :5173/api/auth/health` trả 200.

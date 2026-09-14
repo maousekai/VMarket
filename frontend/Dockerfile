@@ -36,9 +36,13 @@ FROM nginx:1.28-alpine
 # truong, entrypoint cua image chay envsubst -> /etc/nginx/conf.d/default.conf.
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY default.conf.template /etc/nginx/templates/default.conf.template
+# Bo "/" o cuoi API_GATEWAY_URL truoc khi envsubst (tranh "//api/..." khi ghep
+# voi $request_uri). Entrypoint source file .envsh, can bit thuc thi (chmod ben duoi).
+COPY 18-normalize-api-gateway-url.envsh /docker-entrypoint.d/
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # Dich den cua reverse proxy /api/* - doi duoc luc RUNTIME (khong build lai image).
+# Co hay khong "/" o cuoi deu duoc (script .envsh o tren chuan hoa).
 ENV API_GATEWAY_URL=http://api-gateway:8080
 # DNS noi bo cua Docker cho user-defined network (dung de resolve ten service).
 ENV NGINX_RESOLVER=127.0.0.11
@@ -47,6 +51,7 @@ ENV NGINX_RESOLVER=127.0.0.11
 # conf.d phai ghi duoc vi entrypoint (chay bang user nginx) ghi ket qua envsubst
 # vao day; xoa default.conf cua image de khong con server :80 thua.
 RUN rm -f /etc/nginx/conf.d/default.conf \
+ && chmod 755 /docker-entrypoint.d/18-normalize-api-gateway-url.envsh \
  && chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d
 USER nginx
 
