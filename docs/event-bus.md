@@ -24,6 +24,7 @@ mục Elasticsearch (FR-SRCH-04), Recommendation nhận để cập nhật đặ
 | Routing key | `=` **tên sự kiện** (PascalCase, khớp SRS §8.1) | `ProductCreated` |
 | Queue | `{tên-service}.events` (durable, do chính service nhận khai báo) | `ai-search.events` |
 | Binding | Queue bind tới exchange theo từng routing key mà service nhận | `ai-search.events` ← `ProductCreated` |
+| Dead-letter | `{exchange}.dlx` và `{queue}.dead` | `vmarket.events.dlx`, `product.events.dead` |
 
 - Exchange, queue, binding **durable** (không tự xoá) để không mất sự kiện.
 - Service phát sự kiện **không tự khai báo queue** (không cần biết ai nghe).
@@ -117,27 +118,32 @@ channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_
 | Sự kiện | Phát | Nhận |
 |---|---|---|
 | `ProductCreated` / `ProductUpdated` / `ProductDeleted` | Product Catalog | AI Search, Recommendation |
-| `ShopApproved` / `ShopSuspended` | Shop | Notification |
-| `OrderPlaced` | Order | Notification, Delivery |
-| `StockReserved` / `StockReleased` | Product Catalog | Order |
+| `ShopApproved` / `ShopSuspended` | Shop | Auth, Product Catalog, Notification |
+| `OrderPlaced` | Order | Product Catalog, Payment, Notification, Recommendation |
+| `OrderConfirmed` / `OrderCancelled` | Order | Product Catalog |
+| `StockReserved` / `StockReleased` / `StockReservationFailed` | Product Catalog | Order |
+| `ProductModerated` | Product Catalog | Notification |
 | `PaymentSucceeded` / `PaymentFailed` | Payment | Order, Notification |
 | `DeliveryAssigned` | Delivery | Notification |
 | `ReviewCreated` | Review | Notification, Product |
 | `UserBehaviorTracked` | Gateway / Clients | Recommendation |
 
-## 6. Demo end-to-end (PBL6-39)
+## 6. Kiểm thử end-to-end
 
 Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 
 1. Khởi động RabbitMQ: `docker compose up -d rabbitmq`.
 2. Chạy product-service (`mvnw spring-boot:run`) và ai-search-service (`uvicorn main:app`).
-3. Gọi demo: `POST http://localhost:8084/api/products/_demo/product-created`.
-4. Quan sát log ai-search-service in ra `ProductCreated` vừa nhận.
+3. Đồng bộ một `ShopApproved`, sau đó tạo sản phẩm qua API Seller thật.
+4. Quan sát `ProductCreated` schema v2 trong AI Search; event giữ nguyên `eventId`
+   khi outbox phải gửi lại.
 
 ## 7. Lưu ý / hướng phát triển sau
 
-- **Retry + DLQ** (NFR-REL-02): hiện chưa cài; thông điệp lỗi sẽ được thêm retry và
-  chuyển vào Dead-Letter Queue (`{queue}.dlq`) ở giai đoạn sau.
+- **Retry + DLQ** (NFR-REL-02): listener retry thêm 2 lần với exponential backoff,
+  sau đó chuyển thông điệp vào `{queue}.dead` qua exchange `vmarket.events.dlx`.
+- **Transactional outbox**: Product Catalog ghi domain data và outbox trong cùng
+  Mongo transaction; worker gửi lại với exponential backoff khi RabbitMQ lỗi.
 - **Idempotency**: consumer nên dựa vào `eventId` để tránh xử lý trùng (vd khi retry).
 - **Phá phiên bản schema**: khi payload thay đổi, giữ tương thích ngược hoặc bump
   version và thống nhất với các service nhận trước khi deploy.

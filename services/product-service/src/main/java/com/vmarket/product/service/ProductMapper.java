@@ -13,9 +13,14 @@ import com.vmarket.product.model.ProductVariant;
 public class ProductMapper {
 	public ProductResponse toResponse(Product product) {
 		List<ProductResponse.VariantResponse> variants = product.getVariants().stream().map(this::toVariantResponse).toList();
-		BigDecimal minPrice = product.getVariants().stream().map(ProductVariant::getPrice).min(BigDecimal::compareTo).orElse(null);
-		BigDecimal maxPrice = product.getVariants().stream().map(ProductVariant::getPrice).max(BigDecimal::compareTo).orElse(null);
-		long available = product.getVariants().stream().mapToLong(v -> Math.max(0, v.getStock() - v.getReservedStock())).sum();
+		BigDecimal minPrice = product.getMinPrice() != null ? product.getMinPrice()
+				: product.getVariants().stream().map(ProductVariant::getPrice).min(BigDecimal::compareTo).orElse(null);
+		BigDecimal maxPrice = product.getMaxPrice() != null ? product.getMaxPrice()
+				: product.getVariants().stream().map(ProductVariant::getPrice).max(BigDecimal::compareTo).orElse(null);
+		long calculatedAvailable = product.getVariants().stream()
+				.mapToLong(v -> Math.max(0, v.getStock() - v.getReservedStock())).sum();
+		long available = product.getAvailableStock() == 0 && calculatedAvailable > 0
+				? calculatedAvailable : product.getAvailableStock();
 		return new ProductResponse(product.getId(), product.getShopId(), product.getName(), product.getDescription(),
 				List.copyOf(product.getImageUrls()), product.getCategoryId(), product.getBrandId(), product.getStatus(), variants,
 				minPrice, maxPrice, available, product.getRatingAverage(), product.getRatingCount(), product.getSoldCount(),

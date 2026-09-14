@@ -17,11 +17,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.vmarket.product.dto.ProductRequest;
+import com.vmarket.events.ProductCreated;
 import com.vmarket.product.exception.ApiException;
 import com.vmarket.product.event.ProductEventPublisher;
+import com.vmarket.product.event.ProductEventFactory;
 import com.vmarket.product.model.Category;
 import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
@@ -32,6 +35,8 @@ import com.vmarket.product.service.BrandService;
 import com.vmarket.product.service.CategoryService;
 import com.vmarket.product.service.ProductCatalogService;
 import com.vmarket.product.service.ProductMapper;
+import com.vmarket.product.service.ProductDerivedFields;
+import com.vmarket.product.service.ShopAccessService;
 
 @ExtendWith(MockitoExtension.class)
 class ProductCatalogServiceTest {
@@ -40,17 +45,19 @@ class ProductCatalogServiceTest {
 	@Mock CategoryService categoryService;
 	@Mock BrandService brandService;
 	@Mock ProductEventPublisher publisher;
+	@Mock ShopAccessService shopAccessService;
 	private ProductCatalogService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new ProductCatalogService(repository, query, categoryService, brandService,
-				new ProductMapper(), publisher);
+				new ProductMapper(), publisher, new ProductEventFactory(),
+				new ProductDerivedFields(), shopAccessService);
 	}
 
 	@Test
 	void createPersistsSellerAndPublishesCreatedEvent() {
-		when(categoryService.getRequired("cat-1")).thenReturn(activeCategory());
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
 		when(repository.save(any(Product.class))).thenAnswer(invocation -> {
 			Product product = invocation.getArgument(0);
 			product.setId("product-1");
@@ -62,7 +69,14 @@ class ProductCatalogServiceTest {
 		assertThat(result.id()).isEqualTo("product-1");
 		assertThat(result.availableStock()).isEqualTo(12);
 		assertThat(result.variants().get(0).id()).isNotBlank();
-		verify(publisher).publishCreated(any());
+		verify(shopAccessService).requireActiveOwner("shop-1", "seller-1");
+		ArgumentCaptor<ProductCreated> event = ArgumentCaptor.forClass(ProductCreated.class);
+		verify(publisher).publishCreated(event.capture());
+		assertThat(event.getValue().schemaVersion()).isEqualTo(2);
+		assertThat(event.getValue().description()).isEqualTo("Mô tả");
+		assertThat(event.getValue().categoryId()).isEqualTo("cat-1");
+		assertThat(event.getValue().availableStock()).isEqualTo(12);
+		assertThat(event.getValue().variants()).hasSize(1);
 	}
 
 	@Test
@@ -80,7 +94,7 @@ class ProductCatalogServiceTest {
 	void updateCannotReduceStockBelowReservedQuantity() {
 		Product product = product("seller-1", 5);
 		when(repository.findById("product-1")).thenReturn(Optional.of(product));
-		when(categoryService.getRequired("cat-1")).thenReturn(activeCategory());
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
 
 		assertThatThrownBy(() -> service.update("product-1", "seller-1", request("variant-1", 4)))
 				.isInstanceOf(ApiException.class)

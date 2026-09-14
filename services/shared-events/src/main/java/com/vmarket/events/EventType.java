@@ -24,10 +24,17 @@ public final class EventType {
 
 	/** Order Service phát khi tạo đơn hàng. */
 	public static final String ORDER_PLACED = "OrderPlaced";
+	/** Order Service phát khi Seller xác nhận đơn COD hoặc yêu cầu chốt tồn kho. */
+	public static final String ORDER_CONFIRMED = "OrderConfirmed";
+	/** Order Service phát khi đơn bị hủy và cần hoàn lượng tồn kho đã giữ. */
+	public static final String ORDER_CANCELLED = "OrderCancelled";
 
 	/** Product Catalog phát khi tạm giữ / giải phóng tồn kho theo đơn. */
 	public static final String STOCK_RESERVED = "StockReserved";
 	public static final String STOCK_RELEASED = "StockReleased";
+	public static final String STOCK_RESERVATION_FAILED = "StockReservationFailed";
+	/** Product Catalog phát sau khi Admin gỡ/khôi phục sản phẩm. */
+	public static final String PRODUCT_MODERATED = "ProductModerated";
 
 	/** Payment Service phát theo kết quả giao dịch (PayOS webhook). */
 	public static final String PAYMENT_SUCCEEDED = "PaymentSucceeded";

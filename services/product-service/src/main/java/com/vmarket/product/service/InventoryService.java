@@ -8,6 +8,7 @@ import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.events.StockItem;
 import com.vmarket.events.StockReleased;
@@ -16,6 +17,7 @@ import com.vmarket.product.dto.InventoryRequest;
 import com.vmarket.product.dto.InventoryResponse;
 import com.vmarket.product.exception.ApiException;
 import com.vmarket.product.event.ProductEventPublisher;
+import com.vmarket.product.event.ProductEventFactory;
 import com.vmarket.product.model.InventoryReservation;
 import com.vmarket.product.model.InventoryReservation.ReservationItem;
 import com.vmarket.product.model.Product;
@@ -30,15 +32,21 @@ public class InventoryService {
 	private final ProductRepository productRepository;
 	private final InventoryReservationRepository reservationRepository;
 	private final ProductEventPublisher publisher;
+	private final ProductEventFactory eventFactory;
+	private final ProductDerivedFields derivedFields;
 
 	public InventoryService(ProductRepository productRepository,
-			InventoryReservationRepository reservationRepository, ProductEventPublisher publisher) {
+			InventoryReservationRepository reservationRepository, ProductEventPublisher publisher,
+			ProductEventFactory eventFactory, ProductDerivedFields derivedFields) {
 		this.productRepository = productRepository;
 		this.reservationRepository = reservationRepository;
 		this.publisher = publisher;
+		this.eventFactory = eventFactory;
+		this.derivedFields = derivedFields;
 	}
 
-	public synchronized InventoryResponse reserve(InventoryRequest request) {
+	@Transactional
+	public InventoryResponse reserve(InventoryRequest request) {
 		List<InventoryRequest.InventoryItem> items = normalize(request.items());
 		var existing = reservationRepository.findByOrderId(request.orderId());
 		if (existing.isPresent()) {
@@ -50,23 +58,27 @@ public class InventoryService {
 		}
 
 		Map<String, Product> products = loadAndValidate(items, true);
-		for (InventoryRequest.InventoryItem item : items) {
-			ProductVariant variant = findVariant(products.get(item.productId()), item.variantId());
-			variant.setReservedStock(variant.getReservedStock() + item.quantity());
-			products.get(item.productId()).setUpdatedAt(Instant.now());
-		}
-		productRepository.saveAll(products.values());
-
 		Instant now = Instant.now();
 		InventoryReservation reservation = new InventoryReservation(null, request.orderId(), items.stream()
 				.map(item -> new ReservationItem(item.productId(), item.variantId(), item.quantity())).toList(),
 				ReservationStatus.RESERVED, now, now);
 		InventoryReservation saved = reservationRepository.save(reservation);
+
+		for (InventoryRequest.InventoryItem item : items) {
+			Product product = products.get(item.productId());
+			ProductVariant variant = findVariant(product, item.variantId());
+			variant.setReservedStock(variant.getReservedStock() + item.quantity());
+			derivedFields.refresh(product);
+			product.setUpdatedAt(Instant.now());
+		}
+		List<Product> changedProducts = productRepository.saveAll(products.values());
+		changedProducts.forEach(product -> publisher.publishUpdated(eventFactory.updated(product)));
 		publisher.publishStockReserved(new StockReserved(saved.getOrderId(), toEventItems(saved)));
 		return toResponse(saved);
 	}
 
-	public synchronized InventoryResponse confirm(String orderId) {
+	@Transactional
+	public InventoryResponse confirm(String orderId) {
 		InventoryReservation reservation = getReservation(orderId);
 		if (reservation.getStatus() == ReservationStatus.CONFIRMED) return toResponse(reservation);
 		if (reservation.getStatus() != ReservationStatus.RESERVED) {
@@ -84,32 +96,43 @@ public class InventoryService {
 			variant.setStock(variant.getStock() - item.quantity());
 			variant.setSoldCount(variant.getSoldCount() + item.quantity());
 			product.setSoldCount(product.getSoldCount() + item.quantity());
+			derivedFields.refresh(product);
 			product.setUpdatedAt(Instant.now());
 		}
-		productRepository.saveAll(products.values());
+		List<Product> changedProducts = productRepository.saveAll(products.values());
+		changedProducts.forEach(product -> publisher.publishUpdated(eventFactory.updated(product)));
 		reservation.setStatus(ReservationStatus.CONFIRMED);
 		reservation.setUpdatedAt(Instant.now());
 		return toResponse(reservationRepository.save(reservation));
 	}
 
-	public synchronized InventoryResponse release(String orderId) {
+	@Transactional
+	public InventoryResponse release(String orderId) {
 		InventoryReservation reservation = getReservation(orderId);
 		if (reservation.getStatus() == ReservationStatus.RELEASED) return toResponse(reservation);
-		if (reservation.getStatus() != ReservationStatus.RESERVED) {
-			throw conflict("Không thể hoàn tồn kho đã được xác nhận trừ");
-		}
+		ReservationStatus previousStatus = reservation.getStatus();
 		List<InventoryRequest.InventoryItem> items = fromReservation(reservation);
 		Map<String, Product> products = loadAndValidate(items, false);
 		for (InventoryRequest.InventoryItem item : items) {
 			Product product = products.get(item.productId());
 			ProductVariant variant = findVariant(product, item.variantId());
-			if (variant.getReservedStock() < item.quantity()) {
-				throw conflict("Dữ liệu tồn kho tạm giữ không còn nhất quán");
+			if (previousStatus == ReservationStatus.RESERVED) {
+				if (variant.getReservedStock() < item.quantity()) {
+					throw conflict("Dữ liệu tồn kho tạm giữ không còn nhất quán");
+				}
+				variant.setReservedStock(variant.getReservedStock() - item.quantity());
+			} else if (previousStatus == ReservationStatus.CONFIRMED) {
+				variant.setStock(variant.getStock() + item.quantity());
+				variant.setSoldCount(Math.max(0, variant.getSoldCount() - item.quantity()));
+				product.setSoldCount(Math.max(0, product.getSoldCount() - item.quantity()));
+			} else {
+				throw conflict("Trạng thái giao dịch tồn kho không hợp lệ");
 			}
-			variant.setReservedStock(variant.getReservedStock() - item.quantity());
+			derivedFields.refresh(product);
 			product.setUpdatedAt(Instant.now());
 		}
-		productRepository.saveAll(products.values());
+		List<Product> changedProducts = productRepository.saveAll(products.values());
+		changedProducts.forEach(product -> publisher.publishUpdated(eventFactory.updated(product)));
 		reservation.setStatus(ReservationStatus.RELEASED);
 		reservation.setUpdatedAt(Instant.now());
 		InventoryReservation saved = reservationRepository.save(reservation);

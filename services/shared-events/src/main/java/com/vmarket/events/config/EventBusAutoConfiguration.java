@@ -9,10 +9,13 @@ import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.MessageListener;
 import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
+import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
+import org.springframework.amqp.rabbit.retry.RejectAndDontRequeueRecoverer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -76,9 +79,18 @@ public class EventBusAutoConfiguration {
 	@ConditionalOnProperty(prefix = "app.events", name = "listen", havingValue = "true")
 	Declarables eventDeclarables(EventBusProperties properties, TopicExchange exchange) {
 		validateQueueConfigured(properties);
-		Queue queue = new Queue(properties.getQueue(), true, false, false);
+		String deadLetterExchangeName = properties.getExchange() + ".dlx";
+		String deadLetterRoutingKey = properties.getQueue() + ".dead";
+		Queue queue = QueueBuilder.durable(properties.getQueue())
+				.deadLetterExchange(deadLetterExchangeName)
+				.deadLetterRoutingKey(deadLetterRoutingKey).build();
+		TopicExchange deadLetterExchange = new TopicExchange(deadLetterExchangeName, true, false);
+		Queue deadLetterQueue = QueueBuilder.durable(properties.getQueue() + ".dead").build();
 		List<Declarable> declarables = new ArrayList<>();
 		declarables.add(queue);
+		declarables.add(deadLetterExchange);
+		declarables.add(deadLetterQueue);
+		declarables.add(BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(deadLetterRoutingKey));
 		for (String bindingKey : properties.getBindings()) {
 			Binding binding = BindingBuilder.bind(queue).to(exchange).with(bindingKey);
 			declarables.add(binding);
@@ -93,6 +105,10 @@ public class EventBusAutoConfiguration {
 		validateQueueConfigured(properties);
 		SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
 		container.setQueueNames(properties.getQueue());
+		container.setDefaultRequeueRejected(false);
+		container.setAdviceChain(RetryInterceptorBuilder.stateless().maxRetries(2)
+				.backOffOptions(1000, 2, 10000)
+				.recoverer(new RejectAndDontRequeueRecoverer()).build());
 		container.setMessageListener((MessageListener) message -> {
 			dispatcher.dispatch(json.readEnvelope(message.getBody()));
 		});

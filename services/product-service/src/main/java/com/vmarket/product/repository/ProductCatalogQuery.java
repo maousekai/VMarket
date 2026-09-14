@@ -28,8 +28,9 @@ public class ProductCatalogQuery {
 			Double minRating, String shopId, String sort, int page, int size) {
 		Criteria criteria = Criteria.where("status").is(ProductStatus.ACTIVE)
 				.and("moderationRemoved").is(false).and("deletedAt").is(null);
-		if (categoryIds != null && !categoryIds.isEmpty()) {
-			criteria.and("categoryId").in(categoryIds);
+		if (categoryIds != null) {
+			if (categoryIds.isEmpty()) criteria.and("_id").exists(false);
+			else criteria.and("categoryId").in(categoryIds);
 		}
 		if (keyword != null && !keyword.isBlank()) {
 			criteria.and("name").regex(Pattern.compile(Pattern.quote(keyword.trim()), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE));
@@ -51,8 +52,8 @@ public class ProductCatalogQuery {
 		long total = mongoTemplate.count(countQuery, Product.class);
 		Sort sorting = switch (sort == null ? "NEWEST" : sort.toUpperCase()) {
 			case "BEST_SELLING" -> Sort.by(Sort.Direction.DESC, "soldCount");
-			case "PRICE_ASC" -> Sort.by(Sort.Direction.ASC, "variants.price");
-			case "PRICE_DESC" -> Sort.by(Sort.Direction.DESC, "variants.price");
+			case "PRICE_ASC" -> Sort.by(Sort.Direction.ASC, "minPrice");
+			case "PRICE_DESC" -> Sort.by(Sort.Direction.DESC, "minPrice");
 			default -> Sort.by(Sort.Direction.DESC, "createdAt");
 		};
 		PageRequest pageable = PageRequest.of(page, size, sorting);

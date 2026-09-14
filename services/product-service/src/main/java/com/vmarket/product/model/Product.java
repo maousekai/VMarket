@@ -1,5 +1,6 @@
 package com.vmarket.product.model;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,12 +37,18 @@ public class Product {
 	@Indexed
 	private ProductStatus status;
 	private List<ProductVariant> variants = new ArrayList<>();
+	@Indexed
+	private BigDecimal minPrice;
+	private BigDecimal maxPrice;
+	private long availableStock;
 	private double ratingAverage;
 	private long ratingCount;
 	private long soldCount;
 	private boolean moderationRemoved;
 	private String moderationReason;
 	private ProductStatus statusBeforeModeration;
+	private boolean shopSuspended;
+	private ProductStatus statusBeforeShopSuspension;
 	private Instant createdAt;
 	private Instant updatedAt;
 	private Instant deletedAt;

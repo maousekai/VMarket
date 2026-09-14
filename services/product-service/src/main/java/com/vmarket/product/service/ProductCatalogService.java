@@ -13,16 +13,17 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import com.vmarket.events.ProductCreated;
 import com.vmarket.events.ProductDeleted;
-import com.vmarket.events.ProductUpdated;
+import com.vmarket.events.ProductModerated;
 import com.vmarket.product.dto.PageResponse;
 import com.vmarket.product.dto.ProductDetailResponse;
 import com.vmarket.product.dto.ProductRequest;
 import com.vmarket.product.dto.ProductResponse;
 import com.vmarket.product.exception.ApiException;
 import com.vmarket.product.event.ProductEventPublisher;
+import com.vmarket.product.event.ProductEventFactory;
 import com.vmarket.product.model.Brand;
 import com.vmarket.product.model.Category;
 import com.vmarket.product.model.Product;
@@ -39,19 +40,28 @@ public class ProductCatalogService {
 	private final BrandService brandService;
 	private final ProductMapper mapper;
 	private final ProductEventPublisher publisher;
+	private final ProductEventFactory eventFactory;
+	private final ProductDerivedFields derivedFields;
+	private final ShopAccessService shopAccessService;
 
 	public ProductCatalogService(ProductRepository repository, ProductCatalogQuery query,
 			CategoryService categoryService, BrandService brandService, ProductMapper mapper,
-			ProductEventPublisher publisher) {
+			ProductEventPublisher publisher, ProductEventFactory eventFactory,
+			ProductDerivedFields derivedFields, ShopAccessService shopAccessService) {
 		this.repository = repository;
 		this.query = query;
 		this.categoryService = categoryService;
 		this.brandService = brandService;
 		this.mapper = mapper;
 		this.publisher = publisher;
+		this.eventFactory = eventFactory;
+		this.derivedFields = derivedFields;
+		this.shopAccessService = shopAccessService;
 	}
 
+	@Transactional
 	public ProductResponse create(String sellerId, ProductRequest request) {
+		shopAccessService.requireActiveOwner(request.shopId().trim(), sellerId);
 		validateReferences(request.categoryId(), request.brandId(), request.status());
 		validateVariants(request.variants());
 		Instant now = Instant.now();
@@ -65,12 +75,14 @@ public class ProductCatalogService {
 		applyRequest(product, request, Map.of());
 		product.setUpdatedAt(now);
 		Product saved = repository.save(product);
-		publisher.publishCreated(toCreatedEvent(saved));
+		publisher.publishCreated(eventFactory.created(saved));
 		return mapper.toResponse(saved);
 	}
 
+	@Transactional
 	public ProductResponse update(String id, String sellerId, ProductRequest request) {
 		Product product = getOwned(id, sellerId);
+		shopAccessService.requireActiveOwner(product.getShopId(), sellerId);
 		if (!product.getShopId().equals(request.shopId().trim())) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "SHOP_IMMUTABLE", "Không thể chuyển sản phẩm sang gian hàng khác");
 		}
@@ -92,10 +104,11 @@ public class ProductCatalogService {
 		applyRequest(product, request, existing);
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
-		publisher.publishUpdated(toUpdatedEvent(saved));
+		publisher.publishUpdated(eventFactory.updated(saved));
 		return mapper.toResponse(saved);
 	}
 
+	@Transactional
 	public void delete(String id, String sellerId) {
 		Product product = getOwned(id, sellerId);
 		if (product.getDeletedAt() != null) return;
@@ -106,6 +119,7 @@ public class ProductCatalogService {
 		publisher.publishDeleted(new ProductDeleted(saved.getId(), saved.getShopId()));
 	}
 
+	@Transactional
 	public ProductResponse moderate(String id, boolean removed, String reason) {
 		Product product = getRequired(id);
 		if (product.getDeletedAt() != null) {
@@ -122,12 +136,21 @@ public class ProductCatalogService {
 		} else {
 			product.setModerationRemoved(false);
 			product.setModerationReason(null);
-			product.setStatus(product.getStatusBeforeModeration() == null ? ProductStatus.DRAFT : product.getStatusBeforeModeration());
+			ProductStatus restoredStatus = product.getStatusBeforeModeration() == null
+					? ProductStatus.DRAFT : product.getStatusBeforeModeration();
+			if (product.isShopSuspended()) {
+				product.setStatus(ProductStatus.HIDDEN);
+				product.setStatusBeforeShopSuspension(restoredStatus);
+			} else {
+				product.setStatus(restoredStatus);
+			}
 			product.setStatusBeforeModeration(null);
 		}
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
-		publisher.publishUpdated(toUpdatedEvent(saved));
+		publisher.publishUpdated(eventFactory.updated(saved));
+		publisher.publishModerated(new ProductModerated(saved.getId(), saved.getShopId(), saved.getSellerId(),
+				removed, saved.getModerationReason()));
 		return mapper.toResponse(saved);
 	}
 
@@ -143,7 +166,7 @@ public class ProductCatalogService {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_RATING", "Điểm đánh giá phải nằm trong khoảng 0 đến 5");
 		}
 		List<String> categories = categoryId == null || categoryId.isBlank()
-				? List.of() : categoryService.descendantIds(categoryId);
+				? categoryService.publicIds() : categoryService.descendantIds(categoryId);
 		Page<ProductResponse> result = query.search(keyword, categories, minPrice, maxPrice, minRating, shopId, sort,
 				Math.max(page, 0), Math.min(Math.max(size, 1), 100)).map(mapper::toResponse);
 		return PageResponse.from(result);
@@ -154,6 +177,7 @@ public class ProductCatalogService {
 		if (product.getDeletedAt() != null || product.getStatus() != ProductStatus.ACTIVE || product.isModerationRemoved()) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Không tìm thấy sản phẩm");
 		}
+		categoryService.getPublicRequired(product.getCategoryId());
 		List<ProductResponse> similar = query.search(null, List.of(product.getCategoryId()), null, null, null, null,
 				"BEST_SELLING", 0, 7).getContent().stream()
 				.filter(item -> !item.getId().equals(product.getId())).limit(6).map(mapper::toResponse).toList();
@@ -201,10 +225,12 @@ public class ProductCatalogService {
 					old == null ? 0 : old.getSoldCount());
 		}).toList();
 		product.setVariants(variants);
+		derivedFields.refresh(product);
 	}
 
 	private void validateReferences(String categoryId, String brandId, ProductStatus status) {
-		Category category = categoryService.getRequired(categoryId);
+		Category category = status == ProductStatus.ACTIVE
+				? categoryService.getPublicRequired(categoryId) : categoryService.getRequired(categoryId);
 		if (status == ProductStatus.ACTIVE && !category.isActive()) {
 			throw new ApiException(HttpStatus.CONFLICT, "CATEGORY_INACTIVE", "Không thể bán sản phẩm trong danh mục đang ẩn");
 		}
@@ -238,20 +264,6 @@ public class ProductCatalogService {
 						"Không thể xóa biến thể đang có tồn kho tạm giữ");
 			}
 		}
-	}
-
-	private ProductCreated toCreatedEvent(Product product) {
-		return new ProductCreated(product.getId(), product.getShopId(), product.getName(), minimumPrice(product),
-				product.getStatus().name(), List.copyOf(product.getImageUrls()));
-	}
-
-	private ProductUpdated toUpdatedEvent(Product product) {
-		return new ProductUpdated(product.getId(), product.getShopId(), product.getName(), minimumPrice(product),
-				product.getStatus().name(), List.copyOf(product.getImageUrls()));
-	}
-
-	private BigDecimal minimumPrice(Product product) {
-		return product.getVariants().stream().map(ProductVariant::getPrice).min(BigDecimal::compareTo).orElse(null);
 	}
 
 	private String blankToNull(String value) {

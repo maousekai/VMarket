@@ -77,25 +77,50 @@ public class CategoryService {
 	}
 
 	public List<CategoryResponse> tree(boolean includeInactive) {
-		List<Category> categories = categoryRepository.findAllByOrderBySortOrderAscNameAsc().stream()
-				.filter(category -> includeInactive || category.isActive()).toList();
+		List<Category> allCategories = categoryRepository.findAllByOrderBySortOrderAscNameAsc();
+		List<Category> categories = includeInactive ? allCategories
+				: allCategories.stream().filter(Category::isActive).toList();
 		Map<String, List<Category>> children = new HashMap<>();
 		for (Category category : categories) {
 			children.computeIfAbsent(category.getParentId(), ignored -> new ArrayList<>()).add(category);
 		}
-		Set<String> visibleIds = new HashSet<>();
-		categories.forEach(category -> visibleIds.add(category.getId()));
+		Set<String> allIds = new HashSet<>();
+		allCategories.forEach(category -> allIds.add(category.getId()));
 		return categories.stream()
-				.filter(category -> category.getParentId() == null || !visibleIds.contains(category.getParentId()))
+				.filter(category -> category.getParentId() == null
+						|| includeInactive && !allIds.contains(category.getParentId()))
 				.map(category -> buildTree(category, children, new HashSet<>())).toList();
 	}
 
 	public List<String> descendantIds(String categoryId) {
 		if (categoryId == null || categoryId.isBlank()) return List.of();
-		getRequired(categoryId);
+		getPublicRequired(categoryId);
+		Map<String, List<Category>> children = activeChildren();
 		List<String> ids = new ArrayList<>();
-		collectDescendants(categoryId, ids, new HashSet<>());
+		collectDescendants(categoryId, children, ids, new HashSet<>());
 		return ids;
+	}
+
+	public List<String> publicIds() {
+		List<String> result = new ArrayList<>();
+		Map<String, List<Category>> children = activeChildren();
+		children.getOrDefault(null, List.of())
+				.forEach(root -> collectDescendants(root.getId(), children, result, new HashSet<>()));
+		return result;
+	}
+
+	public Category getPublicRequired(String id) {
+		Category category = getRequired(id);
+		String cursor = id;
+		Set<String> visited = new HashSet<>();
+		while (cursor != null && visited.add(cursor)) {
+			Category current = getRequired(cursor);
+			if (!current.isActive()) {
+				throw new ApiException(HttpStatus.NOT_FOUND, "CATEGORY_NOT_FOUND", "Không tìm thấy danh mục");
+			}
+			cursor = current.getParentId();
+		}
+		return category;
 	}
 
 	public Category getRequired(String id) {
@@ -122,10 +147,19 @@ public class CategoryService {
 		return toResponse(category, nested);
 	}
 
-	private void collectDescendants(String id, List<String> result, Set<String> visited) {
+	private Map<String, List<Category>> activeChildren() {
+		Map<String, List<Category>> children = new HashMap<>();
+		categoryRepository.findAllByOrderBySortOrderAscNameAsc().stream().filter(Category::isActive)
+				.forEach(category -> children.computeIfAbsent(category.getParentId(), ignored -> new ArrayList<>()).add(category));
+		return children;
+	}
+
+	private void collectDescendants(String id, Map<String, List<Category>> children,
+			List<String> result, Set<String> visited) {
 		if (!visited.add(id)) return;
 		result.add(id);
-		categoryRepository.findByParentId(id).forEach(child -> collectDescendants(child.getId(), result, visited));
+		children.getOrDefault(id, List.of())
+				.forEach(child -> collectDescendants(child.getId(), children, result, visited));
 	}
 
 	private CategoryResponse toResponse(Category category, List<CategoryResponse> children) {

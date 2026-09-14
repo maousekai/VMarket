@@ -75,6 +75,29 @@ class CategoryServiceTest {
 	}
 
 	@Test
+	void publicTreeDoesNotPromoteActiveChildOfHiddenParent() {
+		Category root = category("root", null);
+		root.setActive(false);
+		Category child = category("child", "root");
+		when(categoryRepository.findAllByOrderBySortOrderAscNameAsc()).thenReturn(List.of(root, child));
+
+		assertThat(service.tree(false)).isEmpty();
+	}
+
+	@Test
+	void descendantsStopAtHiddenCategoryBranch() {
+		Category root = category("root", null);
+		Category hidden = category("hidden", "root");
+		hidden.setActive(false);
+		Category leakedChild = category("leaked", "hidden");
+		when(categoryRepository.findById("root")).thenReturn(Optional.of(root));
+		when(categoryRepository.findAllByOrderBySortOrderAscNameAsc())
+				.thenReturn(List.of(root, hidden, leakedChild));
+
+		assertThat(service.descendantIds("root")).containsExactly("root");
+	}
+
+	@Test
 	void deleteRejectsCategoryUsedByProduct() {
 		Category category = category("cat-1", null);
 		when(categoryRepository.findById("cat-1")).thenReturn(Optional.of(category));

@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.vmarket.product.dto.InventoryRequest;
 import com.vmarket.product.event.ProductEventPublisher;
+import com.vmarket.product.event.ProductEventFactory;
 import com.vmarket.product.exception.ApiException;
 import com.vmarket.product.model.InventoryReservation;
 import com.vmarket.product.model.Product;
@@ -31,6 +32,7 @@ import com.vmarket.product.model.ReservationStatus;
 import com.vmarket.product.repository.InventoryReservationRepository;
 import com.vmarket.product.repository.ProductRepository;
 import com.vmarket.product.service.InventoryService;
+import com.vmarket.product.service.ProductDerivedFields;
 
 @ExtendWith(MockitoExtension.class)
 class InventoryServiceTest {
@@ -41,7 +43,8 @@ class InventoryServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new InventoryService(productRepository, reservationRepository, publisher);
+		service = new InventoryService(productRepository, reservationRepository, publisher,
+				new ProductEventFactory(), new ProductDerivedFields());
 	}
 
 	@Test
@@ -50,6 +53,7 @@ class InventoryServiceTest {
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
 		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
 		var response = service.reserve(request(3));
 
@@ -69,6 +73,7 @@ class InventoryServiceTest {
 				.isInstanceOf(ApiException.class)
 				.hasMessageContaining("Không đủ tồn kho");
 		verify(productRepository, never()).saveAll(any());
+		verify(reservationRepository, never()).save(any());
 	}
 
 	@Test
@@ -90,6 +95,7 @@ class InventoryServiceTest {
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
 		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
 		var response = service.confirm("order-1");
 
@@ -107,6 +113,7 @@ class InventoryServiceTest {
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
 		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
 		var response = service.release("order-1");
 
@@ -114,6 +121,25 @@ class InventoryServiceTest {
 		assertThat(product.getVariants().get(0).getReservedStock()).isZero();
 		assertThat(product.getVariants().get(0).getStock()).isEqualTo(10);
 		verify(publisher).publishStockReleased(any());
+	}
+
+	@Test
+	void cancellingConfirmedOrderRestoresPhysicalStockAndSoldCount() {
+		Product product = product(7, 0);
+		product.setSoldCount(3);
+		product.getVariants().get(0).setSoldCount(3);
+		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
+		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
+		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		var response = service.release("order-1");
+
+		assertThat(response.status()).isEqualTo(ReservationStatus.RELEASED);
+		assertThat(product.getVariants().get(0).getStock()).isEqualTo(10);
+		assertThat(product.getVariants().get(0).getSoldCount()).isZero();
+		assertThat(product.getSoldCount()).isZero();
 	}
 
 	private InventoryRequest request(int quantity) {

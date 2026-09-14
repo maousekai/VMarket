@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -25,6 +26,13 @@ public class InventoryReservation {
 	private ReservationStatus status;
 	private Instant createdAt;
 	private Instant updatedAt;
+	@Version
+	private Long version;
+
+	public InventoryReservation(String id, String orderId, List<ReservationItem> items,
+			ReservationStatus status, Instant createdAt, Instant updatedAt) {
+		this(id, orderId, items, status, createdAt, updatedAt, null);
+	}
 
 	@Data
 	@NoArgsConstructor
