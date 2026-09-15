@@ -137,6 +137,8 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token (xoay vòng). 200 / 401 (`INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`) |
 | `POST /api/auth/otp/request` | FR-AUTH-01 — gửi mã OTP xác thực email. 200 / 400 `VALIDATION_ERROR` / 429 (`OTP_RESEND_TOO_SOON`, `OTP_RATE_LIMITED`) / 502 `EMAIL_SEND_FAILED` |
 | `POST /api/auth/otp/verify`  | FR-AUTH-01 — xác nhận OTP → `email_verified=true` + `TokenResponse`. 200 / 400 (`OTP_NOT_FOUND`, `OTP_EXPIRED`, `OTP_INVALID`, `OTP_TOO_MANY_ATTEMPTS`, `OTP_ALREADY_USED`) |
+| `POST /api/auth/password/forgot` | FR-AUTH-04 — gửi mã đặt lại mật khẩu. 200 (không tiết lộ email tồn tại hay không) / 400 `VALIDATION_ERROR` / 429 (`PASSWORD_RESET_TOO_SOON`, `PASSWORD_RESET_RATE_LIMITED`) / 502 `EMAIL_SEND_FAILED` |
+| `POST /api/auth/password/reset`  | FR-AUTH-04 — xác nhận mã + đặt mật khẩu mới (không tự đăng nhập). 200 (`MessageResponse`) / 400 (`PASSWORD_RESET_NOT_FOUND`, `PASSWORD_RESET_EXPIRED`, `PASSWORD_RESET_INVALID`, `PASSWORD_RESET_TOO_MANY_ATTEMPTS`, `PASSWORD_RESET_ALREADY_USED`) |
 | `GET  /api/auth/health`  | Health-check                                              |
 
 Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
@@ -167,6 +169,17 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - Tài khoản tạo qua OTP có `password_hash = NULL` → không đăng nhập bằng mật khẩu
   được (dùng lại OTP để vào).
 
+**Quên mật khẩu (FR-AUTH-04, migration V5):**
+- `password/forgot` → mã 6 số (`SecureRandom`), lưu **hash BCrypt** + hạn 5 phút vào
+  bảng `password_reset_token` (key theo `user_id`, khác `email_otp` key theo email);
+  gửi qua `EmailSender`. Email chưa đăng ký vẫn trả response giống hệt (không tiết lộ).
+- Chặn gửi lại trong **60 giây**; tối đa **5 mã / giờ / tài khoản**.
+- `password/reset` → sai **5 lần** thì mã vô hiệu; đúng thì băm lại `password_hash`,
+  gỡ khoá đăng nhập (`failed_login_attempts`/`locked_until`) và thu hồi toàn bộ
+  refresh token hiện có. **Không tự đăng nhập** — phải đăng nhập lại bằng mật khẩu mới.
+- Cũng là cách đầu tiên để đặt mật khẩu cho tài khoản tạo qua OTP (vốn
+  `password_hash = NULL`).
+
 ## Roadmap nghiệp vụ (theo SRS)
 
 - [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
@@ -174,6 +187,6 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - [x] FR-AUTH-01 (PBL6-44): **xác thực email bằng OTP** (`/api/auth/otp/*`, migration V4)
 - [x] FR-AUTH-02 (PBL6-43): đăng nhập JWT + refresh xoay vòng + khoá sau 5 lần sai (migration V3)
 - [ ] FR-AUTH-03 (Google OAuth 2.0) — chuyển backlog (PBL6-44 đổi phạm vi sang OTP)
-- [ ] FR-AUTH-04 (PBL6-45): Quên mật khẩu (dùng lại `EmailSender`)
+- [x] FR-AUTH-04 (PBL6-45): **Quên mật khẩu** (`/api/auth/password/*`, migration V5)
 - [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
 - [ ] PBL6-47: Testing, Swagger & PR review

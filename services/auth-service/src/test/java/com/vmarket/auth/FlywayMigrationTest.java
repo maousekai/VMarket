@@ -15,7 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V4) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V5) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
  *
  * <p>Nếu context khởi động được nghĩa là: (1) các script migration chạy không lỗi,
@@ -41,8 +41,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("4");
-		assertThat(flyway.info().applied()).hasSize(4);
+		assertThat(current.getVersion().getVersion()).isEqualTo("5");
+		assertThat(flyway.info().applied()).hasSize(5);
 	}
 
 	@Test
@@ -59,6 +59,12 @@ class FlywayMigrationTest {
 			assertThat(columnExists(c, "email_otp", "attempts")).isTrue();
 			assertThat(columnExists(c, "email_otp", "consumed_at")).isTrue();
 			assertThat(passwordHashIsNullable(c)).isTrue();
+			// V5
+			assertThat(columnExists(c, "password_reset_token", "user_id")).isTrue();
+			assertThat(columnExists(c, "password_reset_token", "code_hash")).isTrue();
+			assertThat(columnExists(c, "password_reset_token", "expires_at")).isTrue();
+			assertThat(columnExists(c, "password_reset_token", "attempts")).isTrue();
+			assertThat(columnExists(c, "password_reset_token", "consumed_at")).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
 	}
