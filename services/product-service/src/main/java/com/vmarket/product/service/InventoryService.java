@@ -10,7 +10,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.vmarket.events.StockItem;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.vmarket.events.StockReleased;
 import com.vmarket.events.StockReserved;
 import com.vmarket.product.dto.InventoryRequest;
@@ -31,6 +38,8 @@ import com.vmarket.product.repository.ReturnRestockRepository;
 
 @Service
 public class InventoryService {
+	private static final Logger log = LoggerFactory.getLogger(InventoryService.class);
+
 	private final ProductRepository productRepository;
 	private final InventoryReservationRepository reservationRepository;
 	private final ProductEventPublisher publisher;
@@ -38,11 +47,13 @@ public class InventoryService {
 	private final ProductDerivedFields derivedFields;
 	private final ReturnRestockRepository returnRestockRepository;
 	private final InventoryInputValidator inputValidator;
+	private final MeterRegistry metrics;
 
 	public InventoryService(ProductRepository productRepository,
 			InventoryReservationRepository reservationRepository, ProductEventPublisher publisher,
 			ProductEventFactory eventFactory, ProductDerivedFields derivedFields,
-			ReturnRestockRepository returnRestockRepository, InventoryInputValidator inputValidator) {
+			ReturnRestockRepository returnRestockRepository, InventoryInputValidator inputValidator,
+			MeterRegistry metrics) {
 		this.productRepository = productRepository;
 		this.reservationRepository = reservationRepository;
 		this.publisher = publisher;
@@ -50,6 +61,7 @@ public class InventoryService {
 		this.derivedFields = derivedFields;
 		this.returnRestockRepository = returnRestockRepository;
 		this.inputValidator = inputValidator;
+		this.metrics = metrics;
 	}
 
 	@Transactional
@@ -89,6 +101,10 @@ public class InventoryService {
 	public InventoryResponse confirm(String orderId) {
 		InventoryReservation reservation = getReservation(orderId);
 		if (reservation.getStatus() == ReservationStatus.CONFIRMED) return toResponse(reservation);
+		if (reservation.getStatus() == ReservationStatus.RELEASED) {
+			metrics.counter("vmarket.outbox.out-of-order", "action", "confirm").increment();
+			return toResponse(reservation);
+		}
 		if (reservation.getStatus() != ReservationStatus.RESERVED) {
 			throw conflict("Chỉ có thể xác nhận tồn kho đang được tạm giữ");
 		}
@@ -116,7 +132,14 @@ public class InventoryService {
 
 	@Transactional
 	public InventoryResponse release(String orderId) {
-		InventoryReservation reservation = getReservation(orderId);
+		InventoryReservation reservation = reservationRepository.findByOrderId(orderId).orElse(null);
+		if (reservation == null) {
+			// Out-of-order (Review 3 - F5): CANCELLED tới trước OrderPlaced — bỏ qua có
+			// kiểm soát thay vì DLQ, vì khi OrderPlaced tới thì chưa cần release gì.
+			metrics.counter("vmarket.outbox.out-of-order", "action", "release").increment();
+			log.info("Bỏ qua release cho đơn {} chưa có reservation (event tới sai thứ tự)", orderId);
+			return new InventoryResponse(orderId, ReservationStatus.RELEASED, List.of());
+		}
 		if (reservation.getStatus() == ReservationStatus.RELEASED) return toResponse(reservation);
 		ReservationStatus previousStatus = reservation.getStatus();
 		List<InventoryRequest.InventoryItem> items = fromReservation(reservation);
@@ -157,7 +180,15 @@ public class InventoryService {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_RETURN", "returnId không được để trống");
 		}
 		if (returnRestockRepository.existsByReturnId(returnId)) return;
-		InventoryReservation reservation = getReservation(orderId);
+		InventoryReservation reservation = reservationRepository.findByOrderId(orderId).orElse(null);
+		if (reservation == null) {
+			// Out-of-order (Review 3 - F5): ReturnResolved tới trước khi có reservation —
+			// bỏ qua có kiểm soát: chưa có reservation nghĩa là chưa từng trừ kho,
+			// nên không có gì cần nhập lại.
+			metrics.counter("vmarket.outbox.out-of-order", "action", "restockReturn").increment();
+			log.info("Bỏ qua restockReturn cho đơn {} chưa có reservation (event tới sai thứ tự)", orderId);
+			return;
+		}
 		if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
 			throw conflict("Chỉ có thể nhập lại hàng từ đơn đã chốt tồn kho");
 		}

@@ -1,13 +1,17 @@
-"""PBL6-39 — AI Search Service: consumer Event Bus (RabbitMQ).
+"""Consumer Event Bus (RabbitMQ) — Recommendation Service.
 
 Theo quy ước event bus dùng chung (docs/event-bus.md):
   - topic exchange:  vmarket.events
   - routing key   :  tên sự kiện (PascalCase, khớp danh mục SRS §8.1)
-  - message schema:  {"eventId", "eventType", "timestamp", "payload"}
+  - queue         :  recommendation.events, có DLX trỏ vmarket.events.dlx
 
-AI Search lắng nghe ProductCreated/Updated/Deleted để đồng bộ chỉ mục
-Elasticsearch (FR-SRCH-04). Ở giai đoạn PBL6-39 chỉ log payload; việc ghi index
-sẽ điền sau khi cài Elasticsearch client.
+Recommendation lắng nghe ProductCreated/Updated/Deleted để cập nhật đặc trưng
+gợi ý (docs/event-bus.md §5) và OrderPlaced/OrderStatusChanged cho tương quan
+đơn hàng. Ở giai đoạn skeleton chỉ log payload; logic tính gợi ý sẽ điền sau.
+
+Ghi nhớ Review 3 (worklogs/PBL6-15.md): queue consumer phải được KHAI BÁO SỚM
+ngay cả khi logic chưa có — nếu không, event catalog phát ra sẽ không có queue
+nào nhận (NO_ROUTE) và kẹt ở outbox phía Product Catalog.
 """
 
 import json
@@ -18,27 +22,28 @@ import time
 import pika
 
 EXCHANGE = os.getenv("EVENT_EXCHANGE", "vmarket.events")
-QUEUE = os.getenv("EVENT_QUEUE", "ai-search.events")
+QUEUE = os.getenv("EVENT_QUEUE", "recommendation.events")
 # Quy ước dead-letter (docs/event-bus.md §2): {exchange}.dlx và {queue}.dead.
 DEAD_EXCHANGE = EXCHANGE + ".dlx"
 DEAD_QUEUE = QUEUE + ".dead"
 DEAD_ROUTING_KEY = QUEUE + ".dead"
 
-# Các sự kiện AI Search quan tâm (FR-SRCH-04).
-EVENT_TYPES = ["ProductCreated", "ProductUpdated", "ProductDeleted"]
+# Các sự kiện Recommendation quan tâm (docs/event-bus.md §5).
+EVENT_TYPES = [
+    "ProductCreated",
+    "ProductUpdated",
+    "ProductDeleted",
+    "OrderPlaced",
+    "OrderStatusChanged",
+]
 
 
-def _handle_product_event(event_type: str, payload: dict) -> None:
-    # TODO(FR-SRCH-04): cập nhật chỉ mục Elasticsearch + trích xuất embedding
-    # ảnh sản phẩm bằng mô hình CNN trong vòng tối đa 1 phút.
+def _handle_event(event_type: str, payload: dict) -> None:
+    # TODO (PBL6): cập nhật đặc trưng gợi ý cá nhân hóa - FR-REC-01..04
     print(f"[event] nhan {event_type}: {payload}", flush=True)
 
 
-_HANDLERS = {
-    "ProductCreated": _handle_product_event,
-    "ProductUpdated": _handle_product_event,
-    "ProductDeleted": _handle_product_event,
-}
+_HANDLERS = {event_type: _handle_event for event_type in EVENT_TYPES}
 
 
 def _on_message(ch, method, _properties, body: bytes) -> None:
@@ -53,7 +58,7 @@ def _on_message(ch, method, _properties, body: bytes) -> None:
         ch.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as exc:  # noqa: BLE001
         print(f"[event] loi xu ly thong diep: {exc}", flush=True)
-        # Nack khong requeue de tranh loop vo tan; san sang cho DLQ (docs/event-bus.md §7)
+        # Nack không requeue → message rơi vào {queue}.dead qua vmarket.events.dlx
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
@@ -71,14 +76,14 @@ def _connection_parameters() -> pika.ConnectionParameters:
 
 
 def start_consumer() -> None:
-    """Kết nối RabbitMQ, khai báo exchange/queue/binding rồi lắng nghe."""
+    """Kết nối RabbitMQ, khai báo exchange/queue/DLQ/binding rồi lắng nghe."""
     connection = pika.BlockingConnection(_connection_parameters())
     channel = connection.channel()
 
     channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
-    # DLX theo đúng convention Java (EventBusAutoConfiguration) để message lỗi
-    # consumer rơi vào ai-search.events.dead thay vì bị mất.
     channel.exchange_declare(exchange=DEAD_EXCHANGE, exchange_type="topic", durable=True)
+    # DLX theo đúng convention Java (EventBusAutoConfiguration) để message lỗi
+    # consumer rơi vào recommendation.events.dead thay vì bị mất.
     channel.queue_declare(queue=QUEUE, durable=True, arguments={
         "x-dead-letter-exchange": DEAD_EXCHANGE,
         "x-dead-letter-routing-key": DEAD_ROUTING_KEY,

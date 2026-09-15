@@ -23,7 +23,8 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # 'metrics' cần cho alert dựa trên vmarket.outbox.pending / dead.total.
+        include: health,info,metrics
 
 app:
   cors:
@@ -46,6 +47,10 @@ app:
     poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:1000}
     batch-size: ${OUTBOX_BATCH_SIZE:50}
     lease-seconds: ${OUTBOX_LEASE_SECONDS:30}
+    # Số lần thử tối đa trước khi đánh dấu event DEAD (ngừng retry vô hạn).
+    # Event DEAD nằm lại collection để re-drive thủ công (docs/event-bus.md §7).
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:10}
+    # Gauge vmarket.outbox.pending / vmarket.outbox.dead.total được Micrometer scrape trực tiếp (đăng ký một lần trong constructor OutboxDispatcher).
     confirm-timeout-seconds: ${OUTBOX_CONFIRM_TIMEOUT_SECONDS:10}
   catalog-migration:
     enabled: ${CATALOG_MIGRATION_ENABLED:true}

@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.EventsJson;
 import com.vmarket.events.config.EventBusProperties;
@@ -32,18 +33,25 @@ public class OutboxDispatcher {
 	private final RabbitTemplate rabbitTemplate;
 	private final EventBusProperties properties;
 	private final EventsJson json;
+	private final MeterRegistry metrics;
 	private final String workerId = UUID.randomUUID().toString();
 	private int batchSize = 50;
 	private long leaseSeconds = 30;
 	private long confirmTimeoutSeconds = 10;
+	private int maxAttempts = 10;
 
 	public OutboxDispatcher(OutboxEventStore store, RabbitTemplate rabbitTemplate,
-			EventBusProperties properties, EventsJson json) {
+			EventBusProperties properties, EventsJson json, MeterRegistry metrics) {
 		this.store = store;
 		this.rabbitTemplate = rabbitTemplate;
 		this.properties = properties;
 		this.json = json;
+		this.metrics = metrics;
 		this.rabbitTemplate.setMandatory(true);
+		// Đăng ký gauge ĐÚNG MỘT LẦN: hàm được Micrometer đọc lại mỗi lần scrape,
+		// nên giá trị luôn tươi mà không cần đăng ký lại (đăng ký lại gây WARN spam).
+		this.metrics.gauge("vmarket.outbox.pending", store, s -> s.countPending(Instant.now()));
+		this.metrics.gauge("vmarket.outbox.dead.total", store, OutboxEventStore::countDead);
 	}
 
 	@Value("${app.outbox.batch-size:50}")
@@ -61,6 +69,11 @@ public class OutboxDispatcher {
 		this.confirmTimeoutSeconds = Math.max(1, confirmTimeoutSeconds);
 	}
 
+	@Value("${app.outbox.max-attempts:10}")
+	void setMaxAttempts(int maxAttempts) {
+		this.maxAttempts = Math.max(1, maxAttempts);
+	}
+
 	@Scheduled(fixedDelayString = "${app.outbox.poll-interval-ms:1000}",
 			initialDelayString = "${app.outbox.initial-delay-ms:1000}")
 	public void publishPending() {
@@ -75,12 +88,27 @@ public class OutboxDispatcher {
 					log.warn("Mất lease trước khi đánh dấu outbox event {} đã publish", event.getId());
 				}
 			} catch (RuntimeException ex) {
+				String reason = abbreviate(ex.getMessage());
 				int nextAttempt = event.getAttempts() + 1;
-				long delaySeconds = Math.min(60, 1L << Math.min(nextAttempt, 6));
-				store.markFailed(event.getId(), workerId,
-						Instant.now().plus(delaySeconds, ChronoUnit.SECONDS), abbreviate(ex.getMessage()));
-				log.warn("Không thể publish outbox event {} (lần {}): {}", event.getId(),
-						nextAttempt, ex.getMessage());
+				if (nextAttempt >= maxAttempts) {
+					// Cạn lượt thử (vd: unroutable, broker NACK vĩnh viễn) — đánh dấu DEAD
+					// để ngừng retry vô hạn; event vẫn nằm trong collection để re-drive
+					// thủ công (xem docs/event-bus.md §7). Mikrometer tăng chỉ số outbox.dead.
+					if (store.markDead(event.getId(), workerId, reason)) {
+						log.error("Outbox event {} đã bị đánh dấu DEAD sau {} lần thử: {}", event.getId(),
+								nextAttempt, reason);
+						metrics.counter("vmarket.outbox.dead",
+								"eventType", event.getEventType()).increment();
+					}
+				} else {
+					long delaySeconds = Math.min(60, 1L << Math.min(nextAttempt, 6));
+					store.markFailed(event.getId(), workerId,
+							Instant.now().plus(delaySeconds, ChronoUnit.SECONDS), reason);
+					log.warn("Không thể publish outbox event {} (lần {}): {}", event.getId(),
+							nextAttempt, reason);
+					metrics.counter("vmarket.outbox.retry",
+							"eventType", event.getEventType()).increment();
+				}
 			}
 		}
 	}

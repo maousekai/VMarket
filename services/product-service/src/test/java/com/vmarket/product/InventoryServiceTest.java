@@ -49,7 +49,8 @@ class InventoryServiceTest {
 	@BeforeEach
 	void setUp() {
 		service = new InventoryService(productRepository, reservationRepository, publisher,
-				new ProductEventFactory(), new ProductDerivedFields(), returnRestockRepository, inputValidator);
+				new ProductEventFactory(), new ProductDerivedFields(), returnRestockRepository, inputValidator,
+				new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 	}
 
 	@Test
@@ -188,6 +189,40 @@ class InventoryServiceTest {
 		assertThatThrownBy(() -> service.restockReturn("return-1", "order-1",
 				List.of(new StockItem("product-1", "variant-1", 4))))
 				.isInstanceOf(ApiException.class).hasMessageContaining("vượt số lượng");
+	}
+
+	@Test
+	void releaseBeforeReservationArrivesIsSkippedAndCountedAsOutOfOrder() {
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+
+		var response = service.release("order-1");
+
+		assertThat(response.status()).isEqualTo(ReservationStatus.RELEASED);
+		verify(publisher, never()).publishStockReleased(any());
+		verify(returnRestockRepository, never()).save(any());
+	}
+
+	@Test
+	void restockReturnBeforeReservationArrivesIsSkippedAndCountedAsOutOfOrder() {
+		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+
+		service.restockReturn("return-1", "order-1", List.of(new StockItem("product-1", "variant-1", 2)));
+
+		verify(productRepository, never()).findById(any());
+		verify(returnRestockRepository, never()).save(any());
+		verify(publisher, never()).publishStockReleased(any());
+	}
+
+	@Test
+	void confirmAfterReservationWasReleasedIsSkippedInsteadOfFailing() {
+		InventoryReservation reservation = reservation(ReservationStatus.RELEASED, 3);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
+
+		var response = service.confirm("order-1");
+
+		assertThat(response.status()).isEqualTo(ReservationStatus.RELEASED);
+		verify(productRepository, never()).findById(any());
 	}
 
 	private InventoryRequest request(int quantity) {

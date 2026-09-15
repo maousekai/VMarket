@@ -29,6 +29,7 @@ public class OutboxEventStore {
 				Criteria.where("claimedUntil").lt(now));
 		Criteria pending = new Criteria().andOperator(
 				Criteria.where("publishedAt").is(null),
+				Criteria.where("deadAt").is(null),
 				Criteria.where("nextAttemptAt").lte(now), claimable);
 		Query query = new Query(pending).with(Sort.by(Sort.Direction.ASC, "createdAt"));
 		Update update = new Update().set("claimedBy", workerId).set("claimedUntil", claimedUntil);
@@ -50,5 +51,33 @@ public class OutboxEventStore {
 		Update update = new Update().inc("attempts", 1).set("nextAttemptAt", nextAttemptAt)
 				.set("lastError", error).unset("claimedBy").unset("claimedUntil");
 		return mongoTemplate.updateFirst(query, update, OutboxEvent.class).getModifiedCount() == 1;
+	}
+
+	/**
+	 * Đánh dấu event đã cạn lượt thử (vượt {@code app.outbox.max-attempts}) — event
+	 * được GIỮ LẠI trong collection để xử lý thủ công (re-drive), không bị xoá.
+	 * Re-drive: xoá {@code deadAt}/{@code deadReason} rồi đặt lại
+	 * {@code nextAttemptAt} về hiện tại (xem docs/event-bus.md §7).
+	 */
+	public boolean markDead(String eventId, String workerId, String reason) {
+		Query query = Query.query(Criteria.where("_id").is(eventId).and("claimedBy").is(workerId)
+				.and("publishedAt").is(null));
+		Update update = new Update().set("deadAt", Instant.now()).set("deadReason", reason)
+				.set("lastError", reason).unset("claimedBy").unset("claimedUntil");
+		return mongoTemplate.updateFirst(query, update, OutboxEvent.class).getModifiedCount() == 1;
+	}
+
+	/** Số event chờ được publish (đã tới lượt thử, chưa publish, chưa DEAD). */
+	public long countPending(Instant now) {
+		Query query = Query.query(new Criteria().andOperator(
+				Criteria.where("publishedAt").is(null),
+				Criteria.where("deadAt").is(null),
+				Criteria.where("nextAttemptAt").lte(now)));
+		return mongoTemplate.count(query, OutboxEvent.class);
+	}
+
+	/** Số event đã bị đánh dấu DEAD — chỉ số cần alert khi > 0. */
+	public long countDead() {
+		return mongoTemplate.count(Query.query(Criteria.where("deadAt").ne(null)), OutboxEvent.class);
 	}
 }

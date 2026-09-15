@@ -106,13 +106,29 @@ app:
 ### 4.2. Service Python (FastAPI) — qua `pika`
 
 Không dùng được thư viện Java; Python tự khai báo theo ĐÚNG quy ước ở `§2`/`§3`
-(xem mẫu `services/ai-search-service/event_consumer.py`):
+(xem mẫu `services/ai-search-service/event_consumer.py` và
+`services/recommendation-service/event_consumer.py`). Queue PHẢI khai báo kèm
+arguments DLX, và DLQ phải được khai báo + bind — nếu không message lỗi consumer
+sẽ bị mất thay vì rơi vào `{queue}.dead`:
 
 ```python
 channel.exchange_declare(exchange="vmarket.events", exchange_type="topic", durable=True)
-channel.queue_declare(queue="ai-search.events", durable=True)
+channel.exchange_declare(exchange="vmarket.events.dlx", exchange_type="topic", durable=True)
+channel.queue_declare(queue="ai-search.events", durable=True, arguments={
+    "x-dead-letter-exchange": "vmarket.events.dlx",
+    "x-dead-letter-routing-key": "ai-search.events.dead",
+})
+channel.queue_declare(queue="ai-search.events.dead", durable=True)
+channel.queue_bind(queue="ai-search.events.dead", exchange="vmarket.events.dlx",
+                   routing_key="ai-search.events.dead")
 channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_key="ProductCreated")
 ```
+
+CẢNH BÁO (bài học PBL6-15 Review 3): consumer catalog (AI Search,
+Recommendation) phải khai báo queue/binding SỚM — kể cả khi logic nghiệp vụ
+chưa có (skeleton chỉ log). Nếu không, `ProductCreated`/`ProductUpdated`/
+`ProductDeleted` phát ra sẽ không có queue nào nhận (`NO_ROUTE`) và event bị
+park phía outbox của Product Catalog (xem `§7`).
 
 ## 5. Danh mục sự kiện
 
@@ -139,9 +155,14 @@ channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_
 Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 
 1. Khởi động RabbitMQ: `docker compose up -d rabbitmq`.
-2. Chạy product-service (`mvnw spring-boot:run`) và ai-search-service (`uvicorn main:app`).
-3. Đồng bộ một `ShopApproved`, sau đó tạo sản phẩm qua API Seller thật.
-4. Quan sát `ProductCreated` schema v3 trong AI Search; event giữ nguyên `eventId`
+2. Chạy product-service (`mvnw spring-boot:run`) và consumer cần kiểm tra (ai-search-service /
+   recommendation-service: `uvicorn main:app`).
+3. Kiểm tra queue đã được khai báo TRƯỚC khi phát event:
+   `rabbitmqctl list_bindings source_name routing_key destination_name` — phải thấy
+   `ai-search.events` / `recommendation.events` bind với `ProductCreated`. Thiếu binding ⇒
+   outbox sẽ park event (xem §7).
+4. Đồng bộ một `ShopApproved`, sau đó tạo sản phẩm qua API Seller thật.
+5. Quan sát `ProductCreated` schema v3 trong AI Search; event giữ nguyên `eventId`
    khi outbox phải gửi lại.
 
 ## 7. Lưu ý / hướng phát triển sau
@@ -151,7 +172,14 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 - **Transactional outbox**: Product Catalog ghi domain data và outbox trong cùng
   Mongo transaction; worker atomic-claim từng message, chờ publisher confirm và
   kiểm tra returned message trước khi đánh dấu đã phát. Lỗi được retry với
-  exponential backoff.
+  exponential backoff, tối đa `app.outbox.max-attempts` (mặc định 10) lần; vượt ngưỡng
+  (hoặc park tạm thời vì unroutable) bị đánh dấu DEAD và NGỪNG retry để tránh retry vô
+  hạn im lặng (vd chưa có consumer nào bind routing key). Event DEAD nằm lại collection
+  `catalog_outbox` để re-drive thủ công. Metric cảnh báo (exposed qua
+  `/actuator/metrics`; gauge được Micrometer đọc lại mỗi lần scrape):
+  `vmarket.outbox.pending` (số event chờ), `vmarket.outbox.dead.total` (số event DEAD),
+  `vmarket.outbox.retry` (số lần retry có lease), `vmarket.outbox.dead` (event vừa bị
+  park/DEAD, tag `reason=no_route` khi broker từ chối route).
 - **Idempotency**: consumer nên dựa vào `eventId` để tránh xử lý trùng (vd khi retry).
 - **Phá phiên bản schema**: khi payload thay đổi, giữ tương thích ngược hoặc bump
   version và thống nhất với các service nhận trước khi deploy.

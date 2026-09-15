@@ -27,6 +27,8 @@ public class OutboxEvent {
 	private Instant publishedAt;
 	private int attempts;
 	private String lastError;
+	private Instant deadAt;
+	private String deadReason;
 	private String claimedBy;
 	private Instant claimedUntil;
 	@Version
