@@ -186,16 +186,23 @@ chung. Chi tiết: [`docs/templates/README.md`](docs/templates/README.md).
 ```bash
 cd frontend
 npm install
-copy .env.example .env            # VITE_API_BASE_URL=http://localhost:8080 (gateway)
 npm run dev                       # http://localhost:5173
 ```
+
+Dev server tự proxy `/api` sang gateway `http://localhost:8080` (xem
+`vite.config.js`), nên không cần `.env`. Chỉ copy `.env.example` thành `.env`
+khi muốn đổi đích proxy (`VITE_DEV_API_TARGET`).
 
 Hoặc chạy frontend bằng Docker (image tự build, phục vụ bằng nginx):
 
 ```bash
 docker compose up -d --build frontend   # http://localhost:5173
-# Muon doi URL API: sua build.args.VITE_API_BASE_URL cua service frontend trong docker-compose.yml
 ```
+
+Trong container, nginx vừa phục vụ file tĩnh (SPA fallback cho react-router)
+vừa **reverse proxy `/api/*` sang API Gateway** — browser gọi cùng origin nên
+không dính CORS. Đổi đích proxy bằng biến `API_GATEWAY_URL` trong `.env`
+(runtime, **không cần build lại image**).
 
 Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết nối API thành công" khi gateway + auth-service đang chạy.
 
