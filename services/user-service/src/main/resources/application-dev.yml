@@ -1,0 +1,15 @@
+# Cau hinh chi cho profile 'dev' (local). Khong dung o prod.
+# Gia tri gia ro rang de chay 'mvnw spring-boot:run' khong can set bien moi truong.
+# Khi chay qua docker compose, cac bien tu .env / anchor common-environment se ghi de.
+spring:
+  datasource:
+    # Local mvnw: PostgreSQL cua docker compose publish ra host o cong 5433
+    # (POSTGRES_HOST_PORT trong .env - tranh dung PostgreSQL cai san tren may).
+    # Trong container: bien DB_HOST=postgres / DB_PORT=5432 se ghi de default nay.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:vmarket_user}
+
+auth:
+  jwt:
+    # PHAI trung voi gia tri dev cua auth-service, neu khong token do auth-service
+    # phat ra se bi user-service tu choi voi chu ky khong hop le.
+    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
