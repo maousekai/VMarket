@@ -119,6 +119,7 @@ services:
   mongo:
     image: mongo:8.0
     container_name: vmarket-mongo
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
       # Port host: MONGO_HOST_PORT (27018 - tranh xung dot voi mongod cai
       # local tren may). Port trong container luon la 27017.
@@ -133,6 +134,24 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+
+  # Mongo transaction yêu cầu replica set; job idempotent này khởi tạo single-node rs0.
+  mongo-init-replica:
+    image: mongo:8.0
+    container_name: vmarket-mongo-init-replica
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command:
+      - mongosh
+      - mongodb://mongo:27017/admin?directConnection=true
+      - --quiet
+      - --eval
+      - 'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}) }'
+    networks:
+      - vmarket-network
+    mem_limit: 128m
 
   # Redis - cho: cart, delivery (vi tri shipper), recommendation (cache)
   redis:

@@ -81,6 +81,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
+		if (isInternalApiRequest(request)) {
+			// Defense-in-depth (PBL6-15 Review 3): endpoint nội bộ giữa các service
+			// (vd /api/products/internal/**) KHÔNG được lộ qua cửa công khai của
+			// gateway. Trả 404 như resource không tồn tại để không dò được sự tồn tại.
+			writeError(response, HttpStatus.NOT_FOUND.value(), "NOT_FOUND", "Resource không tồn tại");
+			return;
+		}
 		if (CorsUtils.isPreFlightRequest(request) || isPublic(request)) {
 			// Public/preflight: khong yeu cau token nhung VAN strip X-User-* do
 			// client gui len (identity map rong) de khong bi gia mao.
@@ -102,6 +109,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			log.warn("JWT không hợp lệ: {}", ex.getMessage());
 			writeError(response, HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED", "Token không hợp lệ hoặc đã hết hạn");
 		}
+	}
+
+	/**
+	 * Endpoint nội bộ giữa các service (header {@code X-Internal-Api-Key}) — luôn
+	 * bị chặn ở gateway. Service-to-service gọi trực tiếp qua URL nội bộ, không
+	 * bao giờ đi qua cổng công khai (PBL6-15 Review 3, defense-in-depth).
+	 */
+	private boolean isInternalApiRequest(HttpServletRequest request) {
+		String path = request.getRequestURI();
+		for (String pattern : securityProperties.getInternalDenyPaths()) {
+			if (pathMatcher.match(pattern, path)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private boolean isPublic(HttpServletRequest request) {

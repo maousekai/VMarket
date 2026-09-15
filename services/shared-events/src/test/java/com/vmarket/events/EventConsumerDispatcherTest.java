@@ -1,6 +1,7 @@
 package com.vmarket.events;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -88,9 +89,9 @@ class EventConsumerDispatcherTest {
 				new ProductCreated("p9", "s9", "Quần", java.math.BigDecimal.valueOf(200000), "ACTIVE", List.of()));
 		EventEnvelope received = json.readEnvelope(json.write(envelope));
 
-		// Dispatch không được ném ngoại lệ và succeedingConsumer vẫn phải nhận được sự kiện (NFR-REL-02)
-		dispatcher.dispatch(received);
+		assertThatThrownBy(() -> dispatcher.dispatch(received)).isInstanceOf(EventBusException.class);
 
+		// Consumer độc lập vẫn chạy; exception được trả lên listener để retry/DLQ.
 		assertThat(succeedingConsumer.received).hasSize(1);
 		assertThat(succeedingConsumer.received.get(0).productId()).isEqualTo("p9");
 	}

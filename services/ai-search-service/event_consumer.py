@@ -19,6 +19,10 @@ import pika
 
 EXCHANGE = os.getenv("EVENT_EXCHANGE", "vmarket.events")
 QUEUE = os.getenv("EVENT_QUEUE", "ai-search.events")
+# Quy ước dead-letter (docs/event-bus.md §2): {exchange}.dlx và {queue}.dead.
+DEAD_EXCHANGE = EXCHANGE + ".dlx"
+DEAD_QUEUE = QUEUE + ".dead"
+DEAD_ROUTING_KEY = QUEUE + ".dead"
 
 # Các sự kiện AI Search quan tâm (FR-SRCH-04).
 EVENT_TYPES = ["ProductCreated", "ProductUpdated", "ProductDeleted"]
@@ -72,7 +76,15 @@ def start_consumer() -> None:
     channel = connection.channel()
 
     channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
-    channel.queue_declare(queue=QUEUE, durable=True)
+    # DLX theo đúng convention Java (EventBusAutoConfiguration) để message lỗi
+    # consumer rơi vào ai-search.events.dead thay vì bị mất.
+    channel.exchange_declare(exchange=DEAD_EXCHANGE, exchange_type="topic", durable=True)
+    channel.queue_declare(queue=QUEUE, durable=True, arguments={
+        "x-dead-letter-exchange": DEAD_EXCHANGE,
+        "x-dead-letter-routing-key": DEAD_ROUTING_KEY,
+    })
+    channel.queue_declare(queue=DEAD_QUEUE, durable=True)
+    channel.queue_bind(queue=DEAD_QUEUE, exchange=DEAD_EXCHANGE, routing_key=DEAD_ROUTING_KEY)
     for event_type in EVENT_TYPES:
         channel.queue_bind(queue=QUEUE, exchange=EXCHANGE, routing_key=event_type)
 
