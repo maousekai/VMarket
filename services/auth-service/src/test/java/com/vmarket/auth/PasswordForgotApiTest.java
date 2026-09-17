@@ -8,6 +8,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,17 +98,24 @@ class PasswordForgotApiTest {
 	}
 
 	@Test
-	void forgot_again_within60s_returns429_tooSoon() throws Exception {
-		seedUser(EMAIL);
+	void forgot_again_within60s_returns200_butNoNewTokenOrEmail() throws Exception {
+		User user = seedUser(EMAIL);
 
 		forgot(EMAIL).andExpect(status().isOk());
 		forgot(EMAIL)
-				.andExpect(status().isTooManyRequests())
-				.andExpect(jsonPath("$.error.code").value("PASSWORD_RESET_TOO_SOON"));
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.expiresInSeconds").value(300));
+
+		// Cooldown vẫn chặn ở tầng dưới — chỉ không còn lộ ra qua status code
+		// (M-1): chỉ 1 token được tạo, chỉ 1 email được gửi.
+		assertThat(tokenRepository.countByUserIdAndCreatedAtAfter(user.getId(), Instant.now().minusSeconds(3600)))
+				.isEqualTo(1);
+		org.mockito.Mockito.verify(emailSender, org.mockito.Mockito.times(1))
+				.send(org.mockito.ArgumentMatchers.any());
 	}
 
 	@Test
-	void forgot_moreThanHourlyLimit_returns429_rateLimited() throws Exception {
+	void forgot_moreThanHourlyLimit_returns200_butNoNewToken() throws Exception {
 		User user = seedUser(EMAIL);
 		// Seed 5 token đã 'consumed' (created_at ~ now) -> resend-60s không chặn
 		// (điều kiện là consumedAt == null), nhưng đếm 1 giờ = 5 >= hourlyLimit.
@@ -114,8 +128,12 @@ class PasswordForgotApiTest {
 			tokenRepository.save(old);
 		}
 		forgot(EMAIL)
-				.andExpect(status().isTooManyRequests())
-				.andExpect(jsonPath("$.error.code").value("PASSWORD_RESET_RATE_LIMITED"));
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.expiresInSeconds").value(300));
+
+		// Hourly-limit vẫn chặn ở tầng dưới (M-1): vẫn 5 token, không email mới.
+		assertThat(tokenRepository.findAll()).hasSize(5);
+		org.mockito.Mockito.verifyNoInteractions(emailSender);
 	}
 
 	@Test
@@ -123,5 +141,34 @@ class PasswordForgotApiTest {
 		forgot("not-an-email")
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void forgot_concurrentRequests_onlyOneTokenIssued() throws Exception {
+		User user = seedUser(EMAIL);
+
+		int concurrentRequests = 6;
+		ExecutorService pool = Executors.newFixedThreadPool(concurrentRequests);
+		try {
+			List<Callable<Void>> tasks = new ArrayList<>();
+			for (int i = 0; i < concurrentRequests; i++) {
+				tasks.add(() -> {
+					forgot(EMAIL);
+					return null;
+				});
+			}
+			List<Future<Void>> futures = pool.invokeAll(tasks);
+			for (Future<Void> future : futures) {
+				future.get(10, TimeUnit.SECONDS);
+			}
+		} finally {
+			pool.shutdown();
+		}
+
+		// M-2: check-cooldown + check-hourly-limit + insert không còn là 3 thao tác
+		// tách rời không khoá -> đúng 1 trong 6 request song song tạo được token
+		// (những request còn lại bị chặn bởi cooldown 60s của request thắng cuộc).
+		assertThat(tokenRepository.countByUserIdAndCreatedAtAfter(user.getId(), Instant.now().minusSeconds(3600)))
+				.isEqualTo(1);
 	}
 }

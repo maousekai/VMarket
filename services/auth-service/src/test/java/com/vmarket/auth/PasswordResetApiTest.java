@@ -23,6 +23,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.auth.email.EmailMessage;
 import com.vmarket.auth.email.EmailSender;
@@ -129,14 +130,62 @@ class PasswordResetApiTest {
 	@Test
 	void reset_wrongCode_400_incrementsAttempts() throws Exception {
 		User user = seedUser(EMAIL);
-		forgotAndCaptureCode(EMAIL);
+		String code = forgotAndCaptureCode(EMAIL);
+		// "000000" cố định có 1/1.000.000 khả năng trùng mã thật sinh ngẫu nhiên —
+		// chọn mã khác mã thật, giống reset_fiveWrong_invalidatesToken_400_tooManyAttempts.
+		String wrong = code.equals("000000") ? "111111" : "000000";
 
-		reset(EMAIL, "000000", NEW_PASSWORD)
+		reset(EMAIL, wrong, NEW_PASSWORD)
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("PASSWORD_RESET_INVALID"));
 
 		assertThat(tokenRepository.findFirstByUserIdOrderByCreatedAtDesc(user.getId()).orElseThrow().getAttempts())
 				.isEqualTo(1);
+	}
+
+	@Test
+	void reset_correctCode_400_ifAttemptLimitAlreadyReachedConcurrently() throws Exception {
+		// H-1: mô phỏng 5 request mã sai song song đã commit "attempts=5" vào DB
+		// trước khi request mã đúng này chạy tới đoạn kiểm tra limit (giá trị đọc
+		// được ở service có thể vẫn là bản cũ, nhỏ hơn). Mã đúng phải vẫn bị chặn —
+		// giới hạn thật nằm ở điều kiện atomic trong markConsumed, không phải ở
+		// biến attempts đọc trước đó.
+		User user = seedUser(EMAIL);
+		String code = forgotAndCaptureCode(EMAIL);
+
+		PasswordResetToken token = tokenRepository.findFirstByUserIdOrderByCreatedAtDesc(user.getId()).orElseThrow();
+		token.setAttempts(5); // maxAttempts mặc định = 5 — mô phỏng trạng thái DB đã hết lượt
+		tokenRepository.save(token);
+
+		reset(EMAIL, code, NEW_PASSWORD)
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("PASSWORD_RESET_TOO_MANY_ATTEMPTS"));
+
+		User afterUser = userRepository.findByEmail(EMAIL).orElseThrow();
+		assertThat(passwordEncoder.matches(NEW_PASSWORD, afterUser.getPasswordHash())).isFalse();
+	}
+
+	@Test
+	@Transactional // custom @Modifying query (flushAutomatically) cần transaction đang mở của caller
+	void markConsumed_atomicallyRejects_whenAttemptsAlreadyAtLimit_evenIfNotConsumedYet() {
+		// H-1, biên an toàn thật: markConsumed phải tự kiểm tra lại attempts <
+		// maxAttempts NGAY TRONG câu UPDATE, không dựa vào giá trị attempts mà
+		// service đọc trước đó — giá trị đó có thể đã cũ nếu request mã sai khác
+		// vừa commit trong lúc request mã đúng này đang xử lý (đây chính là kẽ hở
+		// H-1 mô tả). Mô phỏng: DB đã ở trạng thái "hết lượt" nhưng consumed_at vẫn
+		// null (chưa ai tiêu mã) -> markConsumed KHÔNG được phép tiêu mã.
+		User user = seedUser(EMAIL);
+		PasswordResetToken token = new PasswordResetToken();
+		token.setUserId(user.getId());
+		token.setCodeHash(passwordEncoder.encode("123456"));
+		token.setExpiresAt(Instant.now().plus(5, ChronoUnit.MINUTES));
+		token.setAttempts(5);
+		token = tokenRepository.save(token);
+
+		int updated = tokenRepository.markConsumed(token.getId(), Instant.now(), 5);
+
+		assertThat(updated).isZero();
+		assertThat(tokenRepository.findById(token.getId()).orElseThrow().getConsumedAt()).isNull();
 	}
 
 	@Test

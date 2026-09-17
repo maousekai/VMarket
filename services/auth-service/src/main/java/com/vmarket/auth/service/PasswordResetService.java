@@ -1,7 +1,5 @@
 package com.vmarket.auth.service;
 
-import java.security.SecureRandom;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 
@@ -40,7 +38,6 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PasswordResetService {
 
-	private static final SecureRandom RANDOM = new SecureRandom();
 	/** BCrypt hash hợp lệ dùng để so sánh giả — cân bằng thời gian phản hồi khi không có mục tiêu. */
 	private static final String DUMMY_HASH =
 			"$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
@@ -51,17 +48,22 @@ public class PasswordResetService {
 	private final PasswordEncoder passwordEncoder;
 	private final EmailSender emailSender;
 	private final AuthPasswordResetProperties props;
+	private final PasswordResetTokenIssuer tokenIssuer;
 
 	/**
-	 * KHÔNG {@code @Transactional} ở mức method — lý do giống hệt
-	 * {@link OtpService#requestOtp}: dòng {@code password_reset_token} phải commit
-	 * trước khi gọi HTTP gửi mail, để provider lỗi không xoá dấu vết rate-limit.
+	 * KHÔNG {@code @Transactional} ở mức method: {@link PasswordResetTokenIssuer#issue}
+	 * chạy trong transaction ngắn riêng của nó và commit trước khi HTTP gửi mail
+	 * được gọi ở đây, để provider lỗi không xoá dấu vết rate-limit.
 	 *
-	 * <p>Email chưa đăng ký: KHÔNG tạo dòng token / KHÔNG gửi mail, nhưng vẫn trả
-	 * response giống hệt nhánh tìm thấy (không tiết lộ qua nội dung response).
-	 * Lưu ý: đây chỉ cân bằng chi phí CPU (so sánh BCrypt giả), không cân bằng độ
-	 * trễ ghi DB + gọi HTTP của nhánh tìm thấy — chấp nhận như một đánh đổi còn
-	 * sót lại (risk tương tự các đánh đổi đã ghi trong worklog PBL6-44).
+	 * <p>Luôn trả response công khai giống nhau (200, message như nhau) trong MỌI
+	 * trường hợp — email chưa đăng ký, email tồn tại nhưng bị cooldown/hourly-limit
+	 * chặn, hay email tồn tại và phát mã thành công. Trước đây nhánh bị chặn trả
+	 * 429 còn nhánh "chưa đăng ký" trả 200 ngay — hai lần gọi liên tiếp là đủ để dò
+	 * email nào đã đăng ký mà không cần đo thời gian; sửa bằng cách không lộ kết
+	 * quả rate-limit qua status code nữa (chỉ log nội bộ ở
+	 * {@link PasswordResetTokenIssuer#issue}). So sánh BCrypt giả (nhánh không tìm
+	 * thấy) vẫn giữ để cân bằng chi phí CPU, dù không cân bằng được độ trễ ghi DB +
+	 * gọi HTTP của nhánh phát mã thành công — đánh đổi còn sót lại, chấp nhận được.
 	 */
 	public ForgotPasswordResponse forgotPassword(String rawEmail) {
 		String email = normalize(rawEmail);
@@ -73,30 +75,11 @@ public class PasswordResetService {
 			return response();
 		}
 
-		tokenRepository.findFirstByUserIdOrderByCreatedAtDesc(user.getId()).ifPresent(latest -> {
-			if (latest.getConsumedAt() == null
-					&& latest.getCreatedAt().isAfter(now.minus(props.getResendCooldown()))) {
-				throw new ApiException("PASSWORD_RESET_TOO_SOON", HttpStatus.TOO_MANY_REQUESTS,
-						"Vui lòng đợi " + props.getResendCooldown().toSeconds() + " giây trước khi yêu cầu mã mới");
-			}
+		tokenIssuer.issue(user.getId(), now).ifPresent(code -> {
+			emailSender.send(PasswordResetEmailContent.build(email, code, props.getTtl()));
+			log.info("Đã phát mã đặt lại mật khẩu (ttl={}s) userId={}", props.getTtl().toSeconds(), user.getId());
 		});
 
-		if (tokenRepository.countByUserIdAndCreatedAtAfter(user.getId(), now.minus(Duration.ofHours(1)))
-				>= props.getHourlyLimit()) {
-			throw new ApiException("PASSWORD_RESET_RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS,
-					"Đã yêu cầu mã quá nhiều lần, vui lòng thử lại sau");
-		}
-
-		String code = String.format("%06d", RANDOM.nextInt(1_000_000));
-		PasswordResetToken token = new PasswordResetToken();
-		token.setUserId(user.getId());
-		token.setCodeHash(passwordEncoder.encode(code));
-		token.setExpiresAt(now.plus(props.getTtl()));
-		tokenRepository.save(token); // commit ngay - giữ dấu vết rate-limit dù gửi mail lỗi
-
-		emailSender.send(PasswordResetEmailContent.build(email, code, props.getTtl()));
-
-		log.info("Đã phát mã đặt lại mật khẩu (ttl={}s) userId={}", props.getTtl().toSeconds(), user.getId());
 		return response();
 	}
 
@@ -125,12 +108,20 @@ public class PasswordResetService {
 			throw new ApiException("PASSWORD_RESET_EXPIRED", HttpStatus.BAD_REQUEST,
 					"Mã đã hết hạn, hãy yêu cầu mã mới");
 		}
+		// Fast-path: chỉ để tránh so sánh BCrypt thừa. KHÔNG phải biên an toàn thật —
+		// biên an toàn thật nằm ở điều kiện "attempts < maxAttempts" ngay trong các
+		// UPDATE nguyên tử dưới đây (xem PasswordResetTokenRepository).
 		if (token.getAttempts() >= props.getMaxAttempts()) {
 			throw tooManyAttempts();
 		}
 
 		if (!passwordEncoder.matches(code, token.getCodeHash())) {
-			tokenRepository.incrementAttempts(token.getId());
+			// 0 dòng = giới hạn đã đạt ở DB TRƯỚC lần tăng này (request song song
+			// khác vừa tăng) → hết lượt, bất kể giá trị attempts đọc được ở trên có
+			// thể đã cũ.
+			if (tokenRepository.incrementAttempts(token.getId(), props.getMaxAttempts()) == 0) {
+				throw tooManyAttempts();
+			}
 			int used = token.getAttempts() + 1;
 			if (used >= props.getMaxAttempts()) {
 				throw tooManyAttempts();
@@ -139,10 +130,14 @@ public class PasswordResetService {
 					"Mã không đúng (còn " + (props.getMaxAttempts() - used) + " lần thử)");
 		}
 
-		// Đánh dấu đã dùng NGUYÊN TỬ (where consumed_at is null). 0 dòng = request
-		// khác đã dùng mã này → chống double-verify.
-		if (tokenRepository.markConsumed(token.getId(), now) == 0) {
-			throw alreadyUsed();
+		// Đánh dấu đã dùng NGUYÊN TỬ, có kiểm tra lại "attempts < maxAttempts" ngay
+		// trong UPDATE (chặn race H-1: request mã đúng đọc attempts cũ ở trên, trước
+		// khi các request mã sai khác commit, vẫn không thể consume nếu giới hạn đã
+		// đạt tại thời điểm UPDATE này thực thi). 0 dòng = đã dùng HOẶC đã hết lượt.
+		if (tokenRepository.markConsumed(token.getId(), now, props.getMaxAttempts()) == 0) {
+			PasswordResetToken current = tokenRepository.findFirstByUserIdOrderByCreatedAtDesc(user.getId())
+					.orElseThrow();
+			throw current.getConsumedAt() != null ? alreadyUsed() : tooManyAttempts();
 		}
 
 		user.setPasswordHash(passwordEncoder.encode(newPassword));

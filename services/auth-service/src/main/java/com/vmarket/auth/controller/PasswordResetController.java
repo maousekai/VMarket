@@ -30,15 +30,15 @@ public class PasswordResetController {
 	private final PasswordResetService passwordResetService;
 
 	@Operation(summary = "Yêu cầu đặt lại mật khẩu (FR-AUTH-04)",
-			description = "Sinh mã 6 số, gửi qua email. Chặn gửi lại trong 60 giây và giới hạn "
-					+ "số mã mỗi giờ cho một tài khoản. Không tiết lộ email đã đăng ký hay chưa.")
+			description = "Sinh mã 6 số, gửi qua email. Luôn trả 200 với cùng nội dung — kể cả khi "
+					+ "email chưa đăng ký, hay bị chặn nội bộ do gửi lại trong 60 giây/vượt số mã mỗi "
+					+ "giờ cho một tài khoản (không tiết lộ email tồn tại hay không, hay có bị chặn "
+					+ "tần suất hay không).")
 	@ApiResponses({
-			@ApiResponse(responseCode = "200", description = "Đã xử lý yêu cầu (không tiết lộ email tồn tại hay không)",
+			@ApiResponse(responseCode = "200", description = "Đã xử lý yêu cầu (không tiết lộ email tồn tại hay "
+					+ "không, hay có bị chặn tần suất hay không)",
 					content = @Content(schema = @Schema(implementation = ForgotPasswordResponse.class))),
 			@ApiResponse(responseCode = "400", description = "Email không hợp lệ (VALIDATION_ERROR)",
-					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "429",
-					description = "PASSWORD_RESET_TOO_SOON hoặc PASSWORD_RESET_RATE_LIMITED",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "502", description = "Không gửi được email (EMAIL_SEND_FAILED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
