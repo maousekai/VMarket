@@ -1,6 +1,7 @@
 # User Service (PBL6-13)
 
-Hồ sơ cá nhân (FR-USER-01) và sổ địa chỉ giao hàng (FR-USER-02) của người dùng.
+Hồ sơ cá nhân (FR-USER-01), sổ địa chỉ giao hàng (FR-USER-02) và đổi mật khẩu
+(FR-USER-03) của người dùng.
 Cổng `8082`, CSDL PostgreSQL `vmarket_user`.
 
 ## Phạm vi và ranh giới dữ liệu
@@ -9,9 +10,15 @@ Cổng `8082`, CSDL PostgreSQL `vmarket_user`.
 | --- | --- | --- |
 | FR-USER-01 Quản lý hồ sơ | user-service | `vmarket_user.user_profiles` |
 | FR-USER-02 Sổ địa chỉ (CRUD + đặt mặc định) | user-service | `vmarket_user.addresses` |
+| FR-USER-03 Đổi mật khẩu | user-service | `vmarket_auth.users.password_hash` → gọi auth-service |
 
 Hồ sơ **không** chứa email, username hay mật khẩu: đó là dữ liệu định danh do
 auth-service sở hữu. Ở đây chỉ có thông tin hiển thị / liên lạc.
+
+SRS đặt đổi mật khẩu ở User Service, nhưng mật khẩu nằm trong CSDL `vmarket_auth`.
+user-service **không đọc chéo CSDL** — nó gọi REST nội bộ của auth-service (SRS 5.4),
+xem phần *Đổi mật khẩu* bên dưới. Không giữ bản sao mật khẩu nào ở đây: hai nguồn sự
+thật cho một mật khẩu nghĩa là đổi xong vẫn đăng nhập được bằng mật khẩu cũ.
 
 ## API
 
@@ -29,6 +36,7 @@ Mọi endpoint **ghi dữ liệu** (POST/PUT/PATCH/DELETE) nhận thêm header t
 | PUT | `/api/users/me/addresses/{id}` | Sửa địa chỉ (không đổi cờ mặc định) |
 | DELETE | `/api/users/me/addresses/{id}` | Xoá địa chỉ (xoá cái mặc định → cái mới nhất còn lại lên thay) |
 | PUT | `/api/users/me/addresses/{id}/default` | Đặt địa chỉ mặc định |
+| PUT | `/api/users/me/password` | Đổi mật khẩu (FR-USER-03) |
 
 Body `PUT /api/users/me`: `{ "fullName", "avatarUrl", "phone", "dateOfBirth", "gender" }`.
 
@@ -142,6 +150,9 @@ curl http://localhost:8082/api/users/me              # 401 khi chưa có token
 | `DB_HOST` / `DB_PORT` / `DB_NAME` | `localhost` / `5433` / `vmarket_user` | PostgreSQL (trong container: `postgres` / `5432`) |
 | `DB_USERNAME` / `DB_PASSWORD` | `vmarket` / `vmarket` | Tài khoản CSDL |
 | `AUTH_JWT_SECRET` | *(giả, ở dev yml)* | **Bắt buộc ở prod** — dùng chung với auth-service |
+| `AUTH_SERVICE_URL` | `http://localhost:8081` | Base URL API nội bộ auth-service (trong compose: `http://auth-service:8081`) |
+| `INTERNAL_API_KEY` | *(giả, ở dev yml)* | **Bắt buộc ở prod** — khoá `/internal/**`, dùng chung với auth-service |
+| `AUTH_SERVICE_CONNECT_TIMEOUT` / `AUTH_SERVICE_READ_TIMEOUT` | `2s` / `5s` | Timeout gọi auth-service |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,...` | Origin được phép gọi trực tiếp |
 
 `AUTH_JWT_SECRET` **không có giá trị mặc định** ở `application.yml` nền — thiếu ở prod
@@ -197,6 +208,49 @@ vì đó là lỗi của chính service, trả 409 sẽ xui client thử lại m
 > bảo vệ bất biến ở tầng service; kiểm tra ràng buộc CSDL thật để dành PBL6-47
 > (Testcontainers).
 
+## Đổi mật khẩu (FR-USER-03)
+
+`PUT /api/users/me/password` với body `{ "currentPassword", "newPassword" }`.
+Mật khẩu mới: 8–32 ký tự, ít nhất 1 chữ hoa, 1 số và 1 ký tự đặc biệt (đúng chính
+sách của đăng ký). Không có trường "nhập lại mật khẩu mới" — so khớp hai ô là việc
+của form phía client.
+
+Endpoint **không nhận `userId`**; danh tính lấy từ claim `sub` của token đã verify.
+user-service chỉ xác định *ai* đang đổi rồi gọi
+`PUT /internal/users/{id}/password` của auth-service qua `AuthServiceClient`.
+
+| Mã lỗi | HTTP | Khi nào |
+| --- | --- | --- |
+| `VALIDATION_ERROR` | 400 | Thiếu trường, mật khẩu mới không đủ mạnh |
+| `INVALID_CURRENT_PASSWORD` | 400 | Sai mật khẩu hiện tại |
+| `PASSWORD_UNCHANGED` | 400 | Mật khẩu mới trùng mật khẩu cũ |
+| `PASSWORD_NOT_SET` | 400 | Tài khoản tạo qua OTP chưa có mật khẩu — dùng Quên mật khẩu |
+| `ACCOUNT_LOCKED` | 423 | Khoá tạm 15 phút do nhập sai 5 lần |
+| `AUTH_SERVICE_ERROR` | 502 | auth-service lỗi, hoặc `INTERNAL_API_KEY` hai bên lệch |
+| `AUTH_SERVICE_UNAVAILABLE` | 503 | Không kết nối được / quá thời gian |
+
+### Ba điều cần biết
+
+1. **Sai mật khẩu hiện tại trả 400, không phải 401.** 401 khiến frontend tưởng access
+   token hết hạn và đăng xuất người dùng, trong khi họ chỉ gõ nhầm mật khẩu cũ.
+2. **Sai mật khẩu hiện tại tính chung bộ đếm với đăng nhập sai** (5 lần → khoá 15
+   phút). Nếu endpoint này có bộ đếm riêng thì ai cầm được access token (còn sống ≤ 15
+   phút) có thể dò mật khẩu không giới hạn qua đây.
+3. **Đổi thành công thu hồi mọi refresh token** → client phải đăng nhập lại bằng mật
+   khẩu mới. Đổi mật khẩu thường là vì nghi bị lộ, nên các phiên cũ không được sống sót.
+
+> ⚠️ **Lưu ý cho Frontend.** Sau `200 OK`, refresh token hiện tại đã bị thu hồi:
+> access token còn sống tới khi hết hạn, nhưng lần refresh kế tiếp sẽ 401. Nên điều
+> hướng về trang đăng nhập ngay sau khi đổi thành công thay vì đợi refresh thất bại.
+
+**Lỗi 401 từ auth-service không được chuyển tiếp** — đó là dấu hiệu `INTERNAL_API_KEY`
+hai service lệch nhau, không phải token người dùng sai; trả 401 cho client sẽ đăng xuất
+người dùng vì một sự cố cấu hình họ không liên quan. `AuthServiceClient` dịch thành 502.
+
+`AUTH_SERVICE_URL` / `INTERNAL_API_KEY` phải trùng auth-service; `scripts\check-env.cmd`
+đối chiếu tự động. user-service **không** `depends_on` auth-service trong compose: hồ sơ
+và sổ địa chỉ vẫn chạy khi auth-service chết, chỉ endpoint đổi mật khẩu trả 503.
+
 ## Test
 
 ```bash
@@ -209,9 +263,13 @@ không trùng, ngữ nghĩa thay thế của `PUT /me`, kiểm tra đầu vào, 
 `UNDISCLOSED` không tràn cột, hồ sơ hai người dùng tách biệt. Sổ địa chỉ: CRUD, địa
 chỉ đầu tiên tự thành mặc định, đổi mặc định gỡ cờ cái cũ, xoá mặc định thì cái mới
 nhất còn lại lên thay, và người dùng A không chạm được địa chỉ của B dù biết id
-(IDOR). `Idempotency-Key`: gửi lại không tạo bản trùng, phát lại đúng response cũ,
-cùng key khác nội dung bị chặn, request lỗi không khoá key, key treo quá hạn được
-nhả, hai người dùng trùng key không che nhau.
+(IDOR). Đổi mật khẩu: userId lấy từ token (gửi userId trong body bị bỏ qua), mật
+khẩu mới yếu bị chặn TRƯỚC khi gọi auth-service, và mã lỗi nghiệp vụ của
+auth-service được chuyển tiếp nguyên trạng. `AuthServiceClientTest` kiểm hợp đồng
+HTTP với auth-service bằng `MockRestServiceServer` (path, header khoá nội bộ, ánh
+xạ 401→502 / 5xx→502 / timeout→503). `Idempotency-Key`: gửi lại không tạo bản
+trùng, phát lại đúng response cũ, cùng key khác nội dung bị chặn, request lỗi không
+khoá key, key treo quá hạn được nhả, hai người dùng trùng key không che nhau.
 
 `DataIntegrityMappingTest` kiểm phần dịch lỗi ràng buộc CSDL bằng cách dựng thẳng
 exception như driver ném ra — partial unique index chỉ có trên PostgreSQL nên test
