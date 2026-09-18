@@ -51,6 +51,28 @@ class JwtServiceTest {
 		assertThat(claims.get("email_verified")).isEqualTo(false);
 		assertThat(claims.get("roles", List.class)).containsExactly("BUYER");
 		assertThat(claims.getExpiration()).isAfter(claims.getIssuedAt());
+		assertThat(claims.getId()).isNotBlank();
+	}
+
+	@Test
+	void accessToken_jtiIsUniquePerToken() {
+		User user = new User();
+		user.setId("01JRX8Z0M0P8QF3W9K2T7Y6C4B");
+		user.setEmail("an@example.com");
+		user.setUsername("an.nguyen");
+
+		JwtService service = newService();
+		String token1 = service.createAccessToken(user, List.of("BUYER"));
+		String token2 = service.createAccessToken(user, List.of("BUYER"));
+
+		String jti1 = Jwts.parser()
+				.verifyWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8)))
+				.build().parseSignedClaims(token1).getPayload().getId();
+		String jti2 = Jwts.parser()
+				.verifyWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8)))
+				.build().parseSignedClaims(token2).getPayload().getId();
+
+		assertThat(jti1).isNotBlank().isNotEqualTo(jti2);
 	}
 
 	@Test

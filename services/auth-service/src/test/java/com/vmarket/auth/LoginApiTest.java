@@ -2,6 +2,7 @@ package com.vmarket.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -74,15 +75,17 @@ class LoginApiTest {
 	}
 
 	@Test
-	void login_success_returnsTokenPair() throws Exception {
+	void login_success_returnsAccessToken_setsRefreshCookie() throws Exception {
 		login(EMAIL, PASSWORD)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
-				.andExpect(jsonPath("$.refreshToken").isNotEmpty())
+				.andExpect(jsonPath("$.refreshToken").doesNotExist())
 				.andExpect(jsonPath("$.tokenType").value("Bearer"))
 				.andExpect(jsonPath("$.expiresIn").value(900))
 				.andExpect(jsonPath("$.status").value("ACTIVE"))
-				.andExpect(jsonPath("$.roles[0]").value("BUYER"));
+				.andExpect(jsonPath("$.roles[0]").value("BUYER"))
+				.andExpect(cookie().exists("refresh_token"))
+				.andExpect(cookie().httpOnly("refresh_token", true));
 
 		assertThat(refreshTokenRepository.count()).isEqualTo(1);
 		assertThat(userRepository.findById(user.getId()).orElseThrow().getFailedLoginAttempts()).isZero();

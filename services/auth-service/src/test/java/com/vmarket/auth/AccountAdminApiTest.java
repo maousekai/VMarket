@@ -19,13 +19,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockCookie;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.jayway.jsonpath.JsonPath;
 import com.vmarket.auth.config.InternalApiProperties;
 import com.vmarket.auth.controller.InternalAccountController;
 import com.vmarket.auth.entity.AccountActivityType;
@@ -39,6 +39,7 @@ import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
 import com.vmarket.auth.repository.UserRoleRepository;
 import com.vmarket.auth.security.OpaqueTokenCodec;
+import com.vmarket.auth.security.RefreshTokenCookieService;
 
 /**
  * FR-USER-04 — API nội bộ cho Admin quản lý tài khoản: xem, tìm kiếm, khoá, mở khoá,
@@ -146,8 +147,8 @@ class AccountAdminApiTest {
 
 	@Test
 	void khoa_200_chanDangNhap_vaThuHoiRefreshToken() throws Exception {
-		String refreshToken = JsonPath.read(login(an.getEmail(), PASSWORD).andExpect(status().isOk())
-				.andReturn().getResponse().getContentAsString(), "$.refreshToken");
+		String refreshToken = login(an.getEmail(), PASSWORD).andExpect(status().isOk())
+				.andReturn().getResponse().getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
 
 		suspend(an.getId(), "Spam đánh giá", admin.getId())
 				.andExpect(status().isOk())
@@ -161,8 +162,7 @@ class AccountAdminApiTest {
 		login(an.getEmail(), PASSWORD)
 				.andExpect(status().isLocked())
 				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"));
-		mockMvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
-				.content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+		mockMvc.perform(post("/api/auth/refresh").cookie(new MockCookie(RefreshTokenCookieService.COOKIE_NAME, refreshToken)))
 				.andExpect(status().isUnauthorized());
 	}
 
@@ -177,15 +177,14 @@ class AccountAdminApiTest {
 
 	@Test
 	void refreshTokenPhatTruocKhiKhoa_nhungChuaThuHoi_vanBiChan423() throws Exception {
-		String refreshToken = JsonPath.read(login(an.getEmail(), PASSWORD).andExpect(status().isOk())
-				.andReturn().getResponse().getContentAsString(), "$.refreshToken");
+		String refreshToken = login(an.getEmail(), PASSWORD).andExpect(status().isOk())
+				.andReturn().getResponse().getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
 		// Lớp phòng thủ thứ hai: trạng thái khoá có mà token chưa bị thu hồi (vd. sửa tay CSDL).
 		User u = userRepository.findById(an.getId()).orElseThrow();
 		u.setSuspendedAt(Instant.now());
 		userRepository.save(u);
 
-		mockMvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
-				.content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+		mockMvc.perform(post("/api/auth/refresh").cookie(new MockCookie(RefreshTokenCookieService.COOKIE_NAME, refreshToken)))
 				.andExpect(status().isLocked())
 				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"));
 		assertThat(refreshTokenRepository.findByTokenHash(tokenCodec.hash(refreshToken)).orElseThrow().getRevokedAt())

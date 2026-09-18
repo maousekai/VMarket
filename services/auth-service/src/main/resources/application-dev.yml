@@ -14,3 +14,7 @@ auth:
   # PHAI trung voi gia tri dev cua user-service (application-dev.yml ben do).
   internal:
     api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
+  refresh-cookie:
+    # Local chay HTTP thuan (vite proxy / mvnw spring-boot:run) -> Secure=true se
+    # khien trinh duyet khong luu cookie.
+    secure: ${AUTH_REFRESH_COOKIE_SECURE:false}
