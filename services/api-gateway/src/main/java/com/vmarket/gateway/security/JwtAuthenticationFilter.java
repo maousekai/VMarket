@@ -22,6 +22,7 @@ import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.vmarket.gateway.config.GatewaySecurityProperties;
+import com.vmarket.gateway.config.GatewaySecurityProperties.RoleRule;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
@@ -41,8 +42,11 @@ import jakarta.servlet.http.HttpServletResponse;
  *   <li>Ngược lại bắt buộc có {@code Authorization: Bearer <token>}; verify bằng
  *       {@link JwtService}, thiếu/sai/hết hạn → 401 JSON.</li>
  *   <li>Token hợp lệ → gắn identity (userId/roles/email/username/emailVerified)
- *       vào header request để truyền xuống service đích ({@code X-User-*}); KHÔNG
- *       phân quyền theo vai trò ở đây (thuộc PBL6-46).</li>
+ *       vào header request để truyền xuống service đích ({@code X-User-*}).</li>
+ *   <li>Nếu route khớp một {@code role-required-paths} (PBL6-46) — claim
+ *       {@code roles} của token phải giao với danh sách vai trò yêu cầu, thiếu →
+ *       403 JSON ({@code FORBIDDEN_ROLE}). Route protected không khớp rule nào thì
+ *       chỉ cần token hợp lệ, không phân biệt vai trò (giữ nguyên hành vi PBL6-38).</li>
  * </ol>
  *
  * <p><b>Chống giả mạo identity (H-1):</b> các header {@code X-User-*} là do GATEWAY
@@ -97,11 +101,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		String token = header.substring(BEARER_PREFIX.length()).trim();
 		try {
 			Claims claims = jwtService.parse(token);
+			if (!hasRequiredRole(request, claims)) {
+				writeError(response, HttpStatus.FORBIDDEN.value(), "FORBIDDEN_ROLE",
+						"Tài khoản không có vai trò phù hợp để truy cập tài nguyên này");
+				return;
+			}
 			filterChain.doFilter(new IdentityRequestWrapper(request, identityHeaders(claims)), response);
 		} catch (JwtException | IllegalArgumentException ex) {
 			log.warn("JWT không hợp lệ: {}", ex.getMessage());
 			writeError(response, HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED", "Token không hợp lệ hoặc đã hết hạn");
 		}
+	}
+
+	/**
+	 * true nếu route không khớp rule nào trong {@code role-required-paths}, hoặc
+	 * token thoả MỌI rule khớp (PBL6-46). Duyệt hết tất cả rule khớp thay vì dừng ở
+	 * rule đầu tiên — nếu chỉ dừng ở rule đầu, thứ tự khai báo trong cấu hình sẽ
+	 * quyết định kết quả một cách ngầm định: một rule rộng (vd toàn bộ
+	 * {@code /api/shops/**}) khai báo trước một rule hẹp hơn, khắt khe hơn (vd chỉ
+	 * {@code POST /api/shops/*\/approve}) sẽ vô hiệu hoá rule hẹp đó.
+	 */
+	private boolean hasRequiredRole(HttpServletRequest request, Claims claims) {
+		String path = request.getRequestURI();
+		List<RoleRule> matched = securityProperties.getRoleRequiredPaths().stream()
+				.filter(rule -> pathMatcher.match(rule.getPattern(), path))
+				.filter(rule -> rule.getMethods().isEmpty()
+						|| rule.getMethods().stream().anyMatch(m -> m.equalsIgnoreCase(request.getMethod())))
+				.toList();
+		if (matched.isEmpty()) {
+			return true;
+		}
+		Set<String> tokenRoles = tokenRoles(claims);
+		return matched.stream().allMatch(rule -> tokenRoles.stream().anyMatch(rule.getRoles()::contains));
+	}
+
+	private Set<String> tokenRoles(Claims claims) {
+		Object rolesClaim = claims.get("roles");
+		if (rolesClaim instanceof List<?> list) {
+			return list.stream().map(String::valueOf).collect(Collectors.toSet());
+		}
+		return Set.of();
 	}
 
 	private boolean isPublic(HttpServletRequest request) {

@@ -39,6 +39,9 @@ class JwtAuthenticationFilterTest {
 				"/api/auth/login",
 				"/api/auth/register",
 				"/api/auth/refresh",
+				"/api/auth/logout",
+				"/api/auth/sessions",
+				"/api/auth/sessions/**",
 				"/api/auth/health",
 				"/actuator/**"));
 		security.setPublicGetPaths(List.of("/api/products/**"));
@@ -181,5 +184,115 @@ class JwtAuthenticationFilterTest {
 		MockHttpServletResponse res = new MockHttpServletResponse();
 		filter.doFilter(request("GET", "/api/auth/me", null), res, new MockFilterChain());
 		assertThat(res.getStatus()).isEqualTo(401);
+	}
+
+	private JwtAuthenticationFilter filterWithRoleRule(String pattern, List<String> methods, List<String> roles) {
+		GatewayJwtProperties jwtProps = new GatewayJwtProperties();
+		jwtProps.setSecret(SECRET);
+
+		GatewaySecurityProperties.RoleRule rule = new GatewaySecurityProperties.RoleRule();
+		rule.setPattern(pattern);
+		rule.setMethods(methods);
+		rule.setRoles(roles);
+
+		GatewaySecurityProperties security = new GatewaySecurityProperties();
+		security.setPublicPaths(List.of("/api/auth/login"));
+		security.setRoleRequiredPaths(List.of(rule));
+
+		return new JwtAuthenticationFilter(new JwtService(jwtProps), security);
+	}
+
+	@Test
+	void roleRequiredPath_missingRole_rejected403() throws Exception {
+		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("ADMIN"));
+		String buyerToken = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		roleFilter.doFilter(request("POST", "/api/shops/01J/approve", "Bearer " + buyerToken), res, new MockFilterChain());
+
+		assertThat(res.getStatus()).isEqualTo(403);
+		assertThat(res.getContentAsString()).contains("FORBIDDEN_ROLE");
+	}
+
+	@Test
+	void roleRequiredPath_withRequiredRole_passes() throws Exception {
+		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("SELLER"));
+		String token = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		roleFilter.doFilter(request("POST", "/api/shops/01J/approve", "Bearer " + token), res, new MockFilterChain());
+
+		assertThat(res.getStatus()).isEqualTo(200);
+	}
+
+	@Test
+	void roleRequiredPath_methodNotListed_ruleNotApplied() throws Exception {
+		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("ADMIN"));
+		String buyerToken = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		// GET không nằm trong methods của rule -> chỉ cần token hợp lệ, không cần ADMIN.
+		roleFilter.doFilter(request("GET", "/api/shops/01J/approve", "Bearer " + buyerToken), res, new MockFilterChain());
+
+		assertThat(res.getStatus()).isEqualTo(200);
+	}
+
+	@Test
+	void multipleMatchingRules_mustSatisfyAll_notJustFirst() throws Exception {
+		// Rule rong (moi method /api/shops/**, can SELLER) khai bao TRUOC rule hep
+		// hon, khat khe hon (chi POST .../approve, can ADMIN) - ca hai deu phai
+		// thoa man, khong duoc dung o rule dau tien khop.
+		GatewayJwtProperties jwtProps = new GatewayJwtProperties();
+		jwtProps.setSecret(SECRET);
+
+		GatewaySecurityProperties.RoleRule broad = new GatewaySecurityProperties.RoleRule();
+		broad.setPattern("/api/shops/**");
+		broad.setRoles(List.of("SELLER"));
+
+		GatewaySecurityProperties.RoleRule narrow = new GatewaySecurityProperties.RoleRule();
+		narrow.setPattern("/api/shops/*/approve");
+		narrow.setMethods(List.of("POST"));
+		narrow.setRoles(List.of("ADMIN"));
+
+		GatewaySecurityProperties security = new GatewaySecurityProperties();
+		security.setPublicPaths(List.of("/api/auth/login"));
+		security.setRoleRequiredPaths(List.of(broad, narrow));
+
+		JwtAuthenticationFilter roleFilter = new JwtAuthenticationFilter(new JwtService(jwtProps), security);
+		String sellerToken = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		roleFilter.doFilter(request("POST", "/api/shops/01J/approve", "Bearer " + sellerToken), res, new MockFilterChain());
+
+		// Co SELLER (thoa rule rong) nhung KHONG co ADMIN (khong thoa rule hep) -> van phai 403.
+		assertThat(res.getStatus()).isEqualTo(403);
+	}
+
+	@Test
+	void nonMatchingPath_roleRuleIgnored_onlyNeedsValidToken() throws Exception {
+		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("ADMIN"));
+		String buyerToken = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		roleFilter.doFilter(request("GET", "/api/orders/123", "Bearer " + buyerToken), res, new MockFilterChain());
+
+		assertThat(res.getStatus()).isEqualTo(200);
+	}
+
+	@Test
+	void sessionManagementEndpoints_withoutBearerToken_pass() throws Exception {
+		// PBL6-46: dinh danh qua cookie refresh_token, khong qua Authorization Bearer.
+		MockHttpServletResponse logoutRes = new MockHttpServletResponse();
+		filter.doFilter(request("POST", "/api/auth/logout", null), logoutRes, new MockFilterChain());
+		assertThat(logoutRes.getStatus()).isEqualTo(200);
+
+		MockHttpServletResponse listRes = new MockHttpServletResponse();
+		filter.doFilter(request("GET", "/api/auth/sessions", null), listRes, new MockFilterChain());
+		assertThat(listRes.getStatus()).isEqualTo(200);
+
+		MockHttpServletResponse revokeRes = new MockHttpServletResponse();
+		filter.doFilter(request("DELETE", "/api/auth/sessions/01JRX8Z0M0P8QF3W9K2T7Y6C4B", null), revokeRes,
+				new MockFilterChain());
+		assertThat(revokeRes.getStatus()).isEqualTo(200);
 	}
 }

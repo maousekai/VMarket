@@ -3,6 +3,7 @@ package com.vmarket.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doNothing;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -93,9 +94,10 @@ class OtpVerifyApiTest {
 		verify(EMAIL, code)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
-				.andExpect(jsonPath("$.refreshToken").isNotEmpty())
+				.andExpect(jsonPath("$.refreshToken").doesNotExist())
 				.andExpect(jsonPath("$.status").value("ACTIVE"))
-				.andExpect(jsonPath("$.roles[0]").value("BUYER"));
+				.andExpect(jsonPath("$.roles[0]").value("BUYER"))
+				.andExpect(cookie().exists("refresh_token"));
 
 		User user = userRepository.findByEmail(EMAIL).orElseThrow();
 		assertThat(user.isEmailVerified()).isTrue();

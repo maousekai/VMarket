@@ -11,3 +11,7 @@ spring:
 auth:
   jwt:
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
+  refresh-cookie:
+    # Local chay HTTP thuan (vite proxy / mvnw spring-boot:run) -> Secure=true se
+    # khien trinh duyet khong luu cookie.
+    secure: ${AUTH_REFRESH_COOKIE_SECURE:false}
