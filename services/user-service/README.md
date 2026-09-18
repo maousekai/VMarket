@@ -1,6 +1,6 @@
 # User Service (PBL6-13)
 
-Hồ sơ cá nhân của người dùng (FR-USER-01).
+Hồ sơ cá nhân (FR-USER-01) và sổ địa chỉ giao hàng (FR-USER-02) của người dùng.
 Cổng `8082`, CSDL PostgreSQL `vmarket_user`.
 
 ## Phạm vi và ranh giới dữ liệu
@@ -8,6 +8,7 @@ Cổng `8082`, CSDL PostgreSQL `vmarket_user`.
 | Yêu cầu | Endpoint ở | Dữ liệu nằm ở |
 | --- | --- | --- |
 | FR-USER-01 Quản lý hồ sơ | user-service | `vmarket_user.user_profiles` |
+| FR-USER-02 Sổ địa chỉ (CRUD + đặt mặc định) | user-service | `vmarket_user.addresses` |
 
 Hồ sơ **không** chứa email, username hay mật khẩu: đó là dữ liệu định danh do
 auth-service sở hữu. Ở đây chỉ có thông tin hiển thị / liên lạc.
@@ -20,8 +21,14 @@ Mọi endpoint đều cần `Authorization: Bearer <access token>`, trừ `/api/
 | --- | --- | --- |
 | GET | `/api/users/me` | Xem hồ sơ của tôi (tự tạo hồ sơ rỗng ở lần gọi đầu) |
 | PUT | `/api/users/me` | Cập nhật hồ sơ — **thay thế toàn bộ** |
+| GET | `/api/users/me/addresses` | Danh sách địa chỉ (mặc định đứng đầu) |
+| POST | `/api/users/me/addresses` | Thêm địa chỉ (địa chỉ đầu tiên tự thành mặc định) |
+| GET | `/api/users/me/addresses/{id}` | Chi tiết một địa chỉ |
+| PUT | `/api/users/me/addresses/{id}` | Sửa địa chỉ (không đổi cờ mặc định) |
+| DELETE | `/api/users/me/addresses/{id}` | Xoá địa chỉ (xoá cái mặc định → cái mới nhất còn lại lên thay) |
+| PUT | `/api/users/me/addresses/{id}/default` | Đặt địa chỉ mặc định |
 
-Body `PUT`: `{ "fullName", "avatarUrl", "phone", "dateOfBirth", "gender" }`.
+Body `PUT /api/users/me`: `{ "fullName", "avatarUrl", "phone", "dateOfBirth", "gender" }`.
 
 | Trường | Ràng buộc |
 | --- | --- |
@@ -99,8 +106,14 @@ là service chết ngay lúc khởi động. `scripts\check-env.cmd` đối chi�
 
 ## Schema
 
-Flyway quản lý schema (`db/migration/V1__init_user_schema.sql`), Hibernate chỉ
-`validate`. Bảng `user_profiles` (1-1 với tài khoản, `user_id UNIQUE`).
+Flyway quản lý schema, Hibernate chỉ `validate`. Hai bảng: `user_profiles` (1-1 với
+tài khoản, `user_id UNIQUE`) và `addresses`.
+
+| Migration | Việc |
+| --- | --- |
+| `db/migration/V1__init_user_schema.sql` | `user_profiles` (FR-USER-01) |
+| `db/migration/V2__add_addresses.sql` | `addresses` (FR-USER-02) |
+| `db/vendor/postgresql/V3__addresses_one_default_per_user.sql` | Partial unique index — **chỉ PostgreSQL** |
 
 Migration viết bằng kiểu **chuẩn SQL** (`TIMESTAMP WITH TIME ZONE`, không dùng bí
 danh `TIMESTAMPTZ` của Postgres) để `FlywayMigrationTest` chạy được đúng script này
@@ -108,6 +121,28 @@ trên H2 `MODE=PostgreSQL` — xem phần Test.
 
 `user_id` **không có khoá ngoại** vì bảng `users` nằm ở CSDL khác. Ràng buộc là ngữ
 nghĩa: giá trị luôn đến từ claim `sub` của token đã verify.
+
+### Tối đa một địa chỉ mặc định mỗi người dùng
+
+Bất biến này được cưỡng chế ở **cả hai tầng**. Ở CSDL:
+
+```sql
+CREATE UNIQUE INDEX uq_addresses_one_default_per_user
+    ON addresses (user_id) WHERE is_default;
+```
+
+Cần lớp ở CSDL vì hai request "đặt mặc định" chạy song song đều đọc thấy địa chỉ cũ
+rồi cùng ghi `is_default = true` — không có index thì người dùng có hai địa chỉ mặc
+định và trang thanh toán không biết chọn cái nào. Có index thì request tới sau bị từ
+chối và `AddressService` dịch thành `409 DEFAULT_ADDRESS_CONFLICT`.
+
+> Partial index là cú pháp riêng của PostgreSQL (H2 báo lỗi ngay tại `WHERE`), nên nó
+> nằm ở `db/vendor/postgresql` và `spring.flyway.locations` dùng placeholder
+> `{vendor}`: chạy trên H2 thì `db/vendor/h2` không tồn tại và Flyway bỏ qua.
+> Thư mục vendor phải nằm **ngoài** `db/migration` — Flyway quét đệ quy nên thư mục
+> con vẫn bị nạp ở mọi vendor. Trên H2 ràng buộc này không có, nên `AddressApiTest`
+> bảo vệ bất biến ở tầng service; kiểm tra ràng buộc CSDL thật để dành PBL6-47
+> (Testcontainers).
 
 ## Test
 
@@ -118,7 +153,10 @@ cd services
 
 Test phủ: xác thực token (thiếu / hết hạn / sai chữ ký / sai issuer), tạo hồ sơ lười
 không trùng, ngữ nghĩa thay thế của `PUT /me`, kiểm tra đầu vào, giới tính
-`UNDISCLOSED` không tràn cột, hồ sơ hai người dùng tách biệt.
+`UNDISCLOSED` không tràn cột, hồ sơ hai người dùng tách biệt. Sổ địa chỉ: CRUD, địa
+chỉ đầu tiên tự thành mặc định, đổi mặc định gỡ cờ cái cũ, xoá mặc định thì cái mới
+nhất còn lại lên thay, và người dùng A không chạm được địa chỉ của B dù biết id
+(IDOR).
 
 Phần lớn test chạy trên H2 với schema do Hibernate sinh (`ddl-auto: create-drop`,
 Flyway tắt) cho nhanh. Riêng `FlywayMigrationTest` chạy **Flyway thật** trên H2
