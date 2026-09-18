@@ -224,6 +224,9 @@ services:
       AUTH_OTP_MAX_ATTEMPTS: ${AUTH_OTP_MAX_ATTEMPTS:-5}
       AUTH_OTP_RESEND_COOLDOWN: ${AUTH_OTP_RESEND_COOLDOWN:-60s}
       AUTH_OTP_HOURLY_LIMIT: ${AUTH_OTP_HOURLY_LIMIT:-5}
+      # API noi bo /internal/** (PBL6-13) - user-service goi vao. PHAI TRUNG voi
+      # INTERNAL_API_KEY cua block user-service ben duoi.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"
@@ -239,7 +242,9 @@ services:
       retries: 10
       start_period: 40s
 
-  # User Service (PBL6-13) - ho so ca nhan (FR-USER-01).
+  # User Service (PBL6-13) - ho so ca nhan, so dia chi, doi mat khau.
+  # Khong depends_on auth-service co chu y: ho so / so dia chi van chay khi
+  # auth-service chet; chi API doi mat khau tra 503 AUTH_SERVICE_UNAVAILABLE.
   user-service:
     build:
       context: .
@@ -256,6 +261,10 @@ services:
       # xung nen hai service PHAI dung chung mot chuoi bi mat - dat lech nhau se
       # dan toi canh dang nhap thanh cong nhung moi API ho so deu tra 401.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      # Doi mat khau (FR-USER-03) goi API noi bo cua auth-service - mat khau nam o
+      # CSDL vmarket_auth. INTERNAL_API_KEY phai TRUNG voi block auth-service o tren.
+      AUTH_SERVICE_URL: http://auth-service:8081
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${USER_SERVICE_PORT:-8082}:8082"
