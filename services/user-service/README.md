@@ -39,6 +39,16 @@ Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "detai
 
 1. **`PUT /api/users/me` thay thế toàn bộ hồ sơ**, không vá từng trường. Trường
    không gửi sẽ bị **xoá**. Form hồ sơ phải gửi lại cả những trường không đổi.
+
+   > ⚠️ **Lưu ý cho Frontend.** Đây là cái bẫy dễ gặp nhất của endpoint này. Ví dụ
+   > cụ thể: người dùng chỉ đổi ảnh đại diện, FE gửi `{ "avatarUrl": "..." }` →
+   > họ tên, số điện thoại, ngày sinh, giới tính **bị xoá trắng**, và API vẫn trả
+   > `200 OK` nên không có lỗi nào báo ra. Cách đúng: lấy hồ sơ hiện tại bằng
+   > `GET /api/users/me`, sửa đúng trường cần đổi trên object đó, rồi `PUT` lại
+   > **toàn bộ** object.
+   >
+   > Một endpoint `PATCH /api/users/me` (vá từng trường) sẽ được cân nhắc ở ticket
+   > sau; tới lúc đó `PUT` vẫn giữ đúng ngữ nghĩa thay thế của REST.
 2. **Endpoint không nhận `userId`** từ path hay body. Danh tính luôn lấy từ claim `sub`
    của token đã verify — sửa tham số không đổi được hồ sơ người khác.
 
@@ -92,6 +102,10 @@ là service chết ngay lúc khởi động. `scripts\check-env.cmd` đối chi�
 Flyway quản lý schema (`db/migration/V1__init_user_schema.sql`), Hibernate chỉ
 `validate`. Bảng `user_profiles` (1-1 với tài khoản, `user_id UNIQUE`).
 
+Migration viết bằng kiểu **chuẩn SQL** (`TIMESTAMP WITH TIME ZONE`, không dùng bí
+danh `TIMESTAMPTZ` của Postgres) để `FlywayMigrationTest` chạy được đúng script này
+trên H2 `MODE=PostgreSQL` — xem phần Test.
+
 `user_id` **không có khoá ngoại** vì bảng `users` nằm ở CSDL khác. Ràng buộc là ngữ
 nghĩa: giá trị luôn đến từ claim `sub` của token đã verify.
 
@@ -105,3 +119,10 @@ cd services
 Test phủ: xác thực token (thiếu / hết hạn / sai chữ ký / sai issuer), tạo hồ sơ lười
 không trùng, ngữ nghĩa thay thế của `PUT /me`, kiểm tra đầu vào, giới tính
 `UNDISCLOSED` không tràn cột, hồ sơ hai người dùng tách biệt.
+
+Phần lớn test chạy trên H2 với schema do Hibernate sinh (`ddl-auto: create-drop`,
+Flyway tắt) cho nhanh. Riêng `FlywayMigrationTest` chạy **Flyway thật** trên H2
+`MODE=PostgreSQL` với `ddl-auto: validate`, trên một DB in-memory riêng: nếu script
+migration lỗi hoặc entity lệch cột/kiểu so với migration thì test này đỏ — chỗ mà
+các test còn lại không kiểm được. Cùng khuôn với `FlywayMigrationTest` của
+auth-service.

@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -30,7 +31,15 @@ import lombok.Setter;
 @Setter
 public class UserJwtProperties {
 
-	/** Khoá bí mật HS256 — tối thiểu 32 byte, dùng chung với auth-service. */
+	/**
+	 * Khoá bí mật HS256 — tối thiểu 32 ký tự (256-bit), dùng chung với auth-service.
+	 *
+	 * <p>{@code @Size} chứ không chỉ {@code @NotBlank}: khoá ngắn hơn 32 byte vẫn qua
+	 * được bean validation nhưng {@code Keys.hmacShaKeyFor} sẽ ném
+	 * {@code WeakKeyException} lúc filter chạy — tức là service khởi động xanh rồi
+	 * mọi request có token đều 500. Chặn ngay lúc bind cấu hình thì rõ nguyên nhân hơn.
+	 */
 	@NotBlank
+	@Size(min = 32, message = "AUTH_JWT_SECRET phải >= 32 ký tự (256-bit) cho HS256")
 	private String secret;
 }

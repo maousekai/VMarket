@@ -33,11 +33,17 @@ public class UserProfileService {
 	private final UserProfileProvisioner provisioner;
 
 	/**
-	 * Cố ý <b>không</b> đặt {@code readOnly = true}: lần gọi đầu tiên của một người
-	 * dùng sẽ tạo hồ sơ, mà transaction read-only thì PostgreSQL từ chối mọi lệnh
-	 * ghi ({@code cannot execute INSERT in a read-only transaction}).
+	 * Cố ý <b>không</b> bọc {@code @Transactional}: đây là đường đọc nóng nhất của
+	 * service (mọi lần mở trang hồ sơ), còn việc ghi duy nhất — chèn hồ sơ rỗng lần
+	 * đầu — đã nằm trong transaction riêng của {@link UserProfileProvisioner}
+	 * ({@code REQUIRES_NEW}). Mở transaction read-write ở đây chỉ giữ connection
+	 * của pool lâu hơn cần thiết cho một câu {@code SELECT}.
+	 *
+	 * <p>Cũng không đặt {@code readOnly = true} được: lần gọi đầu tiên của một người
+	 * dùng phải chèn hồ sơ, mà transaction read-only thì PostgreSQL từ chối mọi lệnh
+	 * ghi ({@code cannot execute INSERT in a read-only transaction}) — kể cả khi lệnh
+	 * ghi đó chạy ở transaction con.
 	 */
-	@Transactional
 	public ProfileResponse getProfile(String userId) {
 		return ProfileResponse.from(getOrCreate(userId));
 	}

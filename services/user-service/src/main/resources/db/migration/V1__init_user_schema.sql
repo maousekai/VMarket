@@ -5,7 +5,10 @@
 --   - Khoa chinh: ULID (Crockford base32, 26 ky tu), sinh o tang app (BaseEntity).
 --   - Kieu cot dinh danh: VARCHAR(26) - khop mapping mac dinh cua Hibernate cho
 --     String, tranh loi 'ddl-auto: validate' giua char/varchar.
---   - Thoi gian: TIMESTAMPTZ, luu UTC.
+--   - Thoi gian: TIMESTAMP WITH TIME ZONE, luu UTC. Viet dang chuan SQL chu KHONG
+--     dung bi danh TIMESTAMPTZ cua Postgres: H2 (MODE=PostgreSQL) khong hieu bi
+--     danh do, ma FlywayMigrationTest chay chinh script nay tren H2 de doi chieu
+--     entity voi schema migration.
 --
 -- QUAN TRONG - user_id KHONG co FOREIGN KEY:
 --   users nam trong CSDL vmarket_auth cua auth-service, con bang nay nam trong
@@ -28,6 +31,6 @@ CREATE TABLE user_profiles (
     -- 20 chu khong phai 10: gia tri dai nhat cua enum Gender la UNDISCLOSED (11 ky
     -- tu). De VARCHAR(10) thi insert gia tri do se loi ngay tren PostgreSQL.
     gender        VARCHAR(20),
-    created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+    created_at    TIMESTAMP WITH TIME ZONE  NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMP WITH TIME ZONE  NOT NULL DEFAULT now()
 );
