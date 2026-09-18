@@ -5,12 +5,16 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.vmarket.auth.config.AuthJwtProperties;
 import com.vmarket.auth.dto.ErrorResponse;
 import com.vmarket.auth.dto.OtpRequestDto;
 import com.vmarket.auth.dto.OtpRequestResponse;
 import com.vmarket.auth.dto.OtpVerifyDto;
 import com.vmarket.auth.dto.TokenResponse;
+import com.vmarket.auth.security.DeviceMetaResolver;
+import com.vmarket.auth.security.RefreshTokenCookieService;
 import com.vmarket.auth.service.OtpService;
+import com.vmarket.auth.service.TokenIssuer;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -18,6 +22,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -28,6 +34,9 @@ import lombok.RequiredArgsConstructor;
 public class OtpController {
 
 	private final OtpService otpService;
+	private final DeviceMetaResolver deviceMetaResolver;
+	private final RefreshTokenCookieService refreshCookieService;
+	private final AuthJwtProperties jwtProps;
 
 	@Operation(summary = "Gửi mã OTP xác thực email (FR-AUTH-01)",
 			description = "Sinh mã 6 số, gửi qua email. Chặn gửi lại trong 60 giây và giới hạn "
@@ -50,7 +59,8 @@ public class OtpController {
 
 	@Operation(summary = "Xác nhận mã OTP (FR-AUTH-01)",
 			description = "Đúng mã: đánh dấu email đã xác thực (tạo tài khoản mới không mật khẩu "
-					+ "nếu chưa có), trả về access token + refresh token như luồng đăng nhập.")
+					+ "nếu chưa có), trả về access token như luồng đăng nhập. Refresh token được gắn "
+					+ "vào cookie HttpOnly `refresh_token` (không nằm trong body — PBL6-46).")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Xác thực thành công",
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
@@ -60,7 +70,11 @@ public class OtpController {
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PostMapping("/verify")
-	public TokenResponse verify(@Valid @RequestBody OtpVerifyDto body) {
-		return otpService.verifyOtp(body.email(), body.otp());
+	public TokenResponse verify(@Valid @RequestBody OtpVerifyDto body, HttpServletRequest httpRequest,
+			HttpServletResponse httpResponse) {
+		TokenIssuer.IssuedTokens issued = otpService.verifyOtp(
+				body.email(), body.otp(), deviceMetaResolver.resolve(httpRequest));
+		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
+		return issued.body();
 	}
 }

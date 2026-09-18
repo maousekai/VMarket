@@ -25,6 +25,9 @@ auth:
     secret: test-only-secret-0123456789-0123456789-0123456789
     access-ttl: 15m
     refresh-ttl: 15d
+  refresh-cookie:
+    secure: false
+    same-site: Lax
   email:
     provider: log
     from: no-reply@vmarket.local

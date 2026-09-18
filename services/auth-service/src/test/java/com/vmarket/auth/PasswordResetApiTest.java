@@ -98,6 +98,7 @@ class PasswordResetApiTest {
 		active.setUserId(user.getId());
 		active.setTokenHash("some-hash");
 		active.setExpiresAt(Instant.now().plus(15, ChronoUnit.DAYS));
+		active.setLastUsedAt(Instant.now());
 		refreshTokenRepository.save(active);
 
 		String code = forgotAndCaptureCode(EMAIL);
