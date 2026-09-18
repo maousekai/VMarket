@@ -88,6 +88,8 @@ các subtask sau bổ sung theo expand–contract.
 | `AUTH_JWT_ACCESS_TTL`    | `15m`            | Thời hạn access token               |
 | `AUTH_JWT_REFRESH_TTL`   | `30d`            | Thời hạn refresh token              |
 | `INTERNAL_API_KEY`       | *(giả, ở dev yml)* | Khoá API nội bộ `/internal/**` (≥ 32 ký tự), trùng user-service; prod bắt buộc set |
+| `AUTH_REFRESH_COOKIE_SECURE`   | `false` (dev) | Cookie `refresh_token` chỉ gửi qua HTTPS; `true` bắt buộc ở môi trường dùng HTTPS thật |
+| `AUTH_REFRESH_COOKIE_SAMESITE` | `Lax`         | SameSite của cookie `refresh_token` |
 
 Chạy với profile khác:
 
@@ -134,10 +136,14 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | Method & path            | Mô tả                                                      |
 | ------------------------ | -------------------------------------------------------- |
 | `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
-| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
-| `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token (xoay vòng). 200 / 401 (`INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`) |
+| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse` + cookie `refresh_token`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
+| `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token bằng cookie `refresh_token` (xoay vòng). 200 / 401 (`REFRESH_TOKEN_MISSING`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`) |
+| `POST /api/auth/logout`  | FR-AUTH-06 — thu hồi phiên hiện tại (cookie `refresh_token`) + xoá cookie. 200 (`MessageResponse`, idempotent) |
+| `GET /api/auth/sessions` | FR-AUTH-06 — liệt kê phiên/thiết bị đang hoạt động của user gọi. 200 (`SessionSummary[]`) / 401 (`REFRESH_TOKEN_MISSING`, `SESSION_NOT_FOUND`) |
+| `DELETE /api/auth/sessions/{id}` | FR-AUTH-06 — thu hồi một phiên cụ thể (ownership-checked). 200 / 401 / 404 `TARGET_SESSION_NOT_FOUND` |
+| `POST /api/auth/sessions/revoke-others` | FR-AUTH-06 — thu hồi mọi phiên khác, giữ lại phiên hiện tại. 200 (`MessageResponse`) / 401 |
 | `POST /api/auth/otp/request` | FR-AUTH-01 — gửi mã OTP xác thực email. 200 / 400 `VALIDATION_ERROR` / 429 (`OTP_RESEND_TOO_SOON`, `OTP_RATE_LIMITED`) / 502 `EMAIL_SEND_FAILED` |
-| `POST /api/auth/otp/verify`  | FR-AUTH-01 — xác nhận OTP → `email_verified=true` + `TokenResponse`. 200 / 400 (`OTP_NOT_FOUND`, `OTP_EXPIRED`, `OTP_INVALID`, `OTP_TOO_MANY_ATTEMPTS`, `OTP_ALREADY_USED`) |
+| `POST /api/auth/otp/verify`  | FR-AUTH-01 — xác nhận OTP → `email_verified=true` + `TokenResponse` (+ cookie `refresh_token`). 200 / 400 (`OTP_NOT_FOUND`, `OTP_EXPIRED`, `OTP_INVALID`, `OTP_TOO_MANY_ATTEMPTS`, `OTP_ALREADY_USED`) |
 | `POST /api/auth/password/forgot` | FR-AUTH-04 — gửi mã đặt lại mật khẩu. 200 (không tiết lộ email tồn tại hay không) / 400 `VALIDATION_ERROR` / 429 (`PASSWORD_RESET_TOO_SOON`, `PASSWORD_RESET_RATE_LIMITED`) / 502 `EMAIL_SEND_FAILED` |
 | `POST /api/auth/password/reset`  | FR-AUTH-04 — xác nhận mã + đặt mật khẩu mới (không tự đăng nhập). 200 (`MessageResponse`) / 400 (`PASSWORD_RESET_NOT_FOUND`, `PASSWORD_RESET_EXPIRED`, `PASSWORD_RESET_INVALID`, `PASSWORD_RESET_TOO_MANY_ATTEMPTS`, `PASSWORD_RESET_ALREADY_USED`) |
 | `GET  /api/auth/health`  | Health-check                                              |
@@ -167,14 +173,28 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 
 **Đăng nhập (FR-AUTH-02):**
 - Access token: JWT HS256, `exp` mặc định 15 phút. Claims: `sub` (user id), `email`,
-  `username`, `roles`, `email_verified`, `iss=auth-service`.
+  `username`, `roles`, `email_verified`, `jti`, `iss=auth-service`.
 - Refresh token: chuỗi ngẫu nhiên mờ (không phải JWT), sống 15 ngày, DB chỉ lưu SHA-256.
-  `/refresh` xoay vòng: token cũ bị thu hồi; **dùng lại token đã thu hồi → thu hồi
-  toàn bộ phiên của user**.
+  Gắn vào cookie **HttpOnly** `refresh_token` (path `/api/auth`) — **không** nằm
+  trong body JSON (PBL6-46), giảm rủi ro bị đánh cắp qua XSS so với lưu ở
+  localStorage/biến JS. `/refresh` xoay vòng (đọc cookie, ghi đè cookie mới): token
+  cũ bị thu hồi; **dùng lại token đã thu hồi → thu hồi toàn bộ phiên của user**.
 - Khoá tài khoản: sai mật khẩu **5 lần liên tiếp** → khoá **15 phút** (423). Đăng nhập
   đúng → reset bộ đếm.
 - User `email_verified = false` **vẫn đăng nhập được**, response `status = PENDING`
   (client hiển thị màn hình thông báo, chưa cho vào hệ thống bình thường).
+
+**Quản lý phiên (FR-AUTH-06, migration V6):**
+- "Phiên" = một dòng `refresh_tokens` còn hiệu lực (`revoked_at IS NULL`); xoay vòng
+  tạo dòng mới nên phiên tồn tại xuyên suốt các lần `/refresh` của cùng thiết bị.
+  `user_agent`/`ip_address` là best-effort (ưu tiên `X-Forwarded-For`), chỉ để hiển
+  thị, không dùng cho quyết định bảo mật.
+- Định danh "phiên gọi" ở các endpoint `logout`/`sessions/*` là **chính cookie
+  `refresh_token`** hiện tại — auth-service chưa có JWT verification riêng cho
+  route bảo vệ của mình, nên dùng lại refresh token (đã là credential bền của
+  phiên) thay vì access token (stateless, không đối chiếu DB).
+- `sessions/{id}` chỉ cho thu hồi phiên thuộc đúng user gọi; id lạ hoặc của người
+  khác đều trả `404 TARGET_SESSION_NOT_FOUND` (không phân biệt, tránh dò id).
 
 **Xác thực email bằng OTP (FR-AUTH-01, migration V4):**
 - `otp/request` → mã 6 số (`SecureRandom`), lưu **hash BCrypt** + hạn 5 phút vào
@@ -244,5 +264,5 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - [ ] FR-AUTH-03 (Google OAuth 2.0) — chuyển backlog (PBL6-44 đổi phạm vi sang OTP)
 - [x] FR-AUTH-04 (PBL6-45): **Quên mật khẩu** (`/api/auth/password/*`, migration V5)
 - [x] PBL6-13 (FR-USER-03): API nội bộ `/internal/users/{id}/password` cho user-service đổi mật khẩu (không cần migration)
-- [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
+- [x] FR-AUTH-05/06 (PBL6-46): **Phân quyền RBAC (gateway) + quản lý phiên** (`/api/auth/logout`, `/api/auth/sessions/*`, migration V6)
 - [ ] PBL6-47: Testing, Swagger & PR review

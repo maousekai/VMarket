@@ -27,6 +27,9 @@ auth:
     refresh-ttl: 15d
   internal:
     api-key: test-only-internal-api-key-0123456789-0123456789
+  refresh-cookie:
+    secure: false
+    same-site: Lax
   email:
     provider: log
     from: no-reply@vmarket.local

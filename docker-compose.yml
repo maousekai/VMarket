@@ -215,6 +215,9 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
       AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
       AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-15d}
+      # Cookie refresh token (PBL6-46) - false vi stack nay chay HTTP local/staging.
+      AUTH_REFRESH_COOKIE_SECURE: ${AUTH_REFRESH_COOKIE_SECURE:-false}
+      AUTH_REFRESH_COOKIE_SAMESITE: ${AUTH_REFRESH_COOKIE_SAMESITE:-Lax}
       # OTP xac thuc email (PBL6-44). provider=log khong gui email that.
       AUTH_EMAIL_PROVIDER: ${AUTH_EMAIL_PROVIDER:-log}
       AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM:-no-reply@vmarket.local}

@@ -19,7 +19,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import com.jayway.jsonpath.JsonPath;
 import com.vmarket.auth.config.InternalApiProperties;
 import com.vmarket.auth.entity.Role;
 import com.vmarket.auth.entity.RoleName;
@@ -30,6 +29,7 @@ import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
 import com.vmarket.auth.repository.UserRoleRepository;
 import com.vmarket.auth.security.OpaqueTokenCodec;
+import com.vmarket.auth.security.RefreshTokenCookieService;
 
 /**
  * FR-USER-03 — API nội bộ đổi mật khẩu ({@code PUT /internal/users/{id}/password}).
@@ -101,9 +101,8 @@ class PasswordChangeApiTest {
 
 	@Test
 	void doiThanhCong_thuHoiMoiRefreshToken() throws Exception {
-		String refreshToken = JsonPath.read(
-				login(PASSWORD).andExpect(status().isOk()).andReturn().getResponse().getContentAsString(),
-				"$.refreshToken");
+		String refreshToken = login(PASSWORD).andExpect(status().isOk()).andReturn().getResponse()
+				.getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
 
 		changePassword(user.getId(), PASSWORD, NEW_PASSWORD).andExpect(status().isNoContent());
 
