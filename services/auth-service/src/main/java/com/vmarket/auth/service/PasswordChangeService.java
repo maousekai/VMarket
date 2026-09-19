@@ -54,9 +54,12 @@ public class PasswordChangeService {
 	@Transactional(noRollbackFor = ApiException.class)
 	public void changePassword(String userId, String currentPassword, String newPassword) {
 		User user = userRepository.findById(userId)
-				.orElseThrow(PasswordChangeService::userNotFound);
+				.orElseThrow(AccountAdminService::userNotFound);
 		Instant now = Instant.now();
 
+		if (user.isSuspended()) {
+			throw ApiException.accountSuspended();
+		}
 		if (authenticationService.isLocked(user, now)) {
 			throw authenticationService.accountLocked(user.getLockedUntil(), now);
 		}
@@ -93,10 +96,5 @@ public class PasswordChangeService {
 
 		int revoked = refreshTokenRepository.revokeAllActiveByUserId(userId, now);
 		log.info("Đổi mật khẩu thành công userId={}; thu hồi {} phiên", userId, revoked);
-	}
-
-	/** 404 khi {@code userId} không có trong CSDL. */
-	private static ApiException userNotFound() {
-		return new ApiException("USER_NOT_FOUND", HttpStatus.NOT_FOUND, "Không tìm thấy tài khoản");
 	}
 }
