@@ -1,7 +1,7 @@
 # User Service (PBL6-13)
 
-Hồ sơ cá nhân (FR-USER-01), sổ địa chỉ giao hàng (FR-USER-02) và đổi mật khẩu
-(FR-USER-03) của người dùng.
+Hồ sơ cá nhân (FR-USER-01), sổ địa chỉ giao hàng (FR-USER-02), đổi mật khẩu
+(FR-USER-03) của người dùng và Admin quản lý người dùng (FR-USER-04).
 Cổng `8082`, CSDL PostgreSQL `vmarket_user`.
 
 ## Phạm vi và ranh giới dữ liệu
@@ -11,6 +11,7 @@ Cổng `8082`, CSDL PostgreSQL `vmarket_user`.
 | FR-USER-01 Quản lý hồ sơ | user-service | `vmarket_user.user_profiles` |
 | FR-USER-02 Sổ địa chỉ (CRUD + đặt mặc định) | user-service | `vmarket_user.addresses` |
 | FR-USER-03 Đổi mật khẩu | user-service | `vmarket_auth.users.password_hash` → gọi auth-service |
+| FR-USER-04 Admin tìm kiếm / khoá / mở khoá | user-service | email, username, vai trò, trạng thái khoá ở `vmarket_auth` → gọi auth-service; họ tên, SĐT ở `vmarket_user` |
 
 Hồ sơ **không** chứa email, username hay mật khẩu: đó là dữ liệu định danh do
 auth-service sở hữu. Ở đây chỉ có thông tin hiển thị / liên lạc.
@@ -18,7 +19,8 @@ auth-service sở hữu. Ở đây chỉ có thông tin hiển thị / liên l�
 SRS đặt đổi mật khẩu ở User Service, nhưng mật khẩu nằm trong CSDL `vmarket_auth`.
 user-service **không đọc chéo CSDL** — nó gọi REST nội bộ của auth-service (SRS 5.4),
 xem phần *Đổi mật khẩu* bên dưới. Không giữ bản sao mật khẩu nào ở đây: hai nguồn sự
-thật cho một mật khẩu nghĩa là đổi xong vẫn đăng nhập được bằng mật khẩu cũ.
+thật cho một mật khẩu nghĩa là đổi xong vẫn đăng nhập được bằng mật khẩu cũ. Trạng
+thái khoá tài khoản của FR-USER-04 cũng vậy: nằm ở auth-service, user-service chỉ gọi.
 
 ## API
 
@@ -35,6 +37,10 @@ Mọi endpoint đều cần `Authorization: Bearer <access token>`, trừ `/api/
 | DELETE | `/api/users/me/addresses/{id}` | Xoá địa chỉ (xoá cái mặc định → cái mới nhất còn lại lên thay) |
 | PUT | `/api/users/me/addresses/{id}/default` | Đặt địa chỉ mặc định |
 | PUT | `/api/users/me/password` | Đổi mật khẩu (FR-USER-03) |
+| GET | `/api/users?q=&status=&page=&size=` | **[ADMIN]** Tìm kiếm / liệt kê người dùng (FR-USER-04) |
+| GET | `/api/users/{userId}` | **[ADMIN]** Chi tiết một người dùng |
+| PUT | `/api/users/{userId}/lock` | **[ADMIN]** Khoá tài khoản, body `{ "reason" }` |
+| PUT | `/api/users/{userId}/unlock` | **[ADMIN]** Mở khoá tài khoản |
 
 Body `PUT /api/users/me`: `{ "fullName", "avatarUrl", "phone", "dateOfBirth", "gender" }`.
 
@@ -64,8 +70,9 @@ Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "detai
    >
    > Một endpoint `PATCH /api/users/me` (vá từng trường) sẽ được cân nhắc ở ticket
    > sau; tới lúc đó `PUT` vẫn giữ đúng ngữ nghĩa thay thế của REST.
-2. **Endpoint không nhận `userId`** từ path hay body. Danh tính luôn lấy từ claim `sub`
-   của token đã verify — sửa tham số không đổi được hồ sơ người khác.
+2. **Endpoint của người dùng không nhận `userId`** từ path hay body. Danh tính luôn lấy
+   từ claim `sub` của token đã verify — sửa tham số không đổi được hồ sơ người khác.
+   Chỉ endpoint **[ADMIN]** mới có `{userId}` trên path.
 
 ## Xác thực
 
@@ -173,6 +180,7 @@ user-service chỉ xác định *ai* đang đổi rồi gọi
 | `PASSWORD_UNCHANGED` | 400 | Mật khẩu mới trùng mật khẩu cũ |
 | `PASSWORD_NOT_SET` | 400 | Tài khoản tạo qua OTP chưa có mật khẩu — dùng Quên mật khẩu |
 | `ACCOUNT_LOCKED` | 423 | Khoá tạm 15 phút do nhập sai 5 lần |
+| `ACCOUNT_SUSPENDED` | 423 | Tài khoản bị Admin khoá (FR-USER-04) |
 | `AUTH_SERVICE_ERROR` | 502 | auth-service lỗi, hoặc `INTERNAL_API_KEY` hai bên lệch |
 | `AUTH_SERVICE_UNAVAILABLE` | 503 | Không kết nối được / quá thời gian |
 
@@ -196,7 +204,42 @@ người dùng vì một sự cố cấu hình họ không liên quan. `AuthServ
 
 `AUTH_SERVICE_URL` / `INTERNAL_API_KEY` phải trùng auth-service; `scripts\check-env.cmd`
 đối chiếu tự động. user-service **không** `depends_on` auth-service trong compose: hồ sơ
-và sổ địa chỉ vẫn chạy khi auth-service chết, chỉ endpoint đổi mật khẩu trả 503.
+và sổ địa chỉ vẫn chạy khi auth-service chết, chỉ các endpoint cần auth-service (đổi mật
+khẩu, Admin quản lý người dùng) trả 503.
+
+## Admin quản lý người dùng (FR-USER-04)
+
+Mọi endpoint `/api/users` (trừ `/me/**` và `/health`) yêu cầu vai trò **ADMIN** trong claim
+`roles` (`@PreAuthorize`); BUYER / SELLER nhận `403 FORBIDDEN` và không có lời gọi nào sang
+auth-service.
+
+- **Danh sách lấy từ auth-service** — nơi có mọi tài khoản — rồi ghép hồ sơ vào. Người
+  chưa từng mở trang hồ sơ vẫn hiện (khi đó `fullName`/`phone`/`avatarUrl` = `null`).
+- **`q` khớp một phần email, username, họ tên hoặc SĐT** (không phân biệt hoa thường):
+  user-service tìm userId khớp họ tên/SĐT (tối đa 500, mới nhất trước) rồi gửi kèm sang
+  auth-service để lọc "email/username khớp HOẶC id thuộc danh sách". Phân trang diễn ra
+  một chỗ nên `totalElements` luôn đúng.
+- `status`: `ACTIVE` | `LOCKED` (bị Admin khoá). Khoá tạm do đăng nhập sai không đổi
+  `status` — xem trường `loginLockedUntil`. `size` tối đa 100.
+- **Khoá:** lý do bắt buộc; `lockedBy` lấy từ token của Admin (không nhận từ body). Người
+  bị khoá không đăng nhập / refresh / xác thực OTP / đổi mật khẩu được (423
+  `ACCOUNT_SUSPENDED`), mọi refresh token bị thu hồi ngay. Access token còn hạn (≤ 15
+  phút) vẫn dùng được tới khi hết hạn — JWT không thu hồi được. Khoá lần hai giữ nguyên
+  lần khoá đầu. Không tự khoá mình được (`400 CANNOT_LOCK_SELF`).
+- **Khoá của Admin khác khoá tạm do đăng nhập sai:** cột riêng, không tự hết hạn, không bị
+  gỡ bởi đăng nhập đúng hay "Quên mật khẩu". **Mở khoá** gỡ cả hai.
+- `userId` trên path phải là ULID 26 ký tự, sai định dạng → 400 ngay, không gọi sang
+  auth-service. `GET /api/users/me` vẫn là hồ sơ của chính mình, không bị hiểu là `userId`.
+
+Tạo tài khoản ADMIN để thử (chưa có API cấp vai trò):
+
+```sql
+-- docker compose exec postgres psql -U vmarket -d vmarket_auth
+INSERT INTO user_roles (user_id, role_id)
+SELECT u.id, r.id FROM users u, roles r WHERE u.email = '<email>' AND r.name = 'ADMIN';
+```
+
+Đăng nhập lại sau khi cấp để access token mang `roles` mới.
 
 ## Test
 
@@ -214,7 +257,10 @@ nhất còn lại lên thay, và người dùng A không chạm được địa 
 khẩu mới yếu bị chặn TRƯỚC khi gọi auth-service, và mã lỗi nghiệp vụ của
 auth-service được chuyển tiếp nguyên trạng. `AuthServiceClientTest` kiểm hợp đồng
 HTTP với auth-service bằng `MockRestServiceServer` (path, header khoá nội bộ, ánh
-xạ 401→502 / 5xx→502 / timeout→503).
+xạ 401→502 / 5xx→502 / timeout→503). Admin (`AdminUserApiTest`): 401 khi không có
+token, 403 với BUYER/SELLER mà không gọi auth-service, tìm theo họ tên/SĐT, ghép hồ sơ,
+lọc trạng thái + phân trang, `userId` sai định dạng → 400, `adminId` lấy từ token khi
+khoá, chuyển tiếp `USER_NOT_FOUND` / `CANNOT_LOCK_SELF`.
 
 Phần lớn test chạy trên H2 với schema do Hibernate sinh (`ddl-auto: create-drop`,
 Flyway tắt) cho nhanh. Riêng `FlywayMigrationTest` chạy **Flyway thật** trên H2

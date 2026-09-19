@@ -247,9 +247,9 @@ services:
       retries: 10
       start_period: 40s
 
-  # User Service (PBL6-13) - ho so ca nhan, so dia chi, doi mat khau.
-  # Khong depends_on auth-service co chu y: ho so / so dia chi van chay khi
-  # auth-service chet; chi API doi mat khau tra 503 AUTH_SERVICE_UNAVAILABLE.
+  # User Service (PBL6-13) - ho so ca nhan, so dia chi, doi mat khau, Admin quan ly
+  # nguoi dung. Khong depends_on auth-service co chu y: ho so / so dia chi van chay
+  # khi auth-service chet; chi cac API can auth-service tra 503.
   user-service:
     build:
       context: .
@@ -266,8 +266,9 @@ services:
       # xung nen hai service PHAI dung chung mot chuoi bi mat - dat lech nhau se
       # dan toi canh dang nhap thanh cong nhung moi API ho so deu tra 401.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
-      # Doi mat khau (FR-USER-03) goi API noi bo cua auth-service - mat khau nam o
-      # CSDL vmarket_auth. INTERNAL_API_KEY phai TRUNG voi block auth-service o tren.
+      # Doi mat khau (FR-USER-03) va Admin quan ly tai khoan (FR-USER-04) goi API noi
+      # bo cua auth-service - mat khau / trang thai khoa nam o CSDL vmarket_auth.
+      # INTERNAL_API_KEY phai TRUNG voi block auth-service o tren.
       AUTH_SERVICE_URL: http://auth-service:8081
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
     ports:

@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -107,6 +108,25 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleUnsupportedMediaType(HttpMediaTypeNotSupportedException ex) {
 		return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
 				.body(ErrorResponse.of("UNSUPPORTED_MEDIA_TYPE", "Content-Type không được hỗ trợ"));
+	}
+
+	/**
+	 * Từ chối quyền do {@code @PreAuthorize} trên method.
+	 *
+	 * <p>Phải bắt tường minh ở đây. {@code @PreAuthorize} chạy <b>bên trong</b> lời
+	 * gọi controller, nên exception của nó rơi vào {@code @RestControllerAdvice}
+	 * TRƯỚC khi tới được {@code ExceptionTranslationFilter} của Spring Security —
+	 * handler {@code Exception} bên dưới sẽ nuốt mất và trả 500 thay vì 403.
+	 * (Cơ chế {@code accessDeniedHandler} trong {@code SecurityConfig} chỉ áp dụng
+	 * cho phần bị chặn ở tầng filter, không áp dụng cho method security.)
+	 *
+	 * <p>{@code AuthorizationDeniedException} kế thừa {@code AccessDeniedException}
+	 * nên khai một cái là phủ cả hai.
+	 */
+	@ExceptionHandler(AccessDeniedException.class)
+	public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
+		return ResponseEntity.status(HttpStatus.FORBIDDEN)
+				.body(ErrorResponse.of("FORBIDDEN", "Bạn không có quyền thực hiện thao tác này"));
 	}
 
 	@ExceptionHandler(Exception.class)

@@ -14,9 +14,10 @@ import lombok.Setter;
 /**
  * Kết nối tới API nội bộ của auth-service (khoá {@code app.auth-service.*}).
  *
- * <p>Mật khẩu nằm trong CSDL của auth-service. FR-USER-03 (đổi mật khẩu) thuộc
- * user-service theo SRS nhưng phải đọc/ghi dữ liệu đó → gọi REST nội bộ (SRS 5.4),
- * không đọc chéo CSDL.
+ * <p>Mật khẩu, email, vai trò và trạng thái khoá tài khoản nằm trong CSDL của
+ * auth-service. FR-USER-03 (đổi mật khẩu) và FR-USER-04 (Admin quản lý người dùng)
+ * thuộc user-service theo SRS nhưng phải đọc/ghi dữ liệu đó → gọi REST nội bộ
+ * (SRS 5.4), không đọc chéo CSDL.
  */
 @ConfigurationProperties(prefix = "app.auth-service")
 @Validated

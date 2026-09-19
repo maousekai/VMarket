@@ -29,9 +29,9 @@ import tools.jackson.databind.ObjectMapper;
  * nghiệp vụ). Việc siết quyền theo vai trò (RBAC filter, kiểm tra JWT) thuộc
  * phạm vi PBL6-46.
  *
- * <p>PBL6-13: thêm API nội bộ {@code /internal/**} cho service khác gọi (user-service
- * — đổi mật khẩu, FR-USER-03), xác thực bằng {@link InternalApiKeyFilter}. Không có
- * khoá hợp lệ → 401 với body lỗi chuẩn.
+ * <p>PBL6-13: thêm API nội bộ {@code /internal/**} cho service khác gọi (user-service —
+ * đổi mật khẩu, Admin quản lý tài khoản), xác thực bằng {@link InternalApiKeyFilter}.
+ * Không có khoá hợp lệ → 401 với body lỗi chuẩn.
  */
 @Configuration
 public class SecurityConfig {

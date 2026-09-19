@@ -62,6 +62,42 @@ public class AuthServiceClient {
 				.toBodilessEntity());
 	}
 
+	/** FR-USER-04. */
+	public AuthAccount getAccount(String userId) {
+		return call(() -> restClient.get()
+				.uri("/internal/users/{userId}", userId)
+				.retrieve()
+				.body(AuthAccount.class));
+	}
+
+	/** FR-USER-04. */
+	public AuthAccountPage searchAccounts(AuthAccountSearch search) {
+		return call(() -> restClient.post()
+				.uri("/internal/users/search")
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(search)
+				.retrieve()
+				.body(AuthAccountPage.class));
+	}
+
+	/** FR-USER-04 — khoá. */
+	public AuthAccount suspend(String userId, String reason, String actorId) {
+		return call(() -> restClient.put()
+				.uri("/internal/users/{userId}/suspension", userId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(new SuspendBody(reason, actorId))
+				.retrieve()
+				.body(AuthAccount.class));
+	}
+
+	/** FR-USER-04 — mở khoá. */
+	public AuthAccount unsuspend(String userId) {
+		return call(() -> restClient.delete()
+				.uri("/internal/users/{userId}/suspension", userId)
+				.retrieve()
+				.body(AuthAccount.class));
+	}
+
 	// --- helpers -------------------------------------------------------------
 
 	private <T> T call(Supplier<T> request) {
@@ -117,6 +153,9 @@ public class AuthServiceClient {
 	}
 
 	record ChangePasswordBody(String currentPassword, String newPassword) {
+	}
+
+	record SuspendBody(String reason, String actorId) {
 	}
 
 	/** Body lỗi chuẩn của dự án {@code { "error": { "code", "message" } }}. */

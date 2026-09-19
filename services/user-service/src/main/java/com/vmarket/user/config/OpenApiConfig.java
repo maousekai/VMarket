@@ -24,7 +24,10 @@ public class OpenApiConfig {
 		return new OpenAPI()
 				.info(new Info()
 						.title("VMarket User Service API")
-						.description("Hồ sơ cá nhân của người dùng đang đăng nhập (FR-USER-01).")
+						.description("Hồ sơ cá nhân (FR-USER-01), sổ địa chỉ giao hàng (FR-USER-02), "
+								+ "đổi mật khẩu (FR-USER-03) và Admin quản lý người dùng — tìm kiếm, khoá / mở khoá "
+								+ "(FR-USER-04). Mật khẩu và trạng thái khoá do auth-service lưu, user-service gọi "
+								+ "API nội bộ của auth-service.")
 						.version("v1"))
 				.components(new Components()
 						.addSecuritySchemes("bearerAuth", new SecurityScheme()

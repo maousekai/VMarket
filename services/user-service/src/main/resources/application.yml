@@ -50,8 +50,9 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
-  # API noi bo cua auth-service (PBL6-13): doi mat khau (FR-USER-03) - mat khau nam o
-  # CSDL vmarket_auth nen user-service goi REST noi bo, KHONG doc cheo CSDL (SRS 5.4).
+  # API noi bo cua auth-service (PBL6-13): doi mat khau (FR-USER-03) va Admin quan ly
+  # tai khoan (FR-USER-04) - mat khau / trang thai khoa nam o CSDL vmarket_auth nen
+  # user-service goi REST noi bo, KHONG doc cheo CSDL (SRS 5.4).
   # internal-api-key KHONG co mac dinh o file nen -> thieu INTERNAL_API_KEY la fail
   # ngay luc khoi dong. PHAI trung voi gia tri cua auth-service.
   auth-service:

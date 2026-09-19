@@ -145,11 +145,15 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 **API nội bộ `/internal/users/**` (PBL6-13)** — chỉ cho service khác gọi (hiện là
 user-service), header `X-Internal-Api-Key: <INTERNAL_API_KEY>`; thiếu/sai → 401. Gateway
 không định tuyến các path này. Endpoint công khai tương ứng nằm ở user-service
-(`PUT /api/users/me/password`).
+(`PUT /api/users/me/password`, `/api/users/**` cho Admin).
 
 | Method & path | Mô tả |
 | --- | --- |
-| `PUT /internal/users/{id}/password` | FR-USER-03 — đổi mật khẩu `{currentPassword, newPassword}`. 204 / 400 (`VALIDATION_ERROR`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `PASSWORD_NOT_SET`) / 404 `USER_NOT_FOUND` / 423 `ACCOUNT_LOCKED` |
+| `PUT /internal/users/{id}/password` | FR-USER-03 — đổi mật khẩu `{currentPassword, newPassword}`. 204 / 400 (`VALIDATION_ERROR`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `PASSWORD_NOT_SET`) / 404 `USER_NOT_FOUND` / 423 (`ACCOUNT_LOCKED`, `ACCOUNT_SUSPENDED`) |
+| `GET /internal/users/{id}` | FR-USER-04 — xem tài khoản (email, username, roles, trạng thái khoá). 200 / 404 |
+| `POST /internal/users/search` | FR-USER-04 — `{q, status, userIds, page, size}`: `status` VÀ (`q` khớp email/username HOẶC id ∈ `userIds`). 200 / 400 |
+| `PUT /internal/users/{id}/suspension` | FR-USER-04 — Admin khoá `{reason, actorId}`; thu hồi mọi refresh token; idempotent. 200 / 400 `CANNOT_LOCK_SELF` / 404 |
+| `DELETE /internal/users/{id}/suspension` | FR-USER-04 — mở khoá (gỡ cả khoá tạm do đăng nhập sai). 200 / 404 |
 
 Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
 Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 (đều cùng format trên).
@@ -204,6 +208,20 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - **Không cần migration mới:** FR-USER-03 chỉ ghi `users.password_hash` và bảng
   `refresh_tokens` đã có sẵn từ V1/V3.
 
+**Admin khoá tài khoản (FR-USER-04, migration V7):**
+- Cột riêng `users.suspended_at / suspended_reason / suspended_by`, **khác** `locked_until`
+  (khoá tạm 15 phút): không tự hết hạn, không bị gỡ bởi đăng nhập đúng hay đặt lại mật khẩu.
+- Bị khoá → `/login`, `/otp/verify` (chặn tại `TokenIssuer.issue`, sau khi đã xác thực
+  đúng mật khẩu/OTP — người đoán sai không dò được ai đang bị khoá) và `/refresh` trả
+  **423 `ACCOUNT_SUSPENDED`**. Đổi mật khẩu (FR-USER-03) cũng trả 423 `ACCOUNT_SUSPENDED`.
+- Khoá xong thu hồi mọi refresh token. Access token đang còn sống vẫn dùng được tới khi
+  hết hạn (≤ 15 phút) vì JWT không thu hồi được.
+- Mở khoá gỡ luôn khoá tạm do đăng nhập sai: người nhờ Admin mở khoá mong vào được ngay.
+- Admin không tự khoá được mình (`400 CANNOT_LOCK_SELF`) — khoá nhầm Admin cuối cùng thì
+  không còn ai mở khoá được ngoài sửa tay CSDL.
+- **V7 chứ không phải V6:** V6 do PBL6-46 (quản lý phiên, PR #17) giữ. Merge PBL6-46
+  trước; nếu PBL6-13 merge trước thì phải đổi số một trong hai migration.
+
 ## Roadmap nghiệp vụ (theo SRS)
 
 - [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
@@ -213,5 +231,6 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - [ ] FR-AUTH-03 (Google OAuth 2.0) — chuyển backlog (PBL6-44 đổi phạm vi sang OTP)
 - [x] FR-AUTH-04 (PBL6-45): **Quên mật khẩu** (`/api/auth/password/*`, migration V5)
 - [x] PBL6-13 (FR-USER-03): API nội bộ `/internal/users/{id}/password` cho user-service đổi mật khẩu (không cần migration)
+- [x] PBL6-13 (FR-USER-04): API nội bộ Admin tìm kiếm / khoá / mở khoá tài khoản (migration V7)
 - [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
 - [ ] PBL6-47: Testing, Swagger & PR review
