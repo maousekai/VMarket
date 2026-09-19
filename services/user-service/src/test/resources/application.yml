@@ -19,6 +19,11 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:5173
+  auth-service:
+    # ChangePasswordApiTest mock AuthServiceClient (@MockitoBean); AuthServiceClientTest
+    # dung MockRestServiceServer - khong co request that nao toi dia chi nay.
+    base-url: http://auth-service.test:8081
+    internal-api-key: test-only-internal-api-key-0123456789-0123456789
 
 auth:
   jwt:
