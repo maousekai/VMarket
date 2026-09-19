@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
@@ -32,6 +33,7 @@ import jakarta.servlet.http.HttpServletResponse;
  * nào dành cho khách vãng lai.
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
 	private static final String[] PUBLIC_PATHS = {
@@ -84,7 +86,7 @@ public class SecurityConfig {
 				"UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này");
 	}
 
-	/** 403 khi đã đăng nhập nhưng không đủ quyền. */
+	/** 403 khi đã đăng nhập nhưng không đủ vai trò (ví dụ endpoint chỉ dành cho ADMIN). */
 	private AccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper) {
 		return (request, response, ex) -> writeError(response, objectMapper, HttpStatus.FORBIDDEN,
 				"FORBIDDEN", "Bạn không có quyền thực hiện thao tác này");

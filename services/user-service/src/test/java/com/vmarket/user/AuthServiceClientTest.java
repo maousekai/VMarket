@@ -1,0 +1,248 @@
+package com.vmarket.user;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withNoContent;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+
+import java.net.SocketTimeoutException;
+import java.time.Instant;
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
+
+import com.vmarket.user.client.AuthAccount;
+import com.vmarket.user.client.AuthAccountPage;
+import com.vmarket.user.client.AuthAccountSearch;
+import com.vmarket.user.client.AuthServiceClient;
+import com.vmarket.user.config.AuthServiceProperties;
+import com.vmarket.user.exception.ApiException;
+
+/**
+ * Hợp đồng HTTP giữa user-service và API nội bộ auth-service: đúng
+ * path/method/header/body, và ánh xạ lỗi (xem javadoc {@link AuthServiceClient}).
+ *
+ * <p>Không cần Spring context — dựng client bằng đúng
+ * {@link AuthServiceClient#buildRestClient} mà cấu hình thật dùng, chỉ thay request
+ * factory bằng {@link MockRestServiceServer}. Nhờ vậy test bắt được cả lỗi ở chính
+ * phần dựng client (base URL, header khoá nội bộ), không riêng phần gọi.
+ */
+class AuthServiceClientTest {
+
+	private static final String BASE = "http://auth-service.test:8081";
+	private static final String KEY = "test-only-internal-api-key-0123456789-0123456789";
+	private static final String USER = "01JBQ9YDX7K3M8N5P2R4T6V8BB";
+	private static final String PASSWORD_URI = BASE + "/internal/users/" + USER + "/password";
+	private static final String ACCOUNT_URI = BASE + "/internal/users/" + USER;
+	private static final String ADMIN = "01JBQ9YDX7K3M8N5P2R4T6V8AA";
+
+	private static final String ACCOUNT_JSON = """
+			{"userId":"%s","email":"an@example.com","username":"an","roles":["BUYER"],
+			 "emailVerified":true,"suspended":true,"suspendedAt":"2026-09-14T10:00:00Z",
+			 "suspendedReason":"Spam","suspendedBy":"%s",
+			 "lockedUntil":null,"createdAt":"2026-09-01T00:00:00Z"}
+			""".formatted(USER, ADMIN);
+
+	private MockRestServiceServer server;
+	private AuthServiceClient client;
+
+	@BeforeEach
+	void setUp() {
+		AuthServiceProperties props = new AuthServiceProperties();
+		props.setBaseUrl(BASE);
+		props.setInternalApiKey(KEY);
+
+		RestClient.Builder builder = RestClient.builder();
+		server = MockRestServiceServer.bindTo(builder).build();
+		client = new AuthServiceClient(AuthServiceClient.buildRestClient(builder, props));
+	}
+
+	@Test
+	void changePassword_guiDungPathHeaderBody() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andExpect(method(HttpMethod.PUT))
+				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+				.andExpect(jsonPath("$.currentPassword").value("Abcd1234@"))
+				.andExpect(jsonPath("$.newPassword").value("Xyz98765#"))
+				.andRespond(withNoContent());
+
+		client.changePassword(USER, "Abcd1234@", "Xyz98765#");
+
+		server.verify();
+	}
+
+	@Test
+	void getAccount_docDungResponse() {
+		server.expect(requestTo(ACCOUNT_URI))
+				.andExpect(method(HttpMethod.GET))
+				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andRespond(withSuccess(ACCOUNT_JSON, MediaType.APPLICATION_JSON));
+
+		AuthAccount account = client.getAccount(USER);
+
+		assertThat(account.userId()).isEqualTo(USER);
+		assertThat(account.suspended()).isTrue();
+		assertThat(account.suspendedAt()).isEqualTo(Instant.parse("2026-09-14T10:00:00Z"));
+		assertThat(account.suspendedBy()).isEqualTo(ADMIN);
+		assertThat(account.roles()).containsExactly("BUYER");
+		server.verify();
+	}
+
+	@Test
+	void suspend_guiDungPathHeaderBody() {
+		server.expect(requestTo(ACCOUNT_URI + "/suspension"))
+				.andExpect(method(HttpMethod.PUT))
+				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+				.andExpect(jsonPath("$.reason").value("Spam"))
+				.andExpect(jsonPath("$.actorId").value(ADMIN))
+				.andRespond(withSuccess(ACCOUNT_JSON, MediaType.APPLICATION_JSON));
+
+		AuthAccount account = client.suspend(USER, "Spam", ADMIN);
+
+		assertThat(account.suspended()).isTrue();
+		server.verify();
+	}
+
+	@Test
+	void unsuspend_dungMethodDelete() {
+		server.expect(requestTo(ACCOUNT_URI + "/suspension"))
+				.andExpect(method(HttpMethod.DELETE))
+				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andRespond(withSuccess(ACCOUNT_JSON, MediaType.APPLICATION_JSON));
+
+		client.unsuspend(USER);
+
+		server.verify();
+	}
+
+	@Test
+	void searchAccounts_guiDieuKien_docTrang() {
+		server.expect(requestTo(BASE + "/internal/users/search"))
+				.andExpect(method(HttpMethod.POST))
+				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(jsonPath("$.q").value("an"))
+				.andExpect(jsonPath("$.status").value("SUSPENDED"))
+				.andExpect(jsonPath("$.userIds[0]").value(USER))
+				.andExpect(jsonPath("$.page").value(1))
+				.andExpect(jsonPath("$.size").value(10))
+				.andRespond(withSuccess("{\"items\":[" + ACCOUNT_JSON + "],\"page\":1,\"size\":10,"
+						+ "\"totalElements\":11,\"totalPages\":2}", MediaType.APPLICATION_JSON));
+
+		AuthAccountPage page = client.searchAccounts(new AuthAccountSearch("an", "SUSPENDED", List.of(USER), 1, 10));
+
+		assertThat(page.items()).hasSize(1);
+		assertThat(page.totalElements()).isEqualTo(11);
+		assertThat(page.totalPages()).isEqualTo(2);
+		server.verify();
+	}
+
+	/** Lỗi nghiệp vụ là câu trả lời đúng cho người dùng → chuyển tiếp nguyên mã. */
+	@Test
+	void loiNghiepVu4xx_chuyenTiepNguyenMaVaStatus() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withStatus(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":{\"code\":\"INVALID_CURRENT_PASSWORD\",\"message\":\"Mật khẩu hiện tại không đúng\"}}"));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Wrong123@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("INVALID_CURRENT_PASSWORD");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+					assertThat(ex.getMessage()).isEqualTo("Mật khẩu hiện tại không đúng");
+				});
+	}
+
+	@Test
+	void loi423_chuyenTiep() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withStatus(HttpStatus.LOCKED).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":{\"code\":\"ACCOUNT_LOCKED\",\"message\":\"Tài khoản tạm khoá\"}}"));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("ACCOUNT_LOCKED");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.LOCKED);
+				});
+	}
+
+	/**
+	 * 401 từ auth-service là lỗi cấu hình {@code INTERNAL_API_KEY} giữa hai service,
+	 * KHÔNG phải token của người dùng hết hạn. Chuyển tiếp 401 sẽ khiến frontend đăng
+	 * xuất người dùng vì một sự cố họ không liên quan.
+	 */
+	@Test
+	void authServiceTuChoiKhoaNoiBo401_khongChuyenTiep401_ma502() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withStatus(HttpStatus.UNAUTHORIZED).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":{\"code\":\"UNAUTHORIZED\",\"message\":\"Thiếu hoặc sai thông tin xác thực\"}}"));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_ERROR");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+				});
+	}
+
+	@Test
+	void loi4xxKhongCoBodyChuan_502() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.TEXT_HTML).body("<html>404</html>"));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class,
+						ex -> assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_ERROR"));
+	}
+
+	@Test
+	void loi5xx_502() {
+		server.expect(requestTo(PASSWORD_URI)).andRespond(withServerError());
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_ERROR");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+				});
+	}
+
+	@Test
+	void khongKetNoiDuoc_503() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withException(new SocketTimeoutException("Read timed out")));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_UNAVAILABLE");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+				});
+	}
+
+	/**
+	 * {@code userId} được mã hoá khi ghép vào path nên không đổi được endpoint đích.
+	 * {@code userId} luôn đến từ claim {@code sub} đã verify, nhưng một biến URI không
+	 * mã hoá là thứ dễ vỡ về sau nếu có chỗ khác truyền giá trị khác vào.
+	 */
+	@Test
+	void userIdCoKyTuDacBiet_duocMaHoaTrenPath_khongDoiDuocEndpoint() {
+		server.expect(requestTo(BASE + "/internal/users/..%2Fsearch/password"))
+				.andRespond(withNoContent());
+
+		client.changePassword("../search", "Abcd1234@", "Xyz98765#");
+
+		server.verify();
+	}
+}

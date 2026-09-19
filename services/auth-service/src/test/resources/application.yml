@@ -25,6 +25,8 @@ auth:
     secret: test-only-secret-0123456789-0123456789-0123456789
     access-ttl: 15m
     refresh-ttl: 15d
+  internal:
+    api-key: test-only-internal-api-key-0123456789-0123456789
   email:
     provider: log
     from: no-reply@vmarket.local

@@ -124,9 +124,16 @@ public class AuthenticationService {
 		User user = userRepository.findById(token.getUserId())
 				.orElseThrow(() -> new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
 						"Tài khoản không tồn tại"));
+		if (user.isSuspended()) {
+			// Admin khoá (FR-USER-04) đã thu hồi phiên lúc khoá; thu hồi lại ở đây phòng
+			// token phát ra trong khoảnh khắc song song với thao tác khoá.
+			int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
+			log.warn("Refresh bị từ chối do tài khoản bị Admin khoá (userId={}), thu hồi {} phiên",
+					user.getId(), revoked);
+			throw ApiException.accountSuspended();
+		}
 		if (isLocked(user, now)) {
-			// Thu hồi toàn bộ phiên (SRS FR-AUTH-06) — kể cả khi tài khoản bị Admin
-			// khoá thủ công, không đi qua luồng login sai mật khẩu.
+			// Thu hồi toàn bộ phiên (SRS FR-AUTH-06) khi tài khoản đang bị khoá tạm.
 			int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
 			log.warn("Refresh bị từ chối do tài khoản bị khoá (userId={}), thu hồi {} phiên", user.getId(), revoked);
 			throw accountLocked(user.getLockedUntil(), now);
@@ -149,8 +156,13 @@ public class AuthenticationService {
 	}
 
 	// --- helpers -------------------------------------------------------------
+	// isLocked / registerFailedAttempt / accountLocked là package-private chứ không
+	// private: PasswordChangeService (FR-USER-03) dùng chung chính sách khoá khi nhập
+	// sai mật khẩu hiện tại — MỘT bộ đếm duy nhất cho mọi chỗ thử mật khẩu. Nếu đổi
+	// mật khẩu có bộ đếm riêng thì ai cầm được access token (còn sống ≤ 15 phút) có
+	// thể dò mật khẩu không giới hạn qua endpoint đổi mật khẩu.
 
-	private boolean isLocked(User user, Instant now) {
+	boolean isLocked(User user, Instant now) {
 		return user.getLockedUntil() != null && user.getLockedUntil().isAfter(now);
 	}
 
@@ -159,7 +171,7 @@ public class AuthenticationService {
 	 * tài khoản + thu hồi toàn bộ refresh token. Trả về {@code locked_until} nếu
 	 * vừa bị khoá, ngược lại {@code null}.
 	 */
-	private Instant registerFailedAttempt(User user, Instant now) {
+	Instant registerFailedAttempt(User user, Instant now) {
 		userRepository.incrementFailedLoginAttempts(user.getId());
 		int attempts = userRepository.findById(user.getId())
 				.map(User::getFailedLoginAttempts).orElse(0);
@@ -179,7 +191,7 @@ public class AuthenticationService {
 				"Email hoặc mật khẩu không đúng");
 	}
 
-	private ApiException accountLocked(Instant lockedUntil, Instant now) {
+	ApiException accountLocked(Instant lockedUntil, Instant now) {
 		long minutes = Math.max(1, Duration.between(now, lockedUntil).toMinutes() + 1);
 		return new ApiException("ACCOUNT_LOCKED", HttpStatus.LOCKED,
 				"Tài khoản tạm khoá do đăng nhập sai nhiều lần. Thử lại sau khoảng " + minutes + " phút");
