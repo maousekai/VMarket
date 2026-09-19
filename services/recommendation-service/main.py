@@ -1,10 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from event_consumer import start_event_consumer_thread
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Bat consumer RabbitMQ (ProductCreated..., OrderPlaced...) trong luong nen.
+    # Khai bao queue som de event catalog khong bi ket NO_ROUTE o outbox
+    # Product Catalog (Review 3 - worklogs/PBL6-15.md).
+    start_event_consumer_thread()
+    yield
+
 
 app = FastAPI(
     title="VMarket Recommendation Service",
     description="Goi y san pham ca nhan hoa va san pham tuong tu",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS cho response that (preflight OPTIONS da duoc api-gateway tra loi).

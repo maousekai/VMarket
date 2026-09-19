@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: product-service
+  mongodb:
+    uri: mongodb://localhost:27017/vmarket_product_test
+  data:
+    mongodb:
+      auto-index-creation: false
+
+app:
+  internal-api-key: test-internal-key
+  events:
+    listen: false
+  outbox:
+    enabled: false
+  catalog-migration:
+    enabled: false

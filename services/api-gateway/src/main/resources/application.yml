@@ -103,6 +103,12 @@ app:
     public-get-paths:
       - /api/products/**
       - /api/shops/**
+    # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi
+    # nhau trực tiếp qua URL nội bộ (BACKEND_SERVICES_HOST), kèm X-Internal-Api-Key.
+    internal-deny-paths:
+      - /api/products/internal/**
+      - /api/shops/internal/**
+      - /api/users/internal/**
   # Rate limit co ban (fixed-window theo IP). Xem RateLimitProperties.
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}

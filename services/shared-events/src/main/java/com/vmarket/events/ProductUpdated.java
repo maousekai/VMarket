@@ -13,5 +13,23 @@ public record ProductUpdated(
 		String name,
 		BigDecimal price,
 		String status,
-		List<String> imageUrls) {
+		List<String> imageUrls,
+		int schemaVersion,
+		String description,
+		String categoryId,
+		String brandId,
+		BigDecimal maxPrice,
+		List<ProductVariantSnapshot> variants,
+		double ratingAverage,
+		long ratingCount,
+		long soldCount,
+		long availableStock,
+		boolean catalogVisible) {
+
+	/** Constructor tương thích ngược với payload v1. */
+	public ProductUpdated(String productId, String shopId, String name, BigDecimal price,
+			String status, List<String> imageUrls) {
+		this(productId, shopId, name, price, status, imageUrls, 1, null, null, null,
+				price, List.of(), 0, 0, 0, 0, "ACTIVE".equals(status));
+	}
 }
