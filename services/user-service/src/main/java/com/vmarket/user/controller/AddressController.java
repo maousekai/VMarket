@@ -34,6 +34,12 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>Mọi endpoint đều thao tác trong phạm vi {@code /me} nên không thể chạm vào
  * địa chỉ của người khác, kể cả khi biết id.
+ *
+ * <p>Ba endpoint ghi dữ liệu ở đây nhận header tuỳ chọn {@code Idempotency-Key}
+ * (xem {@code IdempotencyFilter}): client hết thời gian chờ rồi gửi lại sẽ nhận lại
+ * đúng response cũ thay vì tạo thêm một địa chỉ trùng. Header do filter xử lý nên
+ * controller không thấy nó; phần khai báo trong tài liệu API nằm ở
+ * {@code OpenApiConfig}.
  */
 @Tag(name = "Address Book", description = "Sổ địa chỉ giao hàng (FR-USER-02)")
 @SecurityRequirement(name = "bearerAuth")
@@ -71,6 +77,10 @@ public class AddressController {
 					content = @Content(schema = @Schema(implementation = AddressResponse.class))),
 			@ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ (VALIDATION_ERROR)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "409",
+					description = "Hai request cùng thêm địa chỉ ĐẦU TIÊN, cả hai cùng xin cờ mặc "
+							+ "định (DEFAULT_ADDRESS_CONFLICT) — gửi lại là xong",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PostMapping
 	public ResponseEntity<AddressResponse> create(@AuthenticationPrincipal String userId,
@@ -101,6 +111,10 @@ public class AddressController {
 	@ApiResponses({
 			@ApiResponse(responseCode = "204", description = "Đã xoá"),
 			@ApiResponse(responseCode = "404", description = "Không tìm thấy địa chỉ (ADDRESS_NOT_FOUND)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "409",
+					description = "Bước chỉ định mặc định mới đụng một thao tác đổi mặc định chạy "
+							+ "song song (DEFAULT_ADDRESS_CONFLICT)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@DeleteMapping("/{addressId}")

@@ -50,6 +50,16 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # Header Idempotency-Key cho cac endpoint ghi (POST/PUT/PATCH/DELETE). Header la
+  # TUY CHON: thieu no thi request chay y nhu truoc, chi la khong co bao ve.
+  idempotency:
+    enabled: ${IDEMPOTENCY_ENABLED:true}
+    # Qua moc nay ma request van chua xong thi coi nhu tien trinh xu ly no da chet
+    # va nha key ra. Phai dai hon thoi gian xu ly that cua endpoint cham nhat.
+    claim-timeout: ${IDEMPOTENCY_CLAIM_TIMEOUT:5m}
+    # Giu ket qua bao lau de con phat lai. Retry cua client xay ra trong vai giay
+    # toi vai phut; mot ngay la rong rai.
+    retention: ${IDEMPOTENCY_RETENTION:1d}
 
 # JWT - user-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
 # hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va

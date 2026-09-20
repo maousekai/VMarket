@@ -15,7 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V2) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V4) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
  *
  * <p>Nếu context khởi động được nghĩa là: (1) script migration chạy không lỗi,
@@ -30,11 +30,11 @@ import org.springframework.test.context.TestPropertySource;
  * <p>Giống {@code com.vmarket.auth.FlywayMigrationTest} bên auth-service — cố ý
  * chép cùng một khuôn để hai service kiểm migration theo đúng một cách.
  *
- * <p><b>Chỉ thấy V1 và V2.</b> {@code locations} có placeholder {@code {vendor}};
- * chạy trên H2 thì {@code db/vendor/h2} không tồn tại nên
- * {@code db/vendor/postgresql/V3__addresses_one_default_per_user.sql} (partial
+ * <p><b>Trên H2 chỉ thấy V1, V2 và V4 — thiếu V3.</b> {@code locations} có
+ * placeholder {@code {vendor}}; chạy trên H2 thì {@code db/vendor/h2} không tồn tại
+ * nên {@code db/vendor/postgresql/V3__addresses_one_default_per_user.sql} (partial
  * index, cú pháp riêng của Postgres) không được nạp. Trên PostgreSQL thật sẽ có đủ
- * ba — con số 2 dưới đây là <b>đúng cho H2</b>, không phải số migration của prod.
+ * bốn — con số 3 dưới đây là <b>đúng cho H2</b>, không phải số migration của prod.
  */
 @SpringBootTest
 @TestPropertySource(properties = {
@@ -52,8 +52,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("2");
-		assertThat(flyway.info().applied()).hasSize(2);
+		assertThat(current.getVersion().getVersion()).isEqualTo("4");
+		assertThat(flyway.info().applied()).hasSize(3);
 	}
 
 	@Test
@@ -78,6 +78,16 @@ class FlywayMigrationTest {
 			assertThat(columnExists(c, "addresses", "street_address")).isTrue();
 			assertThat(columnExists(c, "addresses", "note")).isTrue();
 			assertThat(columnExists(c, "addresses", "is_default")).isTrue();
+			// V4 - idempotency_keys (Idempotency-Key cho mọi endpoint ghi)
+			assertThat(columnExists(c, "idempotency_keys", "user_id")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "idempotency_key")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "request_method")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "request_path")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "request_fingerprint")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "response_status")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "response_body")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "response_content_type")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "completed_at")).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
 	}

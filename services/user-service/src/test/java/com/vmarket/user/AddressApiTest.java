@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import tools.jackson.databind.JsonNode;
@@ -39,6 +42,7 @@ class AddressApiTest {
 	@Autowired UserProfileRepository userProfileRepository;
 	@Autowired UserJwtProperties jwtProperties;
 	@Autowired ObjectMapper objectMapper;
+	@Autowired JdbcTemplate jdbcTemplate;
 
 	@BeforeEach
 	void clean() {
@@ -110,6 +114,31 @@ class AddressApiTest {
 				.toList();
 		assertThat(defaults).hasSize(1);
 		assertThat(defaults.get(0).getId()).isEqualTo(second);
+	}
+
+	@Test
+	void datMacDinh_capNhatCaUpdatedAtCuaDiaChiBiGoCo() throws Exception {
+		String first = createAddress(USER_A, "An");
+		String second = createAddress(USER_A, "Bình");
+
+		// Lùi updated_at về hẳn quá khứ để phép so không phụ thuộc vào độ phân giải
+		// đồng hồ — hai request trong test cách nhau chưa tới một mili giây.
+		OffsetDateTime backdated = OffsetDateTime.now().minusDays(1);
+		jdbcTemplate.update("update addresses set updated_at = ? where id = ?", backdated, first);
+
+		mockMvc.perform(put("/api/users/me/addresses/{id}/default", second)
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A)))
+				.andExpect(status().isOk());
+
+		// clearDefaultForUser là câu UPDATE hàng loạt, nó không kích hoạt
+		// @UpdateTimestamp. Không gán tay thì isDefault của `first` đổi mà updated_at
+		// vẫn đứng yên — sai cho audit và cho mọi thứ đồng bộ theo mốc sửa đổi.
+		Address demoted = addressRepository.findById(first).orElseThrow();
+		assertThat(demoted.isDefault()).isFalse();
+		assertThat(demoted.getUpdatedAt())
+				.as("địa chỉ bị gỡ cờ mặc định phải được cập nhật updated_at")
+				.isAfter(backdated.toInstant().plusSeconds(60));
+		assertThat(demoted.getUpdatedAt()).isBeforeOrEqualTo(Instant.now());
 	}
 
 	@Test

@@ -1,8 +1,8 @@
 package com.vmarket.user.service;
 
+import java.time.Instant;
 import java.util.List;
 
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +32,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Mọi thao tác đều tra cứu theo cặp {@code (id, userId)} nên người dùng A không
  * chạm được vào địa chỉ của B dù có đoán đúng id (IDOR).
+ *
+ * <p><b>Đụng độ khi ghi song song không bắt ở đây.</b> Mọi chỗ ghi cờ mặc định đều
+ * {@code saveAndFlush} để partial unique index nói "không" ngay tại dòng gây lỗi,
+ * rồi {@code GlobalExceptionHandler} dịch một lần cho cả ba chỗ thành
+ * {@code 409 DEFAULT_ADDRESS_CONFLICT}. Bắt lẻ ở từng method thì chỉ cần thêm một
+ * chỗ ghi mới mà quên copy khối try/catch là client nhận 500.
  */
 @Slf4j
 @Service
@@ -61,9 +67,15 @@ public class AddressService {
 		// Địa chỉ đầu tiên tự thành mặc định: bắt người dùng thêm địa chỉ xong còn
 		// phải bấm thêm một nút "đặt mặc định" là thừa, và quên bấm thì trang thanh
 		// toán không có địa chỉ nào để chọn sẵn.
+		//
+		// countByUserId rồi mới ghi là một khoảng hở: hai request thêm địa chỉ ĐẦU
+		// TIÊN chạy song song đều đọc thấy 0 và cùng xin cờ mặc định. saveAndFlush để
+		// partial unique index chặn request tới sau ngay tại đây (nếu để dồn tới lúc
+		// commit thì lỗi bung ra ngoài transaction, khó lần ra chỗ hỏng) — handler
+		// dịch thành 409 để client thử lại, thay vì 500.
 		address.setDefault(addressRepository.countByUserId(userId) == 0);
 
-		Address saved = addressRepository.save(address);
+		Address saved = addressRepository.saveAndFlush(address);
 		log.info("Thêm địa chỉ id={} userId={} (mặc định={})", saved.getId(), userId, saved.isDefault());
 		return AddressResponse.from(saved);
 	}
@@ -108,7 +120,7 @@ public class AddressService {
 			return AddressResponse.from(address);
 		}
 
-		addressRepository.clearDefaultForUser(userId, addressId);
+		addressRepository.clearDefaultForUser(userId, addressId, Instant.now());
 
 		// clearDefaultForUser dùng clearAutomatically nên entity đang giữ đã bị gỡ
 		// khỏi persistence context — phải nạp lại trước khi sửa, nếu không thay đổi
@@ -116,30 +128,28 @@ public class AddressService {
 		Address reloaded = mustFind(userId, addressId);
 		reloaded.setDefault(true);
 
-		try {
-			Address saved = addressRepository.saveAndFlush(reloaded);
-			log.info("Đặt địa chỉ mặc định id={} userId={}", addressId, userId);
-			return AddressResponse.from(saved);
-		} catch (DataIntegrityViolationException ex) {
-			// Hai request "đặt mặc định" chạy song song: partial unique index chặn
-			// request tới sau. Trả 409 để client thử lại thay vì 500.
-			log.warn("Xung đột khi đặt địa chỉ mặc định userId={} addressId={}", userId, addressId);
-			throw ApiException.conflict("DEFAULT_ADDRESS_CONFLICT",
-					"Một thao tác khác đang đổi địa chỉ mặc định, vui lòng thử lại");
-		}
+		Address saved = addressRepository.saveAndFlush(reloaded);
+		log.info("Đặt địa chỉ mặc định id={} userId={}", addressId, userId);
+		return AddressResponse.from(saved);
 	}
 
-	/** Sau khi xoá địa chỉ mặc định, chọn địa chỉ mới nhất còn lại làm mặc định. */
+	/**
+	 * Sau khi xoá địa chỉ mặc định, chọn địa chỉ mới nhất còn lại làm mặc định.
+	 *
+	 * <p>Chỉ nạp đúng một dòng ({@code findFirst}) chứ không lấy cả sổ địa chỉ rồi
+	 * đọc phần tử đầu.
+	 *
+	 * <p>{@code saveAndFlush} vì bước này cũng ghi cờ mặc định: nếu song song có một
+	 * request {@code PUT /{id}/default} vừa gán cờ cho địa chỉ khác thì partial unique
+	 * index chặn ngay ở đây và handler trả 409, thay vì lỗi bung ra lúc commit.
+	 */
 	private void promoteNewDefault(String userId) {
-		List<Address> remaining = addressRepository.findByUserIdOrderByIsDefaultDescCreatedAtDesc(userId);
-		if (remaining.isEmpty()) {
-			return;
-		}
-		Address next = remaining.get(0);
-		next.setDefault(true);
-		addressRepository.save(next);
-		log.info("Địa chỉ id={} được đặt làm mặc định thay cho địa chỉ vừa xoá (userId={})",
-				next.getId(), userId);
+		addressRepository.findFirstByUserIdOrderByCreatedAtDesc(userId).ifPresent(next -> {
+			next.setDefault(true);
+			addressRepository.saveAndFlush(next);
+			log.info("Địa chỉ id={} được đặt làm mặc định thay cho địa chỉ vừa xoá (userId={})",
+					next.getId(), userId);
+		});
 	}
 
 	private Address mustFind(String userId, String addressId) {
