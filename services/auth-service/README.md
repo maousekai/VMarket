@@ -147,6 +147,13 @@ user-service), header `X-Internal-Api-Key: <INTERNAL_API_KEY>`; thiếu/sai → 
 không định tuyến các path này. Endpoint công khai tương ứng nằm ở user-service
 (`PUT /api/users/me/password`).
 
+`InternalApiKeyFilter` và tầng phân quyền dùng **chung một `RequestMatcher`**
+(`PathPatternRequestMatcher` cho `/internal/**`, tạo một lần trong `SecurityConfig` rồi
+truyền vào filter). Hai bên tự so chuỗi riêng thì sẽ lệch: `getRequestURI()` có cả
+context path, còn matcher so trên đường dẫn *trong ứng dụng* — trùng khớp chỉ vì context
+path đang rỗng. Đặt `server.servlet.context-path` là filter bỏ qua sạch các lời gọi hợp
+lệ và **mọi** request nội bộ trả 401. `InternalApiContextPathTest` khoá lại hành vi này.
+
 | Method & path | Mô tả |
 | --- | --- |
 | `PUT /internal/users/{id}/password` | FR-USER-03 — đổi mật khẩu `{currentPassword, newPassword}`. 204 / 400 (`VALIDATION_ERROR`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `PASSWORD_NOT_SET`) / 404 `USER_NOT_FOUND` / 423 `ACCOUNT_LOCKED` |
@@ -203,6 +210,30 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
   khẩu hiện tại" để xác minh, phải dùng Quên mật khẩu để đặt lần đầu.
 - **Không cần migration mới:** FR-USER-03 chỉ ghi `users.password_hash` và bảng
   `refresh_tokens` đã có sẵn từ V1/V3.
+
+**Giới hạn đã biết & đánh đổi có chủ đích (FR-USER-03):**
+
+- **Người giữ access token có thể khoá tài khoản chủ sở hữu.** Dùng chung bộ đếm nghĩa
+  là kẻ cầm access token chỉ cần gửi 5 lần sai mật khẩu hiện tại là khoá tài khoản 15
+  phút, và `registerFailedAttempt` thu hồi mọi refresh token → chủ tài khoản bị đăng
+  xuất và chưa đăng nhập lại được. Đây là **đánh đổi có chủ đích**: không có bộ đếm thì
+  kẻ đó dò được mật khẩu, mà mất mật khẩu là thiệt hại không hồi phục được, còn khoá 15
+  phút thì có. Nhánh khoá xuất phát từ endpoint đổi mật khẩu được log **WARN riêng**
+  (kèm `userId` và ghi rõ nguồn) để còn phát hiện khi bị lạm dụng — khác với log của
+  đăng nhập sai.
+- **Access token cũ sống thêm ≤ 15 phút sau khi đổi mật khẩu.** Chỉ refresh token bị
+  thu hồi; access token là JWT tự chứa nên không vô hiệu hoá được mà không tra CSDL ở
+  mỗi request. Khắc phục cần `token_version` trong claim hoặc denylist theo `sub + iat`
+  → **ticket riêng**, vì đụng tới mọi service đang verify token.
+- **Một khoá nội bộ duy nhất, cấp trọn quyền `/internal/**`.** `ROLE_INTERNAL_SERVICE`
+  không phân biệt service gọi, và khoá chỉ có một giá trị nên xoay khoá phải deploy đồng
+  thời hai service. Đủ cho một endpoint nội bộ; khi có endpoint thứ hai/thứ ba nên chuyển
+  sang danh sách khoá (giữ khoá cũ + mới) hoặc scope theo service.
+- **`authenticationEntryPoint` áp cho mọi request chưa xác thực**, không riêng
+  `/internal/**` — body 401 của các đường dẫn khác cũng đổi từ rỗng sang hình dạng chuẩn
+  `{ "error": { "code", "message" } }`. Đúng theo quy ước lỗi chung của dự án, nhưng là
+  **thay đổi hành vi ngoài phạm vi FR-USER-03**: cần đối chiếu khi gộp với RBAC của
+  PBL6-46.
 
 ## Roadmap nghiệp vụ (theo SRS)
 

@@ -227,7 +227,8 @@ user-service chỉ xác định *ai* đang đổi rồi gọi
 | `PASSWORD_NOT_SET` | 400 | Tài khoản tạo qua OTP chưa có mật khẩu — dùng Quên mật khẩu |
 | `ACCOUNT_LOCKED` | 423 | Khoá tạm 15 phút do nhập sai 5 lần |
 | `AUTH_SERVICE_ERROR` | 502 | auth-service lỗi, hoặc `INTERNAL_API_KEY` hai bên lệch |
-| `AUTH_SERVICE_UNAVAILABLE` | 503 | Không kết nối được / quá thời gian |
+| `AUTH_SERVICE_UNAVAILABLE` | 503 | **Chưa gọi tới được** auth-service — thao tác chắc chắn chưa chạy, thử lại được |
+| `PASSWORD_CHANGE_UNKNOWN` | 504 | **Đã gọi tới nhưng không rõ kết quả** — xem bên dưới, ĐỪNG thử lại |
 
 ### Ba điều cần biết
 
@@ -242,6 +243,39 @@ user-service chỉ xác định *ai* đang đổi rồi gọi
 > ⚠️ **Lưu ý cho Frontend.** Sau `200 OK`, refresh token hiện tại đã bị thu hồi:
 > access token còn sống tới khi hết hạn, nhưng lần refresh kế tiếp sẽ 401. Nên điều
 > hướng về trang đăng nhập ngay sau khi đổi thành công thay vì đợi refresh thất bại.
+
+### `503` và `504` là hai chuyện khác nhau — đừng gộp
+
+`503 AUTH_SERVICE_UNAVAILABLE` nghĩa là **chưa byte nào tới auth-service** (connection
+refused, sai host, hết thời gian *kết nối*). Thao tác chắc chắn chưa chạy → bảo người
+dùng thử lại là đúng.
+
+`504 PASSWORD_CHANGE_UNKNOWN` nghĩa là **request đã tới nơi nhưng không biết kết quả**
+(hết thời gian *đọc*, đứt kết nối giữa chừng). auth-service có thể đã chạy xong: mật
+khẩu đã đổi và mọi phiên đã bị thu hồi.
+
+Vì sao phải tách: nếu gộp `504` vào `503` *"vui lòng thử lại sau"* thì người dùng bấm
+thử lại với mật khẩu **cũ** → `INVALID_CURRENT_PASSWORD` → bộ đếm khoá tăng. Vài lần là
+khoá tài khoản 15 phút **dù họ không làm gì sai**.
+
+> ⚠️ **Lưu ý cho Frontend.** Gặp `504 PASSWORD_CHANGE_UNKNOWN` thì **không** gửi lại
+> request và **không** hiện nút "Thử lại". Hướng người dùng sang đăng nhập bằng mật
+> khẩu **mới**: vào được nghĩa là đã đổi thành công; không vào được thì mật khẩu cũ vẫn
+> còn hiệu lực và họ đổi lại từ đầu. Đây là cách kiểm tra duy nhất không có tác dụng phụ.
+
+Phân loại dựa trên **kiểu exception**, không dò chuỗi thông báo lỗi — `AuthServiceClient`
+dùng `JdkClientHttpRequestFactory` vì nó ném `HttpConnectTimeoutException` cho timeout
+kết nối và `HttpTimeoutException` cho timeout đọc (`SimpleClientHttpRequestFactory` ném
+`SocketTimeoutException` cho cả hai, chỉ khác chuỗi thông báo). Lỗi lạ không nhận ra
+mặc định rơi vào nhóm "không rõ": đoán nhầm theo hướng *"chắc chắn hỏng"* mới là cái
+gây hại.
+
+### Giới hạn đã biết
+
+| Giới hạn | Hệ quả | Hướng xử lý |
+| --- | --- | --- |
+| **Access token cũ sống thêm ≤ 15 phút** sau khi đổi mật khẩu | Chỉ refresh token bị thu hồi. Access token là JWT tự chứa nên không vô hiệu hoá được mà không tra CSDL ở mỗi request. Lý do đổi mật khẩu thường là nghi bị lộ → kẻ đang giữ access token vẫn gọi API bình thường tới khi nó hết hạn. | Cần `token_version` trong claim hoặc denylist theo `sub + iat`. Đụng tới mọi service đang verify token → **ticket riêng**, không làm trong PBL6-13. |
+| **Người giữ access token có thể khoá tài khoản chủ sở hữu** | Gửi 5 lần sai mật khẩu hiện tại là khoá 15 phút, và `registerFailedAttempt` thu hồi mọi refresh token → chủ tài khoản bị đăng xuất và chưa đăng nhập lại được. | **Chủ đích**, không phải sót. Đổi lại là chặn được việc dò mật khẩu — thiệt hại đó không hồi phục được, còn khoá 15 phút thì có. Nhánh khoá xuất phát từ endpoint này được log WARN riêng ở auth-service để phát hiện khi bị lạm dụng. |
 
 **Lỗi 401 từ auth-service không được chuyển tiếp** — đó là dấu hiệu `INTERNAL_API_KEY`
 hai service lệch nhau, không phải token người dùng sai; trả 401 cho client sẽ đăng xuất
@@ -267,7 +301,8 @@ nhất còn lại lên thay, và người dùng A không chạm được địa 
 khẩu mới yếu bị chặn TRƯỚC khi gọi auth-service, và mã lỗi nghiệp vụ của
 auth-service được chuyển tiếp nguyên trạng. `AuthServiceClientTest` kiểm hợp đồng
 HTTP với auth-service bằng `MockRestServiceServer` (path, header khoá nội bộ, ánh
-xạ 401→502 / 5xx→502 / timeout→503). `Idempotency-Key`: gửi lại không tạo bản
+xạ 401→502 / 5xx→502, và quan trọng nhất: timeout **kết nối** → 503 còn timeout **đọc**
+/ đứt giữa chừng → 504 `PASSWORD_CHANGE_UNKNOWN` với thông báo không có chữ "thử lại"). `Idempotency-Key`: gửi lại không tạo bản
 trùng, phát lại đúng response cũ, cùng key khác nội dung bị chặn, request lỗi không
 khoá key, key treo quá hạn được nhả, hai người dùng trùng key không che nhau.
 

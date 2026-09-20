@@ -26,6 +26,13 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>Giống {@code /me} của hồ sơ: không nhận userId từ path hay body — danh tính luôn
  * lấy từ access token đã verify.
+ *
+ * <p><b>Giới hạn đã biết — access token cũ vẫn dùng được tới khi hết hạn (≤ 15 phút).</b>
+ * Đổi mật khẩu thu hồi mọi <i>refresh</i> token, nhưng access token là JWT tự chứa nên
+ * không có cách vô hiệu hoá nó mà không tra CSDL ở mỗi request. Lý do đổi mật khẩu
+ * thường là nghi bị lộ, nên kẻ đang giữ access token vẫn gọi được API trong khoảng đó.
+ * Khắc phục cần {@code token_version} trong claim hoặc denylist theo {@code sub + iat} —
+ * để ticket riêng vì đụng tới mọi service đang verify token.
  */
 @Tag(name = "User Profile", description = "Hồ sơ cá nhân của người dùng đang đăng nhập")
 @SecurityRequirement(name = "bearerAuth")
@@ -40,7 +47,9 @@ public class PasswordController {
 			description = "Yêu cầu mật khẩu hiện tại. Nhập sai 5 lần liên tiếp (tính chung với đăng nhập sai) "
 					+ "→ tài khoản bị khoá tạm 15 phút. Đổi thành công → mọi phiên đăng nhập (refresh token) bị "
 					+ "thu hồi: client nên đăng nhập lại bằng mật khẩu mới. Tài khoản tạo qua OTP chưa có mật "
-					+ "khẩu phải dùng Quên mật khẩu để đặt lần đầu.")
+					+ "khẩu phải dùng Quên mật khẩu để đặt lần đầu. LƯU Ý: gặp 504 PASSWORD_CHANGE_UNKNOWN thì "
+					+ "KHÔNG gửi lại request — mật khẩu có thể đã đổi, gửi lại bằng mật khẩu cũ chỉ làm tăng "
+					+ "bộ đếm khoá.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Đổi thành công",
 					content = @Content(schema = @Schema(implementation = MessageResponse.class))),
@@ -52,7 +61,13 @@ public class PasswordController {
 			@ApiResponse(responseCode = "423",
 					description = "Khoá tạm do nhập sai nhiều lần (ACCOUNT_LOCKED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "503", description = "Không gọi được auth-service (AUTH_SERVICE_UNAVAILABLE)",
+			@ApiResponse(responseCode = "503",
+					description = "Chưa gọi tới được auth-service (AUTH_SERVICE_UNAVAILABLE) — thao tác chắc "
+							+ "chắn chưa chạy, thử lại được",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "504",
+					description = "Đã gọi tới auth-service nhưng không rõ kết quả (PASSWORD_CHANGE_UNKNOWN) — "
+							+ "ĐỪNG thử lại ngay, hãy đăng nhập bằng mật khẩu MỚI để biết nó đã đổi chưa",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PutMapping

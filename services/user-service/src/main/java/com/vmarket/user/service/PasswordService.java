@@ -6,7 +6,6 @@ import com.vmarket.user.client.AuthServiceClient;
 import com.vmarket.user.dto.ChangePasswordRequest;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  * FR-USER-03 — Đổi mật khẩu khi đã đăng nhập.
@@ -19,8 +18,11 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Hệ quả phía auth-service (xem {@code PasswordChangeService} bên đó): nhập sai mật
  * khẩu hiện tại tính chung bộ đếm khoá đăng nhập; đổi thành công thu hồi mọi refresh token.
+ *
+ * <p>Cố ý <b>không log</b> ở đây: auth-service đã log đúng sự kiện này kèm số phiên bị
+ * thu hồi — thứ chỉ bên đó biết. Log thêm một dòng nghèo thông tin hơn ở đây chỉ làm
+ * mỗi lần đổi mật khẩu sinh hai dòng nói cùng một chuyện.
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PasswordService {
@@ -29,6 +31,5 @@ public class PasswordService {
 
 	public void changePassword(String userId, ChangePasswordRequest request) {
 		authServiceClient.changePassword(userId, request.currentPassword(), request.newPassword());
-		log.info("Đổi mật khẩu thành công userId={}", userId);
 	}
 }

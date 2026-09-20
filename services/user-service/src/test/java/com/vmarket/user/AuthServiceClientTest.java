@@ -12,7 +12,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
+import java.net.ConnectException;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.net.http.HttpConnectTimeoutException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -141,13 +144,73 @@ class AuthServiceClientTest {
 	@Test
 	void khongKetNoiDuoc_503() {
 		server.expect(requestTo(PASSWORD_URI))
-				.andRespond(withException(new SocketTimeoutException("Read timed out")));
+				.andRespond(withException(new ConnectException("Connection refused")));
 
 		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
 				.isInstanceOfSatisfying(ApiException.class, ex -> {
 					assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_UNAVAILABLE");
 					assertThat(ex.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
 				});
+	}
+
+	@Test
+	void saiHostname_503() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withException(new UnknownHostException("auth-service.test")));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class,
+						ex -> assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_UNAVAILABLE"));
+	}
+
+	/**
+	 * Hết thời gian KẾT NỐI: chưa byte nào tới auth-service nên thao tác chắc chắn
+	 * chưa chạy — bảo người dùng thử lại là đúng.
+	 */
+	@Test
+	void hetThoiGianKetNoi_503_vaLoiKhuyenLaThuLai() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withException(new HttpConnectTimeoutException("HTTP connect timed out")));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_UNAVAILABLE");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+				});
+	}
+
+	/**
+	 * Hết thời gian ĐỌC là chuyện khác hẳn: auth-service ĐÃ nhận request và có thể đã
+	 * chạy xong (mật khẩu đã đổi, mọi phiên đã bị thu hồi). Trả 503 "vui lòng thử lại
+	 * sau" ở đây đẩy người dùng vào bẫy — họ gửi lại bằng mật khẩu cũ →
+	 * INVALID_CURRENT_PASSWORD → bộ đếm khoá tăng → khoá 15 phút dù không làm gì sai.
+	 */
+	@Test
+	void hetThoiGianDoc_504_vaKhongXuiThuLai() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withException(new SocketTimeoutException("Read timed out")));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("PASSWORD_CHANGE_UNKNOWN");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
+					assertThat(ex.getMessage())
+							.as("thông báo phải hướng người dùng sang ĐĂNG NHẬP bằng mật khẩu mới, "
+									+ "không được có chữ nào rủ họ gửi lại request")
+							.contains("mật khẩu MỚI")
+							.doesNotContain("thử lại sau");
+				});
+	}
+
+	/** Đứt kết nối giữa chừng cũng là "không rõ kết quả", không phải "chắc chắn hỏng". */
+	@Test
+	void dutKetNoiGiuaChung_504() {
+		server.expect(requestTo(PASSWORD_URI))
+				.andRespond(withException(new java.io.IOException("Connection reset")));
+
+		assertThatThrownBy(() -> client.changePassword(USER, "Abcd1234@", "Xyz98765#"))
+				.isInstanceOfSatisfying(ApiException.class,
+						ex -> assertThat(ex.getCode()).isEqualTo("PASSWORD_CHANGE_UNKNOWN"));
 	}
 
 	/**

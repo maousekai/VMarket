@@ -8,6 +8,7 @@ import java.util.List;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.vmarket.auth.config.InternalApiProperties;
@@ -30,20 +31,29 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * <p>Cố ý <b>không</b> là {@code @Component}: Spring Boot tự đăng ký mọi bean Filter
  * cho toàn bộ request, filter sẽ chạy thêm một lần ngoài security chain.
+ *
+ * <p><b>Phạm vi lấy từ chính {@code RequestMatcher} mà {@code SecurityConfig} dùng để
+ * phân quyền</b>, không tự so chuỗi. Tự so bằng {@code getRequestURI()} thì hai bên
+ * đang đọc hai thứ khác nhau: {@code getRequestURI()} gồm cả context path, còn matcher
+ * so trên đường dẫn trong ứng dụng. Trùng khớp chỉ vì hiện tại context path rỗng —
+ * thêm {@code server.servlet.context-path} là filter bỏ qua sạch các request hợp lệ và
+ * mọi lời gọi nội bộ trả 401. Truyền cùng một đối tượng matcher thì không thể lệch.
  */
 public class InternalApiKeyFilter extends OncePerRequestFilter {
 
 	public static final String ROLE = "INTERNAL_SERVICE";
 
 	private final byte[] expectedKey;
+	private final RequestMatcher internalPaths;
 
-	public InternalApiKeyFilter(InternalApiProperties properties) {
+	public InternalApiKeyFilter(InternalApiProperties properties, RequestMatcher internalPaths) {
 		this.expectedKey = properties.getApiKey().getBytes(StandardCharsets.UTF_8);
+		this.internalPaths = internalPaths;
 	}
 
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
-		return !request.getRequestURI().startsWith("/internal/");
+		return !internalPaths.matches(request);
 	}
 
 	@Override
