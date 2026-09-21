@@ -60,6 +60,15 @@ app:
     # Giu ket qua bao lau de con phat lai. Retry cua client xay ra trong vai giay
     # toi vai phut; mot ngay la rong rai.
     retention: ${IDEMPOTENCY_RETENTION:1d}
+  # API noi bo cua auth-service (PBL6-13): doi mat khau (FR-USER-03) - mat khau nam o
+  # CSDL vmarket_auth nen user-service goi REST noi bo, KHONG doc cheo CSDL (SRS 5.4).
+  # internal-api-key KHONG co mac dinh o file nen -> thieu INTERNAL_API_KEY la fail
+  # ngay luc khoi dong. PHAI trung voi gia tri cua auth-service.
+  auth-service:
+    base-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    internal-api-key: ${INTERNAL_API_KEY}
+    connect-timeout: ${AUTH_SERVICE_CONNECT_TIMEOUT:2s}
+    read-timeout: ${AUTH_SERVICE_READ_TIMEOUT:5s}
 
 # JWT - user-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
 # hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va

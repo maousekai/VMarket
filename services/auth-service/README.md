@@ -87,6 +87,7 @@ các subtask sau bổ sung theo expand–contract.
 | `AUTH_JWT_SECRET`        | *(giả, ở dev yml)* | Khóa ký JWT HS256 (≥ 32 byte); prod bắt buộc set |
 | `AUTH_JWT_ACCESS_TTL`    | `15m`            | Thời hạn access token               |
 | `AUTH_JWT_REFRESH_TTL`   | `30d`            | Thời hạn refresh token              |
+| `INTERNAL_API_KEY`       | *(giả, ở dev yml)* | Khoá API nội bộ `/internal/**` (≥ 32 ký tự), trùng user-service; prod bắt buộc set |
 
 Chạy với profile khác:
 
@@ -141,6 +142,22 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | `POST /api/auth/password/reset`  | FR-AUTH-04 — xác nhận mã + đặt mật khẩu mới (không tự đăng nhập). 200 (`MessageResponse`) / 400 (`PASSWORD_RESET_NOT_FOUND`, `PASSWORD_RESET_EXPIRED`, `PASSWORD_RESET_INVALID`, `PASSWORD_RESET_TOO_MANY_ATTEMPTS`, `PASSWORD_RESET_ALREADY_USED`) |
 | `GET  /api/auth/health`  | Health-check                                              |
 
+**API nội bộ `/internal/users/**` (PBL6-13)** — chỉ cho service khác gọi (hiện là
+user-service), header `X-Internal-Api-Key: <INTERNAL_API_KEY>`; thiếu/sai → 401. Gateway
+không định tuyến các path này. Endpoint công khai tương ứng nằm ở user-service
+(`PUT /api/users/me/password`).
+
+`InternalApiKeyFilter` và tầng phân quyền dùng **chung một `RequestMatcher`**
+(`PathPatternRequestMatcher` cho `/internal/**`, tạo một lần trong `SecurityConfig` rồi
+truyền vào filter). Hai bên tự so chuỗi riêng thì sẽ lệch: `getRequestURI()` có cả
+context path, còn matcher so trên đường dẫn *trong ứng dụng* — trùng khớp chỉ vì context
+path đang rỗng. Đặt `server.servlet.context-path` là filter bỏ qua sạch các lời gọi hợp
+lệ và **mọi** request nội bộ trả 401. `InternalApiContextPathTest` khoá lại hành vi này.
+
+| Method & path | Mô tả |
+| --- | --- |
+| `PUT /internal/users/{id}/password` | FR-USER-03 — đổi mật khẩu `{currentPassword, newPassword}`. 204 / 400 (`VALIDATION_ERROR`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `PASSWORD_NOT_SET`) / 404 `USER_NOT_FOUND` / 423 `ACCOUNT_LOCKED` |
+
 Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
 Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 (đều cùng format trên).
 
@@ -180,6 +197,44 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - Cũng là cách đầu tiên để đặt mật khẩu cho tài khoản tạo qua OTP (vốn
   `password_hash = NULL`).
 
+**Đổi mật khẩu (FR-USER-03):**
+- Sai mật khẩu hiện tại **tính chung bộ đếm** với đăng nhập sai (5 lần → khoá 15
+  phút). Không dùng chung bộ đếm thì ai cầm được access token (còn sống ≤ 15 phút)
+  có thể dò mật khẩu không giới hạn qua endpoint đổi mật khẩu.
+- Sai mật khẩu hiện tại trả **400 `INVALID_CURRENT_PASSWORD`**, không phải 401: 401
+  khiến frontend tưởng access token hết hạn và đăng xuất người dùng, trong khi họ
+  chỉ gõ nhầm mật khẩu cũ.
+- Thành công → **thu hồi mọi refresh token**: đổi mật khẩu thường là vì nghi bị lộ,
+  các phiên cũ phải đăng nhập lại. Cùng quyết định với đặt lại mật khẩu (PBL6-45).
+- Tài khoản tạo qua OTP chưa có mật khẩu → **400 `PASSWORD_NOT_SET`**: không có "mật
+  khẩu hiện tại" để xác minh, phải dùng Quên mật khẩu để đặt lần đầu.
+- **Không cần migration mới:** FR-USER-03 chỉ ghi `users.password_hash` và bảng
+  `refresh_tokens` đã có sẵn từ V1/V3.
+
+**Giới hạn đã biết & đánh đổi có chủ đích (FR-USER-03):**
+
+- **Người giữ access token có thể khoá tài khoản chủ sở hữu.** Dùng chung bộ đếm nghĩa
+  là kẻ cầm access token chỉ cần gửi 5 lần sai mật khẩu hiện tại là khoá tài khoản 15
+  phút, và `registerFailedAttempt` thu hồi mọi refresh token → chủ tài khoản bị đăng
+  xuất và chưa đăng nhập lại được. Đây là **đánh đổi có chủ đích**: không có bộ đếm thì
+  kẻ đó dò được mật khẩu, mà mất mật khẩu là thiệt hại không hồi phục được, còn khoá 15
+  phút thì có. Nhánh khoá xuất phát từ endpoint đổi mật khẩu được log **WARN riêng**
+  (kèm `userId` và ghi rõ nguồn) để còn phát hiện khi bị lạm dụng — khác với log của
+  đăng nhập sai.
+- **Access token cũ sống thêm ≤ 15 phút sau khi đổi mật khẩu.** Chỉ refresh token bị
+  thu hồi; access token là JWT tự chứa nên không vô hiệu hoá được mà không tra CSDL ở
+  mỗi request. Khắc phục cần `token_version` trong claim hoặc denylist theo `sub + iat`
+  → **ticket riêng**, vì đụng tới mọi service đang verify token.
+- **Một khoá nội bộ duy nhất, cấp trọn quyền `/internal/**`.** `ROLE_INTERNAL_SERVICE`
+  không phân biệt service gọi, và khoá chỉ có một giá trị nên xoay khoá phải deploy đồng
+  thời hai service. Đủ cho một endpoint nội bộ; khi có endpoint thứ hai/thứ ba nên chuyển
+  sang danh sách khoá (giữ khoá cũ + mới) hoặc scope theo service.
+- **`authenticationEntryPoint` áp cho mọi request chưa xác thực**, không riêng
+  `/internal/**` — body 401 của các đường dẫn khác cũng đổi từ rỗng sang hình dạng chuẩn
+  `{ "error": { "code", "message" } }`. Đúng theo quy ước lỗi chung của dự án, nhưng là
+  **thay đổi hành vi ngoài phạm vi FR-USER-03**: cần đối chiếu khi gộp với RBAC của
+  PBL6-46.
+
 ## Roadmap nghiệp vụ (theo SRS)
 
 - [x] PBL6-41: Setup & data model (entity, migration V1, cấu hình)
@@ -188,5 +243,6 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - [x] FR-AUTH-02 (PBL6-43): đăng nhập JWT + refresh xoay vòng + khoá sau 5 lần sai (migration V3)
 - [ ] FR-AUTH-03 (Google OAuth 2.0) — chuyển backlog (PBL6-44 đổi phạm vi sang OTP)
 - [x] FR-AUTH-04 (PBL6-45): **Quên mật khẩu** (`/api/auth/password/*`, migration V5)
+- [x] PBL6-13 (FR-USER-03): API nội bộ `/internal/users/{id}/password` cho user-service đổi mật khẩu (không cần migration)
 - [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
 - [ ] PBL6-47: Testing, Swagger & PR review

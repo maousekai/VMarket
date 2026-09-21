@@ -52,6 +52,11 @@ auth:
     secret: ${AUTH_JWT_SECRET}
     access-ttl: ${AUTH_JWT_ACCESS_TTL:15m}
     refresh-ttl: ${AUTH_JWT_REFRESH_TTL:15d}
+  # Khoa cho API noi bo /internal/** (PBL6-13) - user-service goi de doi mat khau
+  # (FR-USER-03). Dung CHUNG gia tri voi user-service. Khong co mac dinh o file base -> thieu INTERNAL_API_KEY la fail
+  # ngay luc khoi dong (gia tri gia cho local o application-dev.yml).
+  internal:
+    api-key: ${INTERNAL_API_KEY}
   # Gui email OTP. provider=log (mac dinh) chi ghi log, khong gui that -> chay
   # local/CI khong can API key. Doi sang 'brevo' + BREVO_API_KEY de gui that.
   email:
