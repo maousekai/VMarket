@@ -1,24 +1,22 @@
 package com.vmarket.user.config;
 
-import java.io.IOException;
-
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 import tools.jackson.databind.ObjectMapper;
-import com.vmarket.user.dto.ErrorResponse;
 import com.vmarket.user.security.JwtAuthenticationFilter;
-
-import jakarta.servlet.http.HttpServletResponse;
+import com.vmarket.user.service.IdempotencyService;
+import com.vmarket.user.web.ErrorResponseWriter;
+import com.vmarket.user.web.IdempotencyFilter;
 
 /**
  * Cấu hình Spring Security cho user-service.
@@ -55,6 +53,8 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(HttpSecurity http,
 			CorsConfigurationSource corsConfigurationSource,
 			JwtAuthenticationFilter jwtAuthenticationFilter,
+			IdempotencyService idempotencyService,
+			IdempotencyProperties idempotencyProperties,
 			ObjectMapper objectMapper) throws Exception {
 		http
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -68,6 +68,13 @@ public class SecurityConfig {
 				// Đặt trước filter đăng nhập bằng form/username-password để danh tính
 				// từ token có mặt trong SecurityContext khi tầng phân quyền chạy.
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+				// SAU AuthorizationFilter: Idempotency-Key chỉ có nghĩa trong phạm vi một
+				// người dùng, nên phải chạy ở chỗ danh tính đã chắc chắn và request đã qua
+				// được tầng phân quyền. Cố ý KHÔNG khai filter này là @Component — Spring
+				// Boot sẽ tự đăng ký thêm nó một lần nữa vào chuỗi filter của servlet, chạy
+				// trước cả Spring Security, tức là trước khi có danh tính.
+				.addFilterAfter(new IdempotencyFilter(idempotencyService, objectMapper,
+						idempotencyProperties.isEnabled()), AuthorizationFilter.class)
 				.exceptionHandling(ex -> ex
 						.authenticationEntryPoint(unauthorizedEntryPoint(objectMapper))
 						.accessDeniedHandler(accessDeniedHandler(objectMapper)));
@@ -80,21 +87,13 @@ public class SecurityConfig {
 	 * frontend chỉ cần một hàm đọc lỗi.
 	 */
 	private AuthenticationEntryPoint unauthorizedEntryPoint(ObjectMapper objectMapper) {
-		return (request, response, ex) -> writeError(response, objectMapper, HttpStatus.UNAUTHORIZED,
+		return (request, response, ex) -> ErrorResponseWriter.write(response, objectMapper, HttpStatus.UNAUTHORIZED,
 				"UNAUTHORIZED", "Bạn cần đăng nhập để thực hiện thao tác này");
 	}
 
 	/** 403 khi đã đăng nhập nhưng không đủ quyền. */
 	private AccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper) {
-		return (request, response, ex) -> writeError(response, objectMapper, HttpStatus.FORBIDDEN,
+		return (request, response, ex) -> ErrorResponseWriter.write(response, objectMapper, HttpStatus.FORBIDDEN,
 				"FORBIDDEN", "Bạn không có quyền thực hiện thao tác này");
-	}
-
-	private void writeError(HttpServletResponse response, ObjectMapper objectMapper,
-			HttpStatus status, String code, String message) throws IOException {
-		response.setStatus(status.value());
-		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-		response.setCharacterEncoding("UTF-8");
-		objectMapper.writeValue(response.getWriter(), ErrorResponse.of(code, message));
 	}
 }
