@@ -1,11 +1,12 @@
 package com.vmarket.product.service;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -13,11 +14,10 @@ import org.springframework.stereotype.Service;
 
 import com.vmarket.product.model.Category;
 import com.vmarket.product.model.Product;
-import com.vmarket.product.model.ProductStatus;
 import com.vmarket.product.repository.CategoryRepository;
 import com.vmarket.product.repository.ProductRepository;
 
-/** Maintains materialized category/shop/derived projections without unbounded transactions. */
+/** Maintains materialized category/shop/derived projections in bounded read batches. */
 @Service
 public class CatalogProjectionService {
 	private static final String FIRST_ID = "";
@@ -90,15 +90,16 @@ public class CatalogProjectionService {
 	public void synchronizeAllProducts() {
 		String afterId = FIRST_ID;
 		while (true) {
+			Map<String, CategoryProjection> categories = new HashMap<>();
 			List<Product> batch = productRepository
 					.findTop100ByDeletedAtIsNullAndIdGreaterThanOrderByIdAsc(afterId);
 			if (batch.isEmpty()) return;
 			List<Product> changed = new ArrayList<>();
 			for (Product product : batch) {
-				BigDecimal oldMin = product.getMinPrice();
-				BigDecimal oldMax = product.getMaxPrice();
+				Long oldMin = product.getMinPrice();
+				Long oldMax = product.getMaxPrice();
 				long oldStock = product.getAvailableStock();
-				boolean categoryChanged = refreshCategory(product);
+				boolean categoryChanged = refreshCategory(product, categories);
 				derivedFields.refresh(product);
 				if (categoryChanged || !Objects.equals(oldMin, product.getMinPrice())
 						|| !Objects.equals(oldMax, product.getMaxPrice()) || oldStock != product.getAvailableStock()) {
@@ -111,37 +112,19 @@ public class CatalogProjectionService {
 		}
 	}
 
-	private boolean refreshCategory(Product product) {
+	private boolean refreshCategory(Product product, Map<String, CategoryProjection> categories) {
 		List<String> oldPath = product.getCategoryPath() == null ? List.of() : product.getCategoryPath();
 		boolean oldVisible = product.isCategoryVisible();
-		applyCategory(product);
+		CategoryProjection projection = categories.computeIfAbsent(product.getCategoryId(), this::categoryProjection);
+		product.setCategoryPath(projection.path());
+		product.setCategoryVisible(projection.visible());
 		boolean changed = !oldPath.equals(product.getCategoryPath()) || oldVisible != product.isCategoryVisible();
 		if (changed) product.setUpdatedAt(Instant.now());
 		return changed;
 	}
 
 	private boolean applyShopState(Product product, boolean active) {
-		if (!active) {
-			if (product.isShopSuspended()) return false;
-			ProductStatus desired = product.isModerationRemoved() && product.getStatusBeforeModeration() != null
-					? product.getStatusBeforeModeration() : product.getStatus();
-			product.setStatusBeforeShopSuspension(desired);
-			product.setShopSuspended(true);
-			product.setStatus(ProductStatus.HIDDEN);
-			product.setUpdatedAt(Instant.now());
-			return true;
-		}
-		if (!product.isShopSuspended()) return false;
-		ProductStatus desired = product.getStatusBeforeShopSuspension() == null
-				? ProductStatus.DRAFT : product.getStatusBeforeShopSuspension();
-		product.setShopSuspended(false);
-		if (product.isModerationRemoved()) {
-			product.setStatusBeforeModeration(desired);
-			product.setStatus(ProductStatus.HIDDEN);
-		} else {
-			product.setStatus(desired);
-		}
-		product.setStatusBeforeShopSuspension(null);
+		if (!product.applyShopSuspension(!active)) return false;
 		product.setUpdatedAt(Instant.now());
 		return true;
 	}
@@ -149,12 +132,13 @@ public class CatalogProjectionService {
 	private void synchronizeCategoryProducts(String categoryId) {
 		String afterId = FIRST_ID;
 		while (true) {
+			Map<String, CategoryProjection> categories = new HashMap<>();
 			List<Product> batch = productRepository
 					.findTop100ByCategoryIdAndDeletedAtIsNullAndIdGreaterThanOrderByIdAsc(categoryId, afterId);
 			if (batch.isEmpty()) return;
 			List<Product> changed = new ArrayList<>();
 			for (Product product : batch) {
-				if (refreshCategory(product)) changed.add(product);
+				if (refreshCategory(product, categories)) changed.add(product);
 			}
 			batchWriter.saveAndPublish(changed);
 			afterId = batch.get(batch.size() - 1).getId();

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -129,7 +128,7 @@ class CatalogProjectionServiceTest {
 
 		service.synchronizeAllProducts();
 
-		assertThat(product.getMinPrice()).isEqualByComparingTo("10");
+		assertThat(product.getMinPrice()).isEqualTo(10L);
 		assertThat(product.getAvailableStock()).isEqualTo(8);
 		verify(writer).saveAndPublish(List.of(product));
 	}
@@ -145,7 +144,7 @@ class CatalogProjectionServiceTest {
 		product.setStatus(status);
 		product.setCategoryVisible(true);
 		product.setVariants(new ArrayList<>(List.of(new ProductVariant("v1", "SKU", java.util.Map.of(),
-				BigDecimal.TEN, 10, 2, 0))));
+				10L, 10, 2, 0))));
 		return product;
 	}
 }

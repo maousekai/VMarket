@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -22,7 +23,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * Đưa MỌI lỗi HTTP về đúng envelope dùng chung (PBL6-15 Review 3, finding 4):
- * {timestamp, status, error: mã nghiệp vụ, message, path, [fields]}. Không còn
+ * {timestamp, status, error: {code, message}, path, [fields]}. Không còn
  * trường hợp trả envelope mặc định của Spring (vd lỗi JSON sai định dạng, 404,
  * 405, sai kiểu path variable) khiến client phải xử lý 2 cấu trúc khác nhau.
  */
@@ -53,7 +54,7 @@ public class GlobalExceptionHandler {
 				request.getRequestURI(), Map.of());
 	}
 
-	/** Path variable / request param sai kiểu (vd id không phải ObjectId) — 400 có envelope. */
+	/** Path variable / request param sai kiểu — 400 có envelope. */
 	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
 	public ResponseEntity<Map<String, Object>> handleTypeMismatch(MethodArgumentTypeMismatchException ex,
 			HttpServletRequest request) {
@@ -64,6 +65,13 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(DuplicateKeyException.class)
 	public ResponseEntity<Map<String, Object>> handleDuplicate(DuplicateKeyException ex, HttpServletRequest request) {
 		return error(HttpStatus.CONFLICT, "DUPLICATE_VALUE", "Dữ liệu đã tồn tại", request.getRequestURI(), Map.of());
+	}
+
+	@ExceptionHandler(OptimisticLockingFailureException.class)
+	public ResponseEntity<Map<String, Object>> handleWriteConflict(OptimisticLockingFailureException ex,
+			HttpServletRequest request) {
+		return error(HttpStatus.CONFLICT, "CONCURRENT_MODIFICATION", "Dữ liệu đã thay đổi, vui lòng thử lại",
+				request.getRequestURI(), Map.of());
 	}
 
 	@ExceptionHandler({ ConstraintViolationException.class, MissingRequestHeaderException.class })
@@ -91,8 +99,7 @@ public class GlobalExceptionHandler {
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("timestamp", Instant.now());
 		body.put("status", status.value());
-		body.put("error", code);
-		body.put("message", message);
+		body.put("error", Map.of("code", code, "message", message));
 		body.put("path", path);
 		if (!fields.isEmpty()) {
 			body.put("fields", fields);

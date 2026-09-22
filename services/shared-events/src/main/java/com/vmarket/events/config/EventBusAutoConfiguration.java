@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.ImmediateRequeueAmqpException;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Declarables;
@@ -16,6 +17,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
 import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
 import org.springframework.amqp.rabbit.retry.RejectAndDontRequeueRecoverer;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -106,9 +108,17 @@ public class EventBusAutoConfiguration {
 		SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
 		container.setQueueNames(properties.getQueue());
 		container.setDefaultRequeueRejected(false);
+		RejectAndDontRequeueRecoverer deadLetter = new RejectAndDontRequeueRecoverer();
 		container.setAdviceChain(RetryInterceptorBuilder.stateless().maxRetries(2)
 				.backOffOptions(1000, 2, 10000)
-				.recoverer(new RejectAndDontRequeueRecoverer()).build());
+				.recoverer((message, cause) -> {
+					for (Throwable error = cause; error != null; error = error.getCause()) {
+						if (error instanceof OptimisticLockingFailureException) {
+							throw new ImmediateRequeueAmqpException("Retry concurrent write", cause);
+						}
+					}
+					deadLetter.recover(message, cause);
+				}).build());
 		container.setMessageListener((MessageListener) message -> {
 			dispatcher.dispatch(json.readEnvelope(message.getBody()));
 		});

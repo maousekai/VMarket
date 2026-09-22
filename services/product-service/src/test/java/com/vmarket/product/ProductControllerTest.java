@@ -30,11 +30,12 @@ class ProductControllerTest {
 		mockMvc.perform(post("/api/products")
 				.header("X-User-Id", "seller-1")
 				.header("X-User-Roles", "ROLE_SELLER")
+				.header("Idempotency-Key", "create-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]")))
 				.andExpect(status().isCreated());
 
-		verify(service).create(eq("seller-1"), any(ProductRequest.class));
+		verify(service).create(eq("seller-1"), eq("create-1"), any(ProductRequest.class));
 	}
 
 	@Test
@@ -43,12 +44,13 @@ class ProductControllerTest {
 		mockMvc.perform(post("/api/products")
 				.header("X-User-Id", "seller-1")
 				.header("X-User-Roles", "SELLER")
+				.header("Idempotency-Key", "create-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody(images)))
 				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.error").value("VALIDATION_FAILED"));
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
 
-		verify(service, never()).create(any(), any());
+		verify(service, never()).create(any(), any(), any());
 	}
 
 	@Test
@@ -56,10 +58,34 @@ class ProductControllerTest {
 		mockMvc.perform(post("/api/products")
 				.header("X-User-Id", "buyer-1")
 				.header("X-User-Roles", "BUYER")
+				.header("Idempotency-Key", "create-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]")))
 				.andExpect(status().isForbidden())
-				.andExpect(jsonPath("$.error").value("FORBIDDEN"));
+				.andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+	}
+
+	@Test
+	void fractionalVndPriceIsRejected() throws Exception {
+		mockMvc.perform(post("/api/products")
+				.header("X-User-Id", "seller-1")
+				.header("X-User-Roles", "SELLER")
+				.header("Idempotency-Key", "create-fractional")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(validBody("[\"https://img/1.jpg\"]").replace("100000", "100000.5")))
+				.andExpect(status().isBadRequest());
+		verify(service, never()).create(any(), any(), any());
+	}
+
+	@Test
+	void unsupportedCurrencyIsRejected() throws Exception {
+		mockMvc.perform(post("/api/products")
+				.header("X-User-Id", "seller-1")
+				.header("X-User-Roles", "SELLER")
+				.header("Idempotency-Key", "create-usd")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(validBody("[\"https://img/1.jpg\"]").replace("\"VND\"", "\"USD\"")))
+				.andExpect(status().isBadRequest());
 	}
 
 	private String validBody(String imageUrls) {
@@ -71,6 +97,7 @@ class ProductControllerTest {
 				  "imageUrls":%s,
 				  "categoryId":"cat-1",
 				  "status":"ACTIVE",
+				  "currency":"VND",
 				  "variants":[{"sku":"SKU-1","attributes":{"size":"M"},"price":100000,"stock":5}]
 				}
 				""".formatted(imageUrls);

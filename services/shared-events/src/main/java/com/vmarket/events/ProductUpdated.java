@@ -1,6 +1,5 @@
 package com.vmarket.events;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -11,14 +10,15 @@ public record ProductUpdated(
 		String productId,
 		String shopId,
 		String name,
-		BigDecimal price,
+		Long price,
 		String status,
 		List<String> imageUrls,
 		int schemaVersion,
+		String currency,
 		String description,
 		String categoryId,
 		String brandId,
-		BigDecimal maxPrice,
+		Long maxPrice,
 		List<ProductVariantSnapshot> variants,
 		double ratingAverage,
 		long ratingCount,
@@ -27,9 +27,9 @@ public record ProductUpdated(
 		boolean catalogVisible) {
 
 	/** Constructor tương thích ngược với payload v1. */
-	public ProductUpdated(String productId, String shopId, String name, BigDecimal price,
+	public ProductUpdated(String productId, String shopId, String name, Long price,
 			String status, List<String> imageUrls) {
-		this(productId, shopId, name, price, status, imageUrls, 1, null, null, null,
+		this(productId, shopId, name, price, status, imageUrls, 1, "VND", null, null, null,
 				price, List.of(), 0, 0, 0, 0, "ACTIVE".equals(status));
 	}
 }

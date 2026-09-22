@@ -7,7 +7,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -57,7 +56,7 @@ class InventoryServiceTest {
 	void reserveHoldsStockAndPublishesEvent() {
 		Product product = product(10, 2);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
@@ -73,7 +72,7 @@ class InventoryServiceTest {
 	void reserveRejectsInsufficientAvailableStockWithoutWriting() {
 		Product product = product(10, 8);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 
 		assertThatThrownBy(() -> service.reserve(request(3)))
 				.isInstanceOf(ApiException.class)
@@ -87,7 +86,7 @@ class InventoryServiceTest {
 		Product product = product(10, 0);
 		product.setCategoryVisible(false);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 
 		assertThatThrownBy(() -> service.reserve(request(1)))
 				.isInstanceOf(ApiException.class).hasMessageContaining("không ở trạng thái đang bán");
@@ -101,7 +100,7 @@ class InventoryServiceTest {
 		var response = service.reserve(request(3));
 
 		assertThat(response.status()).isEqualTo(ReservationStatus.RESERVED);
-		verify(productRepository, never()).findById(any());
+		verify(productRepository, never()).findAllById(any());
 		verify(publisher, never()).publishStockReserved(any());
 	}
 
@@ -110,7 +109,7 @@ class InventoryServiceTest {
 		Product product = product(10, 3);
 		InventoryReservation reservation = reservation(ReservationStatus.RESERVED, 3);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
@@ -128,7 +127,7 @@ class InventoryServiceTest {
 		Product product = product(10, 3);
 		InventoryReservation reservation = reservation(ReservationStatus.RESERVED, 3);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
@@ -147,7 +146,7 @@ class InventoryServiceTest {
 		product.getVariants().get(0).setSoldCount(3);
 		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -168,7 +167,7 @@ class InventoryServiceTest {
 		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
 		when(returnRestockRepository.findAllByOrderId("order-1")).thenReturn(List.of());
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
-		when(productRepository.findById("product-1")).thenReturn(Optional.of(product));
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
 		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 
 		service.restockReturn("return-1", "order-1", List.of(new StockItem("product-1", "variant-1", 2)));
@@ -192,14 +191,36 @@ class InventoryServiceTest {
 	}
 
 	@Test
-	void releaseBeforeReservationArrivesIsSkippedAndCountedAsOutOfOrder() {
+	void directReleaseOfUnknownReservationReturnsNotFound() {
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
-
-		var response = service.release("order-1");
-
-		assertThat(response.status()).isEqualTo(ReservationStatus.RELEASED);
+		assertThatThrownBy(() -> service.release("order-1"))
+				.isInstanceOf(ApiException.class).hasMessageContaining("Không tìm thấy giao dịch");
 		verify(publisher, never()).publishStockReleased(any());
-		verify(returnRestockRepository, never()).save(any());
+	}
+
+	@Test
+	void earlyPaymentIsStoredUntilOrderReservationArrives() {
+		InventoryReservation pending = reservation(ReservationStatus.PENDING_CONFIRM, 0);
+		pending.setItems(List.of());
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty(), Optional.of(pending));
+		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		service.confirmOrDefer("order-1");
+		Product product = product(10, 0);
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
+		assertThat(service.reserve(request(3)).status()).isEqualTo(ReservationStatus.CONFIRMED);
+		assertThat(product.getVariants().get(0).getStock()).isEqualTo(7);
+	}
+
+	@Test
+	void earlyCancellationPreventsLaterReservation() {
+		InventoryReservation pending = reservation(ReservationStatus.PENDING_RELEASE, 0);
+		pending.setItems(List.of());
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty(), Optional.of(pending));
+		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		service.releaseOrDefer("order-1");
+		assertThat(service.reserve(request(3)).status()).isEqualTo(ReservationStatus.RELEASED);
+		verify(productRepository, never()).findAllById(any());
 	}
 
 	@Test
@@ -209,20 +230,19 @@ class InventoryServiceTest {
 
 		service.restockReturn("return-1", "order-1", List.of(new StockItem("product-1", "variant-1", 2)));
 
-		verify(productRepository, never()).findById(any());
+		verify(productRepository, never()).findAllById(any());
 		verify(returnRestockRepository, never()).save(any());
 		verify(publisher, never()).publishStockReleased(any());
 	}
 
 	@Test
-	void confirmAfterReservationWasReleasedIsSkippedInsteadOfFailing() {
+	void confirmAfterReservationWasReleasedConflicts() {
 		InventoryReservation reservation = reservation(ReservationStatus.RELEASED, 3);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
 
-		var response = service.confirm("order-1");
-
-		assertThat(response.status()).isEqualTo(ReservationStatus.RELEASED);
-		verify(productRepository, never()).findById(any());
+		assertThatThrownBy(() -> service.confirm("order-1"))
+				.isInstanceOf(ApiException.class).hasMessageContaining("Chỉ có thể xác nhận");
+		verify(productRepository, never()).findAllById(any());
 	}
 
 	private InventoryRequest request(int quantity) {
@@ -241,7 +261,7 @@ class InventoryServiceTest {
 		product.setStatus(ProductStatus.ACTIVE);
 		product.setCategoryVisible(true);
 		product.setVariants(new ArrayList<>(List.of(new ProductVariant("variant-1", "SKU", new HashMap<>(),
-				BigDecimal.TEN, stock, reserved, 0))));
+				10L, stock, reserved, 0))));
 		return product;
 	}
 }

@@ -1,6 +1,7 @@
 package com.vmarket.product.event;
 
 import org.springframework.stereotype.Component;
+import org.springframework.dao.DuplicateKeyException;
 
 import com.vmarket.events.EventConsumer;
 import com.vmarket.events.EventEnvelope;
@@ -22,7 +23,11 @@ public class ReturnResolvedInventoryConsumer implements EventConsumer<ReturnReso
 	@Override
 	public void handle(ReturnResolved payload, EventEnvelope envelope) {
 		if (payload.restock()) {
-			inventoryService.restockReturn(payload.returnId(), payload.orderId(), payload.items());
+			try {
+				inventoryService.restockReturn(payload.returnId(), payload.orderId(), payload.items());
+			} catch (DuplicateKeyException ex) {
+				if (!inventoryService.isReturnRestocked(payload.returnId())) throw ex;
+			}
 		}
 	}
 }

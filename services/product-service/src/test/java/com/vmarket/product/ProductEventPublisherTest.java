@@ -2,7 +2,6 @@ package com.vmarket.product;
 
 import static org.mockito.Mockito.verify;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -29,8 +28,8 @@ class ProductEventPublisherTest {
 	@Test
 	void publishesEveryCatalogEventWithCorrectRoutingKey() {
 		ProductEventPublisher publisher = new ProductEventPublisher(outbox);
-		ProductCreated created = new ProductCreated("p1", "s1", "Tên", BigDecimal.TEN, "ACTIVE", List.of());
-		ProductUpdated updated = new ProductUpdated("p1", "s1", "Tên mới", BigDecimal.ONE, "HIDDEN", List.of());
+		ProductCreated created = new ProductCreated("p1", "s1", "Tên", 10L, "ACTIVE", List.of());
+		ProductUpdated updated = new ProductUpdated("p1", "s1", "Tên mới", 1L, "HIDDEN", List.of());
 		ProductDeleted deleted = new ProductDeleted("p1", "s1");
 		StockReserved reserved = new StockReserved("o1", List.of(new StockItem("p1", "v1", 2)));
 		StockReleased released = new StockReleased("o1", reserved.items());

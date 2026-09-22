@@ -1,6 +1,5 @@
 package com.vmarket.product.dto;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -16,9 +15,10 @@ public record ProductResponse(
 		String categoryId,
 		String brandId,
 		ProductStatus status,
+		String currency,
 		List<VariantResponse> variants,
-		BigDecimal minPrice,
-		BigDecimal maxPrice,
+		Long minPrice,
+		Long maxPrice,
 		long availableStock,
 		double ratingAverage,
 		long ratingCount,
@@ -32,7 +32,8 @@ public record ProductResponse(
 			String id,
 			String sku,
 			Map<String, String> attributes,
-			BigDecimal price,
+			long price,
+			String currency,
 			long stock,
 			long reservedStock,
 			long availableStock,

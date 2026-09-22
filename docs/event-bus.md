@@ -34,6 +34,17 @@ mục Elasticsearch (FR-SRCH-04), Recommendation nhận để cập nhật đặ
   sẽ trả `PRECONDITION_FAILED`. Queue cũ chỉ được xóa sau khi đã drain và rollout
   consumer phiên bản mới hoàn tất.
 
+### Chuyển queue Product từ `product.events` sang `product.events.v2`
+
+Khi nâng cấp một broker đang có queue `product.events`, tạm dừng publisher,
+khởi động Product Service để khai báo `product.events.v2`, rồi chuyển các message
+đang chờ từ queue cũ sang queue mới bằng RabbitMQ Shovel với acknowledgement
+`on-confirm` (đích là default exchange, routing key `product.events.v2`).
+Kiểm tra `messages_ready` và `messages_unacknowledged` của queue cũ đều bằng 0
+trước khi xóa queue cũ và bật lại publisher. Giữ nguyên `eventId` khi chuyển;
+consumer xử lý các event trùng theo khóa nghiệp vụ. Không xóa queue cũ khi còn
+message hoặc khi Shovel chưa xác nhận đích đã nhận.
+
 ## 3. Lược đồ thông điệp (message schema)
 
 Mọi thông điệp đều là JSON theo **envelope** chuẩn:
@@ -150,6 +161,11 @@ park phía outbox của Product Catalog (xem `§7`).
 | `ReturnRequested` / `ReturnResolved` | Order | Payment, Product, Notification |
 | `UserBehaviorTracked` | Gateway / Clients | Recommendation |
 
+`ProductCreated` and `ProductUpdated` schema v4 carry integer `price`/`maxPrice` and
+variant prices in VND minor units, plus ISO `currency: "VND"` at product and variant
+level. VND has zero fractional minor units. Consumers must use the currency field
+when mapping prices into order or payment amounts.
+
 ## 6. Kiểm thử end-to-end
 
 Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
@@ -162,7 +178,7 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
    `ai-search.events` / `recommendation.events` bind với `ProductCreated`. Thiếu binding ⇒
    outbox sẽ park event (xem §7).
 4. Đồng bộ một `ShopApproved`, sau đó tạo sản phẩm qua API Seller thật.
-5. Quan sát `ProductCreated` schema v3 trong AI Search; event giữ nguyên `eventId`
+5. Quan sát `ProductCreated` schema v4 trong AI Search; event giữ nguyên `eventId`
    khi outbox phải gửi lại.
 
 ## 7. Lưu ý / hướng phát triển sau

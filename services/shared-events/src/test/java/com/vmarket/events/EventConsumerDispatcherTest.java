@@ -39,7 +39,7 @@ class EventConsumerDispatcherTest {
 
 		// Mô phỏng đúng luồng thật: serialize → đọc lại (payload thành Map) → dispatch
 		EventEnvelope envelope = new EventEnvelope("evt", EventType.PRODUCT_CREATED, 0L,
-				new ProductCreated("p9", "s9", "Quần", java.math.BigDecimal.valueOf(200000), "ACTIVE", List.of()));
+				new ProductCreated("p9", "s9", "Quần", 200000L, "ACTIVE", List.of()));
 		EventEnvelope received = json.readEnvelope(json.write(envelope));
 
 		dispatcher.dispatch(received);
@@ -86,7 +86,7 @@ class EventConsumerDispatcherTest {
 		EventConsumerDispatcher dispatcher = new EventConsumerDispatcher(registry, json);
 
 		EventEnvelope envelope = new EventEnvelope("evt", EventType.PRODUCT_CREATED, 0L,
-				new ProductCreated("p9", "s9", "Quần", java.math.BigDecimal.valueOf(200000), "ACTIVE", List.of()));
+				new ProductCreated("p9", "s9", "Quần", 200000L, "ACTIVE", List.of()));
 		EventEnvelope received = json.readEnvelope(json.write(envelope));
 
 		assertThatThrownBy(() -> dispatcher.dispatch(received)).isInstanceOf(EventBusException.class);

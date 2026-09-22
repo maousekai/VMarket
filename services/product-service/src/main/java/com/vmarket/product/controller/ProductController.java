@@ -1,6 +1,5 @@
 package com.vmarket.product.controller;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -29,6 +28,8 @@ import com.vmarket.product.service.ProductCatalogService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 @Validated
 @RestController
@@ -46,8 +47,8 @@ public class ProductController {
 	public PageResponse<ProductResponse> browse(
 			@RequestParam(required = false, name = "q") String keyword,
 			@RequestParam(required = false) String categoryId,
-			@RequestParam(required = false) BigDecimal minPrice,
-			@RequestParam(required = false) BigDecimal maxPrice,
+			@RequestParam(required = false) Long minPrice,
+			@RequestParam(required = false) Long maxPrice,
 			@RequestParam(required = false) Double minRating,
 			@RequestParam(required = false) String shopId,
 			@RequestParam(defaultValue = "NEWEST") String sort,
@@ -65,14 +66,16 @@ public class ProductController {
 	public ResponseEntity<ProductResponse> create(
 			@RequestHeader(value = "X-User-Id", required = false) String userId,
 			@RequestHeader(value = "X-User-Roles", required = false) String roles,
+			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ProductRequest request) {
-		return ResponseEntity.status(HttpStatus.CREATED).body(service.create(identity.requireSeller(userId, roles), request));
+		return ResponseEntity.status(HttpStatus.CREATED).body(service.create(identity.requireSeller(userId, roles), idempotencyKey, request));
 	}
 
 	@PutMapping("/{id}")
 	public ProductResponse update(@PathVariable String id,
 			@RequestHeader(value = "X-User-Id", required = false) String userId,
 			@RequestHeader(value = "X-User-Roles", required = false) String roles,
+			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ProductRequest request) {
 		return service.update(id, identity.requireSeller(userId, roles), request);
 	}
@@ -80,7 +83,8 @@ public class ProductController {
 	@DeleteMapping("/{id}")
 	public ResponseEntity<Void> delete(@PathVariable String id,
 			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
+			@RequestHeader(value = "X-User-Roles", required = false) String roles,
+			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey) {
 		service.delete(id, identity.requireSeller(userId, roles));
 		return ResponseEntity.noContent().build();
 	}
@@ -102,6 +106,7 @@ public class ProductController {
 	@PatchMapping("/{id}/moderation")
 	public ProductResponse moderate(@PathVariable String id,
 			@RequestHeader(value = "X-User-Roles", required = false) String roles,
+			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ModerationRequest request) {
 		identity.requireAdmin(roles);
 		return service.moderate(id, request.removed(), request.reason());
@@ -110,7 +115,8 @@ public class ProductController {
 	@PostMapping("/{id}/moderation/resubmit")
 	public ProductResponse resubmitModeration(@PathVariable String id,
 			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
+			@RequestHeader(value = "X-User-Roles", required = false) String roles,
+			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey) {
 		return service.resubmitModeration(id, identity.requireSeller(userId, roles));
 	}
 }

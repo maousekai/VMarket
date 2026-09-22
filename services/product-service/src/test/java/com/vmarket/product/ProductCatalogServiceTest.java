@@ -7,7 +7,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -38,6 +37,7 @@ import com.vmarket.product.service.ProductMapper;
 import com.vmarket.product.service.ProductDerivedFields;
 import com.vmarket.product.service.ShopAccessService;
 import com.vmarket.product.service.CatalogProjectionService;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class ProductCatalogServiceTest {
@@ -54,7 +54,7 @@ class ProductCatalogServiceTest {
 	void setUp() {
 		service = new ProductCatalogService(repository, query, categoryService, brandService,
 				new ProductMapper(), publisher, new ProductEventFactory(),
-				new ProductDerivedFields(), shopAccessService, projections);
+				new ProductDerivedFields(), shopAccessService, projections, new ObjectMapper());
 	}
 
 	@Test
@@ -66,19 +66,41 @@ class ProductCatalogServiceTest {
 			return product;
 		});
 
-		var result = service.create("seller-1", request(null, 12));
+		var result = service.create("seller-1", "create-1", request(null, 12));
 
 		assertThat(result.id()).isEqualTo("product-1");
 		assertThat(result.availableStock()).isEqualTo(12);
 		assertThat(result.variants().get(0).id()).isNotBlank();
+		assertThat(result.currency()).isEqualTo("VND");
+		assertThat(result.variants().get(0).currency()).isEqualTo("VND");
 		verify(shopAccessService).requireActiveOwner("shop-1", "seller-1");
 		ArgumentCaptor<ProductCreated> event = ArgumentCaptor.forClass(ProductCreated.class);
 		verify(publisher).publishCreated(event.capture());
-		assertThat(event.getValue().schemaVersion()).isEqualTo(3);
+		assertThat(event.getValue().schemaVersion()).isEqualTo(4);
+		assertThat(event.getValue().currency()).isEqualTo("VND");
 		assertThat(event.getValue().description()).isEqualTo("Mô tả");
 		assertThat(event.getValue().categoryId()).isEqualTo("cat-1");
 		assertThat(event.getValue().availableStock()).isEqualTo(12);
 		assertThat(event.getValue().variants()).hasSize(1);
+	}
+
+	@Test
+	void createRetryReturnsOriginalProductAndRejectsChangedBody() {
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
+		Product[] stored = new Product[1];
+		when(repository.findByCreationKey("seller-1:create-1"))
+				.thenAnswer(invocation -> Optional.ofNullable(stored[0]));
+		when(repository.save(any(Product.class))).thenAnswer(invocation -> {
+			stored[0] = invocation.getArgument(0);
+			stored[0].setId("product-1");
+			return stored[0];
+		});
+		assertThat(service.create("seller-1", "create-1", request(null, 12)).id()).isEqualTo("product-1");
+		assertThat(service.create("seller-1", "create-1", request(null, 12)).id()).isEqualTo("product-1");
+		assertThatThrownBy(() -> service.create("seller-1", "create-1", request(null, 13)))
+				.isInstanceOf(ApiException.class).hasMessageContaining("Idempotency-Key");
+		verify(repository).save(any(Product.class));
+		verify(publisher).publishCreated(any());
 	}
 
 	@Test
@@ -133,6 +155,40 @@ class ProductCatalogServiceTest {
 	}
 
 	@Test
+	void sellerEditWhileShopSuspendedSurvivesApproval() {
+		Product product = product("seller-1", 0);
+		product.setStatus(ProductStatus.DRAFT);
+		product.applyShopSuspension(true);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
+		when(repository.save(product)).thenReturn(product);
+		service.update("product-1", "seller-1", request("variant-1", 10));
+		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
+		assertThat(product.getStatusBeforeShopSuspension()).isEqualTo(ProductStatus.ACTIVE);
+		product.applyShopSuspension(false);
+		assertThat(product.getStatus()).isEqualTo(ProductStatus.ACTIVE);
+	}
+
+	@Test
+	void restrictionsRestoreDesiredStatusInEitherOrder() {
+		for (boolean moderationFirst : List.of(true, false)) {
+			Product product = product("seller-1", 0);
+			if (moderationFirst) {
+				product.applyModerationRestriction(true);
+				product.applyShopSuspension(true);
+			} else {
+				product.applyShopSuspension(true);
+				product.applyModerationRestriction(true);
+			}
+			product.updateDesiredStatus(ProductStatus.DRAFT);
+			product.applyShopSuspension(false);
+			assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
+			product.applyModerationRestriction(false);
+			assertThat(product.getStatus()).isEqualTo(ProductStatus.DRAFT);
+		}
+	}
+
+	@Test
 	void sellerCanResubmitEditedModeratedProduct() {
 		Product product = product("seller-1", 0);
 		product.setModerationRemoved(true);
@@ -162,11 +218,32 @@ class ProductCatalogServiceTest {
 		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
 	}
 
+	@Test
+	void clearingModerationTwiceKeepsActiveProductListed() {
+		Product product = product("seller-1", 0);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		service.moderate("product-1", false, null);
+		assertThat(product.getStatus()).isEqualTo(ProductStatus.ACTIVE);
+		verify(repository, never()).save(any());
+	}
+
+	@Test
+	void repeatedModerationRemovalDoesNotPublishAgain() {
+		Product product = product("seller-1", 0);
+		product.setModerationRemoved(true);
+		product.setModerationReason("Vi phạm");
+		product.setStatus(ProductStatus.HIDDEN);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		service.moderate("product-1", true, "Vi phạm");
+		verify(repository, never()).save(any());
+		verify(publisher, never()).publishModerated(any());
+	}
+
 	private ProductRequest request(String variantId, long stock) {
 		return new ProductRequest("shop-1", "Áo thun", "Mô tả", List.of("https://img/1.jpg"),
-				"cat-1", null, ProductStatus.ACTIVE,
+				"cat-1", null, ProductStatus.ACTIVE, "VND",
 				List.of(new ProductRequest.VariantRequest(variantId, "SKU-1", new HashMap<>(java.util.Map.of("size", "M")),
-						new BigDecimal("100000"), stock)));
+						100000L, stock)));
 	}
 
 	private Category activeCategory() {
@@ -184,7 +261,7 @@ class ProductCatalogServiceTest {
 		product.setCategoryId("cat-1");
 		product.setStatus(ProductStatus.ACTIVE);
 		product.setVariants(List.of(new ProductVariant("variant-1", "SKU-1", new HashMap<>(),
-				new BigDecimal("100000"), 10, reserved, 0)));
+				100000L, 10, reserved, 0)));
 		product.setCreatedAt(Instant.now());
 		product.setUpdatedAt(Instant.now());
 		return product;

@@ -1,6 +1,7 @@
 package com.vmarket.product.event;
 
 import org.springframework.stereotype.Component;
+import org.springframework.dao.DuplicateKeyException;
 
 import com.vmarket.events.EventConsumer;
 import com.vmarket.events.EventEnvelope;
@@ -26,10 +27,13 @@ public class OrderPlacedInventoryConsumer implements EventConsumer<OrderPlaced> 
 
 	@Override
 	public void handle(OrderPlaced payload, EventEnvelope envelope) {
+		InventoryRequest request = new InventoryRequest(payload.orderId(), payload.items() == null ? null : payload.items().stream()
+				.map(item -> new InventoryRequest.InventoryItem(
+						item.productId(), item.variantId(), item.quantity())).toList());
 		try {
-			inventoryService.reserve(new InventoryRequest(payload.orderId(), payload.items() == null ? null : payload.items().stream()
-					.map(item -> new InventoryRequest.InventoryItem(
-							item.productId(), item.variantId(), item.quantity())).toList()));
+			inventoryService.reserve(request);
+		} catch (DuplicateKeyException ex) {
+			if (!inventoryService.hasReservation(request)) throw ex;
 		} catch (ApiException ex) {
 			publisher.publishStockReservationFailed(
 					new StockReservationFailed(payload.orderId(), ex.getCode(), ex.getMessage()));

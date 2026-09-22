@@ -1,10 +1,13 @@
 package com.vmarket.product.service;
 
-import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +35,7 @@ import com.vmarket.product.model.ProductStatus;
 import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.repository.ProductCatalogQuery;
 import com.vmarket.product.repository.ProductRepository;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ProductCatalogService {
@@ -45,12 +49,13 @@ public class ProductCatalogService {
 	private final ProductDerivedFields derivedFields;
 	private final ShopAccessService shopAccessService;
 	private final CatalogProjectionService projections;
+	private final ObjectMapper json;
 
 	public ProductCatalogService(ProductRepository repository, ProductCatalogQuery query,
 			CategoryService categoryService, BrandService brandService, ProductMapper mapper,
 			ProductEventPublisher publisher, ProductEventFactory eventFactory,
 			ProductDerivedFields derivedFields, ShopAccessService shopAccessService,
-			CatalogProjectionService projections) {
+			CatalogProjectionService projections, ObjectMapper json) {
 		this.repository = repository;
 		this.query = query;
 		this.categoryService = categoryService;
@@ -61,10 +66,23 @@ public class ProductCatalogService {
 		this.derivedFields = derivedFields;
 		this.shopAccessService = shopAccessService;
 		this.projections = projections;
+		this.json = json;
 	}
 
 	@Transactional
-	public ProductResponse create(String sellerId, ProductRequest request) {
+	public ProductResponse create(String sellerId, String idempotencyKey, ProductRequest request) {
+		if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key không hợp lệ");
+		}
+		String creationKey = sellerId + ":" + idempotencyKey.trim();
+		String requestHash = requestHash(request);
+		var previous = repository.findByCreationKey(creationKey);
+		if (previous.isPresent()) {
+			if (!requestHash.equals(previous.get().getCreationRequestHash())) {
+				throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", "Idempotency-Key đã dùng cho yêu cầu khác");
+			}
+			return mapper.toResponse(previous.get());
+		}
 		shopAccessService.requireActiveOwner(request.shopId().trim(), sellerId);
 		validateReferences(request.categoryId(), request.brandId(), request.status());
 		validateVariants(request.variants());
@@ -76,11 +94,22 @@ public class ProductCatalogService {
 		product.setRatingCount(0);
 		product.setSoldCount(0);
 		product.setCreatedAt(now);
+		product.setCreationKey(creationKey);
+		product.setCreationRequestHash(requestHash);
 		applyRequest(product, request, Map.of());
 		product.setUpdatedAt(now);
 		Product saved = repository.save(product);
 		publisher.publishCreated(eventFactory.created(saved));
 		return mapper.toResponse(saved);
+	}
+
+	private String requestHash(ProductRequest request) {
+		try {
+			byte[] bytes = json.writeValueAsString(request).getBytes(StandardCharsets.UTF_8);
+			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+		} catch (NoSuchAlgorithmException ex) {
+			throw new IllegalStateException("SHA-256 unavailable", ex);
+		}
 	}
 
 	@Transactional
@@ -102,11 +131,7 @@ public class ProductCatalogService {
 		}
 		ensureReservedVariantsAreKept(request, existing);
 		applyRequest(product, request, existing);
-		if (product.isModerationRemoved()) {
-			product.setStatusBeforeModeration(request.status());
-			product.setStatus(ProductStatus.HIDDEN);
-			product.setModerationResubmittedAt(null);
-		}
+		if (product.isModerationRemoved()) product.setModerationResubmittedAt(null);
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
 		publisher.publishUpdated(eventFactory.updated(saved));
@@ -134,29 +159,16 @@ public class ProductCatalogService {
 			if (reason == null || reason.isBlank()) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "MODERATION_REASON_REQUIRED", "Phải nhập lý do gỡ sản phẩm");
 			}
-			if (!product.isModerationRemoved()) {
-				ProductStatus desired = product.isShopSuspended() && product.getStatusBeforeShopSuspension() != null
-						? product.getStatusBeforeShopSuspension() : product.getStatus();
-				product.setStatusBeforeModeration(desired);
+			if (product.isModerationRemoved() && reason.trim().equals(product.getModerationReason())) {
+				return mapper.toResponse(product);
 			}
-			product.setModerationRemoved(true);
+			product.applyModerationRestriction(true);
 			product.setModerationReason(reason.trim());
 			product.setModerationResubmittedAt(null);
-			product.setStatus(ProductStatus.HIDDEN);
 		} else {
-			product.setModerationRemoved(false);
+			if (!product.isModerationRemoved()) return mapper.toResponse(product);
+			product.applyModerationRestriction(false);
 			product.setModerationReason(null);
-			ProductStatus restoredStatus = product.getStatusBeforeModeration() == null
-					? ProductStatus.DRAFT : product.getStatusBeforeModeration();
-			if (product.isShopSuspended()) {
-				product.setStatus(ProductStatus.HIDDEN);
-				if (product.getStatusBeforeShopSuspension() == null) {
-					product.setStatusBeforeShopSuspension(restoredStatus);
-				}
-			} else {
-				product.setStatus(restoredStatus);
-			}
-			product.setStatusBeforeModeration(null);
 			product.setModerationResubmittedAt(null);
 		}
 		product.setUpdatedAt(Instant.now());
@@ -175,6 +187,7 @@ public class ProductCatalogService {
 			throw new ApiException(HttpStatus.CONFLICT, "PRODUCT_NOT_MODERATED",
 					"Sản phẩm không ở trạng thái chờ chỉnh sửa sau kiểm duyệt");
 		}
+		if (product.getModerationResubmittedAt() != null) return mapper.toResponse(product);
 		product.setModerationResubmittedAt(Instant.now());
 		product.setUpdatedAt(product.getModerationResubmittedAt());
 		Product saved = repository.save(product);
@@ -183,12 +196,12 @@ public class ProductCatalogService {
 		return mapper.toResponse(saved);
 	}
 
-	public PageResponse<ProductResponse> browse(String keyword, String categoryId, BigDecimal minPrice, BigDecimal maxPrice,
+	public PageResponse<ProductResponse> browse(String keyword, String categoryId, Long minPrice, Long maxPrice,
 			Double minRating, String shopId, String sort, int page, int size) {
-		if (minPrice != null && minPrice.signum() < 0 || maxPrice != null && maxPrice.signum() < 0) {
+		if (minPrice != null && minPrice < 0 || maxPrice != null && maxPrice < 0) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PRICE_RANGE", "Khoảng giá không hợp lệ");
 		}
-		if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+		if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PRICE_RANGE", "Giá tối thiểu không được lớn hơn giá tối đa");
 		}
 		if (minRating != null && (minRating < 0 || minRating > 5)) {
@@ -203,8 +216,7 @@ public class ProductCatalogService {
 
 	public ProductDetailResponse detail(String id) {
 		Product product = getRequired(id);
-		if (product.getDeletedAt() != null || product.getStatus() != ProductStatus.ACTIVE || product.isModerationRemoved()
-				|| product.isShopSuspended() || !product.isCategoryVisible()) {
+		if (!product.isCatalogVisible()) {
 			throw new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "Không tìm thấy sản phẩm");
 		}
 		List<ProductResponse> similar = query.search(null, product.getCategoryId(), null, null, null, null,
@@ -242,7 +254,7 @@ public class ProductCatalogService {
 		product.setCategoryId(request.categoryId());
 		projections.applyCategory(product);
 		product.setBrandId(blankToNull(request.brandId()));
-		product.setStatus(request.status());
+		product.updateDesiredStatus(request.status());
 		List<ProductVariant> variants = request.variants().stream().map(item -> {
 			ProductVariant old = item.id() == null ? null : existing.get(item.id());
 			long reserved = old == null ? 0 : old.getReservedStock();
@@ -251,7 +263,7 @@ public class ProductCatalogService {
 						"Tồn kho không được nhỏ hơn số lượng đang tạm giữ");
 			}
 			return new ProductVariant(old == null ? UUID.randomUUID().toString() : old.getId(), item.sku().trim(),
-					new HashMap<>(item.attributes()), item.price(), item.stock(), reserved,
+					new HashMap<>(item.attributes()), item.price(), request.currency(), item.stock(), reserved,
 					old == null ? 0 : old.getSoldCount());
 		}).toList();
 		product.setVariants(variants);

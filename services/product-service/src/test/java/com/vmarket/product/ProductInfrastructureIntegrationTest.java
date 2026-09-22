@@ -3,7 +3,6 @@ package com.vmarket.product;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -226,7 +225,7 @@ class ProductInfrastructureIntegrationTest {
 		product.setStatus(ProductStatus.ACTIVE);
 		product.setCategoryVisible(true);
 		product.setVariants(new ArrayList<>(List.of(new ProductVariant("v1", "SKU-IT", java.util.Map.of(),
-				BigDecimal.TEN, 10, 0, 0))));
+				10L, 10, 0, 0))));
 		return product;
 	}
 }

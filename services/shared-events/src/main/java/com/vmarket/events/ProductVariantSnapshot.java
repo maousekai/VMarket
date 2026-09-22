@@ -1,14 +1,14 @@
 package com.vmarket.events;
 
-import java.math.BigDecimal;
 import java.util.Map;
 
-/** Biến thể nằm trong snapshot ProductCreated/ProductUpdated schema v2. */
+/** Biến thể nằm trong snapshot ProductCreated/ProductUpdated schema v4. */
 public record ProductVariantSnapshot(
 		String variantId,
 		String sku,
 		Map<String, String> attributes,
-		BigDecimal price,
+		long price,
+		String currency,
 		long availableStock,
 		long soldCount) {
 }

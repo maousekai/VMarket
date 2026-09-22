@@ -4,6 +4,7 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
+import org.springframework.dao.DuplicateKeyException;
 
 import com.vmarket.events.EventConsumer;
 import com.vmarket.events.EventEnvelope;
@@ -28,9 +29,17 @@ public class OrderStatusChangedInventoryConsumer implements EventConsumer<OrderS
 	public void handle(OrderStatusChanged payload, EventEnvelope envelope) {
 		String status = normalize(payload.status());
 		if ("CANCELLED".equals(status)) {
-			inventoryService.release(payload.orderId());
+			try {
+				inventoryService.releaseOrDefer(payload.orderId());
+			} catch (DuplicateKeyException ex) {
+				if (!inventoryService.isReleasedOrPending(payload.orderId())) throw ex;
+			}
 		} else if ("COD".equals(normalize(payload.paymentMethod())) && COD_CONFIRMED_STATUSES.contains(status)) {
-			inventoryService.confirm(payload.orderId());
+			try {
+				inventoryService.confirmOrDefer(payload.orderId());
+			} catch (DuplicateKeyException ex) {
+				if (!inventoryService.isConfirmedOrPending(payload.orderId())) throw ex;
+			}
 		}
 	}
 

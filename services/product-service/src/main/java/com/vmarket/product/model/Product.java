@@ -1,6 +1,5 @@
 package com.vmarket.product.model;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,8 +40,8 @@ public class Product {
 	private ProductStatus status;
 	private List<ProductVariant> variants = new ArrayList<>();
 	@Indexed
-	private BigDecimal minPrice;
-	private BigDecimal maxPrice;
+	private Long minPrice;
+	private Long maxPrice;
 	private long availableStock;
 	private double ratingAverage;
 	private long ratingCount;
@@ -57,6 +56,43 @@ public class Product {
 	private Instant createdAt;
 	private Instant updatedAt;
 	private Instant deletedAt;
+	@Indexed(unique = true, sparse = true)
+	private String creationKey;
+	private String creationRequestHash;
 	@Version
 	private Long version;
+
+	public boolean isCatalogVisible() {
+		return deletedAt == null && status == ProductStatus.ACTIVE && !moderationRemoved
+				&& !shopSuspended && categoryVisible;
+	}
+
+	public ProductStatus getUnrestrictedStatus() {
+		if (shopSuspended && statusBeforeShopSuspension != null) return statusBeforeShopSuspension;
+		if (moderationRemoved && statusBeforeModeration != null) return statusBeforeModeration;
+		return (moderationRemoved || shopSuspended) && status == ProductStatus.HIDDEN ? ProductStatus.DRAFT : status;
+	}
+
+	public void updateDesiredStatus(ProductStatus desired) {
+		if (moderationRemoved) statusBeforeModeration = desired;
+		if (shopSuspended) statusBeforeShopSuspension = desired;
+		status = moderationRemoved || shopSuspended ? ProductStatus.HIDDEN : desired;
+	}
+
+	public void applyModerationRestriction(boolean removed) {
+		if (moderationRemoved == removed) return;
+		ProductStatus desired = getUnrestrictedStatus();
+		moderationRemoved = removed;
+		statusBeforeModeration = removed ? desired : null;
+		updateDesiredStatus(desired);
+	}
+
+	public boolean applyShopSuspension(boolean suspended) {
+		if (shopSuspended == suspended) return false;
+		ProductStatus desired = getUnrestrictedStatus();
+		shopSuspended = suspended;
+		statusBeforeShopSuspension = suspended ? desired : null;
+		updateDesiredStatus(desired);
+		return true;
+	}
 }
