@@ -131,9 +131,12 @@ class RefreshApiTest {
 		String rt1 = loginAndGetRefreshCookie();
 		String rt2 = newCookieFrom(refresh(rt1).andExpect(status().isOk()));
 
-		// Dùng lại rt1 ngay (trong ân hạn) -> chỉ từ chối, KHÔNG thu hồi rt2
+		// Dùng lại rt1 ngay (trong ân hạn) -> chỉ từ chối, KHÔNG thu hồi rt2, và
+		// KHÔNG xoá cookie (rt2 có thể đang là cookie hợp lệ hiện tại của trình
+		// duyệt do request thắng race ghi — xoá nhầm sẽ đăng xuất dù phiên còn sống).
 		refresh(rt1).andExpect(status().isUnauthorized())
-				.andExpect(jsonPath("$.error.code").value("INVALID_REFRESH_TOKEN"));
+				.andExpect(jsonPath("$.error.code").value("REFRESH_TOKEN_ROTATION_CONFLICT"))
+				.andExpect(cookie().doesNotExist(RefreshTokenCookieService.COOKIE_NAME));
 
 		refresh(rt2).andExpect(status().isOk());
 	}

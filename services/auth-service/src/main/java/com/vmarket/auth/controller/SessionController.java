@@ -23,6 +23,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -48,6 +49,7 @@ public class SessionController {
 			@ApiResponse(responseCode = "200", description = "Đã đăng xuất",
 					content = @Content(schema = @Schema(implementation = MessageResponse.class))),
 	})
+	@SecurityRequirement(name = "cookieAuth")
 	@PostMapping("/logout")
 	public MessageResponse logout(HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
 		refreshCookieService.read(httpRequest).ifPresent(sessionService::logout);
@@ -64,6 +66,7 @@ public class SessionController {
 			@ApiResponse(responseCode = "401", description = "REFRESH_TOKEN_MISSING / SESSION_NOT_FOUND",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
+	@SecurityRequirement(name = "cookieAuth")
 	@GetMapping("/sessions")
 	public List<SessionSummary> listSessions(HttpServletRequest httpRequest) {
 		RefreshToken current = sessionService.resolveCurrent(currentRawToken(httpRequest));
@@ -81,6 +84,7 @@ public class SessionController {
 			@ApiResponse(responseCode = "404", description = "TARGET_SESSION_NOT_FOUND",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
+	@SecurityRequirement(name = "cookieAuth")
 	@DeleteMapping("/sessions/{id}")
 	public MessageResponse revokeSession(@PathVariable String id, HttpServletRequest httpRequest,
 			HttpServletResponse httpResponse) {
@@ -100,6 +104,7 @@ public class SessionController {
 			@ApiResponse(responseCode = "401", description = "REFRESH_TOKEN_MISSING / SESSION_NOT_FOUND",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
+	@SecurityRequirement(name = "cookieAuth")
 	@PostMapping("/sessions/revoke-others")
 	public MessageResponse revokeOthers(HttpServletRequest httpRequest) {
 		RefreshToken current = sessionService.resolveCurrent(currentRawToken(httpRequest));

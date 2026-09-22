@@ -25,6 +25,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -90,19 +91,23 @@ public class AuthController {
 	@Operation(summary = "Làm mới access token (FR-AUTH-02)",
 			description = "Dùng refresh token trong cookie HttpOnly `refresh_token` để lấy access token "
 					+ "mới (xoay vòng — cookie được ghi đè bằng refresh token mới). Refresh token cũ bị "
-					+ "thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi. Mọi lỗi "
-					+ "đều xoá luôn cookie hiện tại — trình duyệt không tiếp tục gửi lại một token đã "
-					+ "chết/bị đánh cắp.")
+					+ "thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi. Lỗi do token "
+					+ "thật sự chết (hết hạn/reused/tài khoản khoá) đều xoá luôn cookie hiện tại — trình "
+					+ "duyệt không tiếp tục gửi lại một token không còn dùng được. Riêng "
+					+ "REFRESH_TOKEN_ROTATION_CONFLICT (thua một request /refresh khác chạy song song "
+					+ "cùng token cũ) KHÔNG xoá cookie — request thắng cuộc có thể đã ghi cookie mới hợp "
+					+ "lệ, xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Cấp token mới thành công",
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
 			@ApiResponse(responseCode = "401",
 					description = "REFRESH_TOKEN_MISSING / INVALID_REFRESH_TOKEN / REFRESH_TOKEN_EXPIRED / "
-							+ "REFRESH_TOKEN_REUSED",
+							+ "REFRESH_TOKEN_REUSED / REFRESH_TOKEN_ROTATION_CONFLICT",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "423", description = "Tài khoản đang bị khoá tạm (ACCOUNT_LOCKED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
+	@SecurityRequirement(name = "cookieAuth")
 	@PostMapping("/refresh")
 	public TokenResponse refresh(HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
 		String rawRefreshToken = refreshCookieService.read(httpRequest)
@@ -114,7 +119,11 @@ public class AuthController {
 		} catch (ApiException ex) {
 			// Token hỏng/hết hạn/bị đánh cắp/tài khoản bị khoá: xoá cookie ngay, đừng
 			// để client tiếp tục gửi lại một refresh token không còn dùng được.
-			refreshCookieService.clear(httpResponse);
+			// TRỪ rotation conflict (thua race /refresh song song): cookie hiện tại có
+			// thể đã là token mới hợp lệ do request thắng cuộc ghi — không được xoá.
+			if (!"REFRESH_TOKEN_ROTATION_CONFLICT".equals(ex.getCode())) {
+				refreshCookieService.clear(httpResponse);
+			}
 			throw ex;
 		}
 		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
