@@ -61,6 +61,15 @@
 			<artifactId>spring-boot-starter-data-redis-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!--
+			RestClient.Builder (auto-configuration org.springframework.boot.restclient.*)
+			để gọi product-service đồng bộ (FR-CART-03). Boot 4 tách module này ra
+			khỏi starter webmvc nên phải khai báo riêng.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-restclient</artifactId>
+		</dependency>
 	</dependencies>
 
 	<build>
