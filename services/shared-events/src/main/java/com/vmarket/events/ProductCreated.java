@@ -1,21 +1,32 @@
 package com.vmarket.events;
 
-import java.math.BigDecimal;
 import java.util.List;
 
-/**
- * Payload sự kiện {@code ProductCreated} (Product Catalog phát, AI Search /
- * Recommendation nhận để đồng bộ chỉ mục — FR-SRCH-04).
- *
- * <p>Đây là phiên bản demo tối thiểu (PBL6-39). Khi triển khai Product Catalog
- * thật, cần bổ sung các trường: Mô tả, danh mục, biến thể, thuộc tính... và
- * phiên bản hoá schema nếu cần để khả năng tương thích ngược.
- */
+/** Snapshot đầy đủ để Search/Recommendation đồng bộ sản phẩm vừa tạo. */
 public record ProductCreated(
 		String productId,
 		String shopId,
 		String name,
-		BigDecimal price,
+		Long price,
 		String status,
-		List<String> imageUrls) {
+		List<String> imageUrls,
+		int schemaVersion,
+		String currency,
+		String description,
+		String categoryId,
+		String brandId,
+		Long maxPrice,
+		List<ProductVariantSnapshot> variants,
+		double ratingAverage,
+		long ratingCount,
+		long soldCount,
+		long availableStock,
+		boolean catalogVisible) {
+
+	/** Constructor tương thích ngược với payload v1. */
+	public ProductCreated(String productId, String shopId, String name, Long price,
+			String status, List<String> imageUrls) {
+		this(productId, shopId, name, price, status, imageUrls, 1, "VND", null, null, null,
+				price, List.of(), 0, 0, 0, 0, "ACTIVE".equals(status));
+	}
 }
