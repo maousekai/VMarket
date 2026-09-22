@@ -5,7 +5,9 @@ spring:
   application:
     name: auth-service
   datasource:
-    url: jdbc:h2:mem:auth;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    # LOCK_TIMEOUT: AccountSuspensionRaceTest cho mot transaction CHO khoa dong (SELECT
+    # ... FOR UPDATE) cua transaction khac - de du rong de khong bao loi gia khi may cham.
+    url: jdbc:h2:mem:auth;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000
     driver-class-name: org.h2.Driver
     username: sa
     password: ""

@@ -29,13 +29,22 @@ import lombok.extern.slf4j.Slf4j;
  *       HTTP status và thông báo: đó là câu trả lời đúng cho người dùng.</li>
  *   <li>auth-service trả 401/403 → <b>không</b> chuyển tiếp. Đó là lỗi cấu hình
  *       {@code INTERNAL_API_KEY} giữa hai service; trả 401 cho client sẽ khiến frontend
- *       tưởng access token của người dùng hết hạn và đăng xuất họ. → 502.</li>
+ *       tưởng access token của người dùng hết hạn và đăng xuất họ. → 502.
+ *       <b>Ngoại lệ duy nhất:</b> 403 {@value #ADMIN_ACCESS_REVOKED} — auth-service xác
+ *       nhận Admin gọi vào đã bị khoá / mất vai trò ADMIN (FR-USER-04). Đó là câu trả lời
+ *       đúng cho người gọi nên chuyển tiếp nguyên 403.</li>
  *   <li>auth-service 5xx / body không đọc được → 502 {@code AUTH_SERVICE_ERROR}.</li>
  *   <li><b>Chưa tới được auth-service</b> (connection refused, sai host, hết thời gian
  *       <i>kết nối</i>) → 503 {@code AUTH_SERVICE_UNAVAILABLE}. Request chắc chắn chưa
  *       chạy nên bảo người dùng thử lại là đúng.</li>
  *   <li><b>Đã tới nơi nhưng không biết kết quả</b> (hết thời gian <i>đọc</i>, đứt kết nối
- *       giữa chừng) → mã riêng do từng lời gọi quyết định, xem dưới.</li>
+ *       giữa chừng) → mã riêng <b>do từng lời gọi quyết định</b>, vì lời khuyên cho
+ *       người dùng phụ thuộc vào việc thao tác có lặp lại được hay không:
+ *       <ul>
+ *         <li>đổi mật khẩu → {@code PASSWORD_CHANGE_UNKNOWN}, <b>không</b> được thử lại;</li>
+ *         <li>đọc dữ liệu, khoá/mở khoá tài khoản → {@code AUTH_SERVICE_TIMEOUT}, thử
+ *             lại an toàn vì chạy hai lần cũng ra cùng một trạng thái.</li>
+ *       </ul></li>
  * </ul>
  *
  * <p><b>Vì sao phải tách hai nhóm cuối.</b> Read timeout xảy ra <i>sau</i> khi
@@ -54,6 +63,9 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class AuthServiceClient {
+
+	/** 403 duy nhất được chuyển tiếp — Admin gọi vào không còn quyền theo CSDL auth-service. */
+	public static final String ADMIN_ACCESS_REVOKED = "ADMIN_ACCESS_REVOKED";
 
 	private final RestClient restClient;
 
@@ -81,6 +93,69 @@ public class AuthServiceClient {
 				.retrieve()
 				.toBodilessEntity(),
 				AuthServiceClient::passwordChangeUnknown);
+	}
+
+	// FR-USER-04: mọi lời gọi quản trị mang header X-Actor-Id = Admin thực hiện (lấy từ
+	// access token). auth-service kiểm tra lại theo CSDL rằng người đó còn là Admin đang
+	// hoạt động — token có thể cũ tới 15 phút (review PR #22, M2).
+
+	/** FR-USER-04. */
+	public AuthAccount getAccount(String userId, String actorId) {
+		return call(() -> restClient.get()
+				.uri("/internal/users/{userId}", userId)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
+				.retrieve()
+				.body(AuthAccount.class),
+				AuthServiceClient::timedOutSafeToRetry);
+	}
+
+	/** FR-USER-04. POST nhưng chỉ đọc (tiêu chí tìm kiếm nằm trong body). */
+	public AuthAccountPage searchAccounts(AuthAccountSearch search, String actorId) {
+		return call(() -> restClient.post()
+				.uri("/internal/users/search")
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(search)
+				.retrieve()
+				.body(AuthAccountPage.class),
+				AuthServiceClient::timedOutSafeToRetry);
+	}
+
+	/**
+	 * FR-USER-04 — khoá.
+	 *
+	 * <p>Ghi dữ liệu nhưng <b>lặp lại được</b>: khoá một tài khoản đang bị khoá cho ra
+	 * đúng trạng thái đó. Nên khác đổi mật khẩu, ở đây thử lại là an toàn.
+	 */
+	public AuthAccount suspend(String userId, String reason, String actorId) {
+		return call(() -> restClient.put()
+				.uri("/internal/users/{userId}/suspension", userId)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(new SuspendBody(reason))
+				.retrieve()
+				.body(AuthAccount.class),
+				AuthServiceClient::timedOutSafeToRetry);
+	}
+
+	/** FR-USER-04 — mở khoá. Cũng lặp lại được, xem {@link #suspend}. */
+	public AuthAccount unsuspend(String userId, String actorId) {
+		return call(() -> restClient.delete()
+				.uri("/internal/users/{userId}/suspension", userId)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
+				.retrieve()
+				.body(AuthAccount.class),
+				AuthServiceClient::timedOutSafeToRetry);
+	}
+
+	/** FR-USER-04 — lịch sử hoạt động cơ bản, mới nhất trước. */
+	public AuthAccountActivityPage getActivities(String userId, int page, int size, String actorId) {
+		return call(() -> restClient.get()
+				.uri("/internal/users/{userId}/activities?page={page}&size={size}", userId, page, size)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
+				.retrieve()
+				.body(AuthAccountActivityPage.class),
+				AuthServiceClient::timedOutSafeToRetry);
 	}
 
 	// --- helpers -------------------------------------------------------------
@@ -137,6 +212,12 @@ public class AuthServiceClient {
 
 	private ApiException translate(RestClientResponseException ex) {
 		HttpStatusCode status = ex.getStatusCode();
+		if (status.value() == 403) {
+			ErrorBody body = readErrorBody(ex);
+			if (body != null && body.error() != null && ADMIN_ACCESS_REVOKED.equals(body.error().code())) {
+				return new ApiException(ADMIN_ACCESS_REVOKED, HttpStatus.FORBIDDEN, body.error().message());
+			}
+		}
 		if (status.value() == 401 || status.value() == 403) {
 			log.error("auth-service từ chối khoá nội bộ (HTTP {}) — kiểm tra INTERNAL_API_KEY hai service có trùng không",
 					status.value());
@@ -172,6 +253,21 @@ public class AuthServiceClient {
 	}
 
 	/**
+	 * Quá thời gian nhưng thao tác <b>lặp lại được</b>: đọc dữ liệu, hoặc ghi mà chạy
+	 * hai lần cũng ra cùng một trạng thái (khoá / mở khoá tài khoản).
+	 *
+	 * <p>Tách khỏi {@link #unavailable()} (503) vì hai thứ khác nhau: 503 nói "chắc chắn
+	 * chưa chạy", còn đây là "không rõ đã chạy chưa". Với thao tác lặp lại được thì lời
+	 * khuyên trùng nhau (thử lại), nhưng nói sai trạng thái vẫn là nói sai — và admin
+	 * cần biết để tải lại danh sách kiểm tra thay vì tin là chưa có gì xảy ra.
+	 */
+	private static ApiException timedOutSafeToRetry() {
+		return new ApiException("AUTH_SERVICE_TIMEOUT", HttpStatus.GATEWAY_TIMEOUT,
+				"Dịch vụ tài khoản phản hồi quá chậm nên chưa rõ kết quả. Hãy tải lại danh sách "
+						+ "để kiểm tra; thao tác này lặp lại được nên thử lại cũng an toàn.");
+	}
+
+	/**
 	 * Đổi mật khẩu mà không biết kết quả.
 	 *
 	 * <p>Thông báo cố ý KHÔNG có chữ "thử lại": nếu auth-service đã chạy xong thì mật
@@ -185,6 +281,9 @@ public class AuthServiceClient {
 	}
 
 	record ChangePasswordBody(String currentPassword, String newPassword) {
+	}
+
+	record SuspendBody(String reason) {
 	}
 
 	/** Body lỗi chuẩn của dự án {@code { "error": { "code", "message" } }}. */

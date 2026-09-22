@@ -26,7 +26,7 @@ VMarket/
 │   ├── mvnw                   # Maven Wrapper dùng chung (build từ đây cho cả 11 module)
 │   ├── api-gateway/           # Spring Cloud Gateway (8080)
 │   ├── auth-service/          # Xác thực, phân quyền RBAC (8081, PostgreSQL)
-│   ├── user-service/          # Hồ sơ, sổ địa chỉ (8082, PostgreSQL)
+│   ├── user-service/          # Hồ sơ, sổ địa chỉ, đổi mật khẩu, Admin quản lý người dùng (8082, PostgreSQL)
 │   ├── shop-service/          # Gian hàng (8083, PostgreSQL)
 │   ├── product-service/       # Danh mục, sản phẩm, tồn kho (8084, MongoDB)
 │   ├── cart-service/          # Giỏ hàng (8085, Redis)

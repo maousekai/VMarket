@@ -15,7 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V5) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V5, V7, V8) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
  *
  * <p>Nếu context khởi động được nghĩa là: (1) các script migration chạy không lỗi,
@@ -41,8 +41,9 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("5");
-		assertThat(flyway.info().applied()).hasSize(5);
+		// V6 do PBL6-46 giữ (chưa merge) -> nhánh này có V1..V5 + V7 + V8 = 7 migration.
+		assertThat(current.getVersion().getVersion()).isEqualTo("8");
+		assertThat(flyway.info().applied()).hasSize(7);
 	}
 
 	@Test
@@ -65,6 +66,16 @@ class FlywayMigrationTest {
 			assertThat(columnExists(c, "password_reset_token", "expires_at")).isTrue();
 			assertThat(columnExists(c, "password_reset_token", "attempts")).isTrue();
 			assertThat(columnExists(c, "password_reset_token", "consumed_at")).isTrue();
+			// V7 (PBL6-13)
+			assertThat(columnExists(c, "users", "suspended_at")).isTrue();
+			assertThat(columnExists(c, "users", "suspended_reason")).isTrue();
+			assertThat(columnExists(c, "users", "suspended_by")).isTrue();
+			// V8 (PBL6-13) - lịch sử hoạt động
+			assertThat(columnExists(c, "account_activities", "user_id")).isTrue();
+			assertThat(columnExists(c, "account_activities", "action")).isTrue();
+			assertThat(columnExists(c, "account_activities", "actor_id")).isTrue();
+			assertThat(columnExists(c, "account_activities", "reason")).isTrue();
+			assertThat(columnExists(c, "account_activities", "created_at")).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
 	}

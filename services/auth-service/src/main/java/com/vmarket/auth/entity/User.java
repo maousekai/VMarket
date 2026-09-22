@@ -20,8 +20,10 @@ import lombok.Setter;
  *   <li><b>V3 — PBL6-43:</b> {@code failed_login_attempts}, {@code locked_until}</li>
  *   <li><b>V4 — PBL6-44:</b> {@code password_hash} chuyển nullable (user tạo qua OTP
  *       không có mật khẩu); thêm bảng {@code email_otp}</li>
+ *   <li><b>V7 — PBL6-13:</b> {@code suspended_at}, {@code suspended_reason},
+ *       {@code suspended_by} (Admin khoá tài khoản — V5 của PBL6-45 không đụng bảng
+ *       này, V6 do PBL6-46 giữ)</li>
  * </ul>
- * (Migration tiếp theo: V5.)
  */
 @Entity
 @Table(name = "users")
@@ -58,6 +60,22 @@ public class User extends BaseEntity {
 	@Column(name = "locked_until")
 	private Instant lockedUntil;
 
+	/**
+	 * Thời điểm Admin khoá tài khoản (FR-USER-04); {@code null} = không bị Admin khoá.
+	 * Khác {@link #lockedUntil}: không tự hết hạn và không bị gỡ bởi đăng nhập đúng hay
+	 * đặt lại mật khẩu — chỉ Admin mở khoá được.
+	 */
+	@Column(name = "suspended_at")
+	private Instant suspendedAt;
+
+	/** Lý do Admin khoá (chỉ hiển thị cho Admin). */
+	@Column(name = "suspended_reason", length = 500)
+	private String suspendedReason;
+
+	/** Id của Admin đã khoá (audit). */
+	@Column(name = "suspended_by", length = BaseEntity.ID_LENGTH)
+	private String suspendedBy;
+
 	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
@@ -65,4 +83,8 @@ public class User extends BaseEntity {
 	@UpdateTimestamp
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
+
+	public boolean isSuspended() {
+		return suspendedAt != null;
+	}
 }

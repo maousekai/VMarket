@@ -23,4 +23,14 @@ public class ApiException extends RuntimeException {
 	public static ApiException conflict(String code, String message) {
 		return new ApiException(code, HttpStatus.CONFLICT, message);
 	}
+
+	/**
+	 * Tài khoản bị Admin khoá (FR-USER-04). Cùng HTTP 423 với khoá tạm do đăng nhập
+	 * sai ({@code ACCOUNT_LOCKED}) nhưng khác mã: client cần phân biệt "chờ 15 phút"
+	 * với "liên hệ hỗ trợ".
+	 */
+	public static ApiException accountSuspended() {
+		return new ApiException("ACCOUNT_SUSPENDED", HttpStatus.LOCKED,
+				"Tài khoản đã bị quản trị viên khoá. Vui lòng liên hệ bộ phận hỗ trợ");
+	}
 }

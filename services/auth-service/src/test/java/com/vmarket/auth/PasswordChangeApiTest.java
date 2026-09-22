@@ -162,6 +162,16 @@ class PasswordChangeApiTest {
 	}
 
 	@Test
+	void taiKhoanBiAdminKhoa_423_suspended() throws Exception {
+		user.setSuspendedAt(Instant.now());
+		userRepository.save(user);
+
+		changePassword(user.getId(), PASSWORD, NEW_PASSWORD)
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"));
+	}
+
+	@Test
 	void userKhongTonTai_404() throws Exception {
 		changePassword("01JBQ9YDX7K3M8N5P2R4T6V8ZZ", PASSWORD, NEW_PASSWORD)
 				.andExpect(status().isNotFound())

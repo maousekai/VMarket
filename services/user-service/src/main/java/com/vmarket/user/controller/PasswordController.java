@@ -59,7 +59,7 @@ public class PasswordController {
 			@ApiResponse(responseCode = "401", description = "Thiếu hoặc sai access token (UNAUTHORIZED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "423",
-					description = "Khoá tạm do nhập sai nhiều lần (ACCOUNT_LOCKED)",
+					description = "Khoá tạm do nhập sai nhiều lần (ACCOUNT_LOCKED) hoặc bị Admin khoá (ACCOUNT_SUSPENDED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "503",
 					description = "Chưa gọi tới được auth-service (AUTH_SERVICE_UNAVAILABLE) — thao tác chắc "

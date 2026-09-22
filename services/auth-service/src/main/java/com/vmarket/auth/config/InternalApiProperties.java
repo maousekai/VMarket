@@ -13,9 +13,9 @@ import lombok.Setter;
  * biến môi trường {@code INTERNAL_API_KEY}).
  *
  * <p>API nội bộ phục vụ service khác gọi auth-service trong mạng Docker (SRS 5.4) —
- * hiện là user-service cho FR-USER-03 (đổi mật khẩu). Gateway không định tuyến
- * {@code /internal/**}, nhưng cổng 8081 vẫn publish ra host khi debug nên không thể
- * chỉ dựa vào "không ai gọi tới được".
+ * hiện là user-service cho FR-USER-03 (đổi mật khẩu) và FR-USER-04 (Admin quản lý
+ * tài khoản). Gateway không định tuyến {@code /internal/**}, nhưng cổng 8081 vẫn
+ * publish ra host khi debug nên không thể chỉ dựa vào "không ai gọi tới được".
  *
  * <p>Giống {@code AUTH_JWT_SECRET}: không có giá trị mặc định ở {@code application.yml}
  * nền → thiếu biến ở prod là fail ngay lúc khởi động. Giá trị giả cho dev nằm ở

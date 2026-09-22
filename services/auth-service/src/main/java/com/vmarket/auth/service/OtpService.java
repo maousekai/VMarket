@@ -142,7 +142,10 @@ public class OtpService {
 			throw new ApiException("OTP_ALREADY_USED", HttpStatus.BAD_REQUEST, "Mã OTP đã được sử dụng");
 		}
 
-		User user = userRepository.findByEmail(email)
+		// ForUpdate: khoá dòng user tới khi commit để Admin khoá tài khoản (FR-USER-04)
+		// không xen được vào giữa kiểm tra "chưa bị khoá" trong TokenIssuer và lúc lưu
+		// refresh token (review PR #22, M1).
+		User user = userRepository.findByEmailForUpdate(email)
 				.map(existing -> {
 					if (!existing.isEmailVerified()) {
 						existing.setEmailVerified(true);

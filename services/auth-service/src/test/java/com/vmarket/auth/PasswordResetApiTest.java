@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -27,9 +28,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.auth.email.EmailMessage;
 import com.vmarket.auth.email.EmailSender;
+import com.vmarket.auth.entity.AccountActivity;
+import com.vmarket.auth.entity.AccountActivityType;
 import com.vmarket.auth.entity.PasswordResetToken;
 import com.vmarket.auth.entity.RefreshToken;
 import com.vmarket.auth.entity.User;
+import com.vmarket.auth.repository.AccountActivityRepository;
 import com.vmarket.auth.repository.PasswordResetTokenRepository;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.UserRepository;
@@ -43,6 +47,7 @@ class PasswordResetApiTest {
 	@Autowired UserRepository userRepository;
 	@Autowired RefreshTokenRepository refreshTokenRepository;
 	@Autowired PasswordEncoder passwordEncoder;
+	@Autowired AccountActivityRepository activityRepository;
 
 	@MockitoBean EmailSender emailSender;
 
@@ -115,6 +120,11 @@ class PasswordResetApiTest {
 
 		RefreshToken afterToken = refreshTokenRepository.findById(active.getId()).orElseThrow();
 		assertThat(afterToken.getRevokedAt()).isNotNull();
+
+		// FR-USER-04: lịch sử hoạt động cơ bản mà Admin xem được.
+		assertThat(activityRepository.findByUserId(user.getId(), Pageable.unpaged()))
+				.extracting(AccountActivity::getAction)
+				.containsExactly(AccountActivityType.PASSWORD_RESET);
 	}
 
 	@Test
