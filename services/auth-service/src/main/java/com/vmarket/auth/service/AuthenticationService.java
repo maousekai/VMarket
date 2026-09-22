@@ -12,13 +12,12 @@ import org.springframework.util.StringUtils;
 
 import com.vmarket.auth.config.AuthJwtProperties;
 import com.vmarket.auth.dto.LoginRequest;
-import com.vmarket.auth.dto.RefreshRequest;
-import com.vmarket.auth.dto.TokenResponse;
 import com.vmarket.auth.entity.RefreshToken;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.exception.ApiException;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.UserRepository;
+import com.vmarket.auth.security.DeviceMeta;
 import com.vmarket.auth.security.OpaqueTokenCodec;
 
 import lombok.RequiredArgsConstructor;
@@ -64,7 +63,7 @@ public class AuthenticationService {
 	private final TokenIssuer tokenIssuer;
 
 	@Transactional(noRollbackFor = ApiException.class)
-	public TokenResponse login(LoginRequest request) {
+	public TokenIssuer.IssuedTokens login(LoginRequest request, DeviceMeta device) {
 		String email = request.email().trim().toLowerCase(Locale.ROOT);
 		User user = userRepository.findByEmail(email).orElse(null);
 
@@ -92,12 +91,12 @@ public class AuthenticationService {
 			userRepository.clearLock(user.getId());
 		}
 		log.info("Đăng nhập thành công userId={}", user.getId());
-		return tokenIssuer.issue(user);
+		return tokenIssuer.issue(user, device);
 	}
 
 	@Transactional(noRollbackFor = ApiException.class)
-	public TokenResponse refresh(RefreshRequest request) {
-		String hash = tokenCodec.hash(request.refreshToken());
+	public TokenIssuer.IssuedTokens refresh(String rawRefreshToken, DeviceMeta device) {
+		String hash = tokenCodec.hash(rawRefreshToken);
 		RefreshToken token = refreshTokenRepository.findByTokenHash(hash)
 				.orElseThrow(() -> new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
 						"Refresh token không hợp lệ"));
@@ -107,7 +106,12 @@ public class AuthenticationService {
 			boolean withinGrace = token.getReplacedBy() != null
 					&& token.getRevokedAt().isAfter(now.minus(ROTATION_GRACE));
 			if (withinGrace) {
-				throw new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
+				// Thua một request /refresh khác đang chạy song song với CÙNG token cũ
+				// (2 tab, request trùng lặp...) — token thay thế đã tồn tại và hợp lệ, đây
+				// KHÔNG phải dùng lại token đã chết. Dùng mã riêng để AuthController biết
+				// không được xoá cookie hiện tại (cookie đó có thể đã là token mới của
+				// request thắng cuộc — xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống).
+				throw new ApiException("REFRESH_TOKEN_ROTATION_CONFLICT", HttpStatus.UNAUTHORIZED,
 						"Refresh token đã được dùng, hãy dùng token mới nhất");
 			}
 			int revoked = refreshTokenRepository.revokeAllActiveByUserId(token.getUserId(), now);
@@ -137,15 +141,21 @@ public class AuthenticationService {
 		replacement.setUserId(user.getId());
 		replacement.setTokenHash(tokenCodec.hash(rawNew));
 		replacement.setExpiresAt(now.plus(jwtProps.getRefreshTtl()));
+		replacement.setUserAgent(device.userAgent());
+		replacement.setIpAddress(device.ipAddress());
+		replacement.setLastUsedAt(now);
 		refreshTokenRepository.save(replacement);
 
 		if (refreshTokenRepository.revokeIfActive(token.getId(), now, replacement.getId()) == 0) {
+			// SELECT ở trên còn thấy token active, nhưng một request /refresh khác đã
+			// thu hồi nó trước khi UPDATE này chạy (race y hệt nhánh withinGrace ở trên,
+			// chỉ khác điểm phát hiện) — cùng mã lỗi để AuthController không xoá cookie.
 			refreshTokenRepository.delete(replacement);
-			throw new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
+			throw new ApiException("REFRESH_TOKEN_ROTATION_CONFLICT", HttpStatus.UNAUTHORIZED,
 					"Refresh token không hợp lệ");
 		}
 
-		return tokenIssuer.responseFor(user, rawNew);
+		return new TokenIssuer.IssuedTokens(tokenIssuer.responseFor(user), rawNew);
 	}
 
 	// --- helpers -------------------------------------------------------------

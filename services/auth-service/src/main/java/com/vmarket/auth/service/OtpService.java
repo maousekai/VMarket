@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.auth.config.AuthOtpProperties;
 import com.vmarket.auth.dto.OtpRequestResponse;
-import com.vmarket.auth.dto.TokenResponse;
 import com.vmarket.auth.email.EmailSender;
 import com.vmarket.auth.email.OtpEmailContent;
 import com.vmarket.auth.entity.EmailOtp;
@@ -26,6 +25,7 @@ import com.vmarket.auth.repository.EmailOtpRepository;
 import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
 import com.vmarket.auth.repository.UserRoleRepository;
+import com.vmarket.auth.security.DeviceMeta;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -100,7 +100,7 @@ public class OtpService {
 
 	// noRollbackFor: tăng bộ đếm sai / vô hiệu hoá mã (ghi rồi ném) phải được commit.
 	@Transactional(noRollbackFor = ApiException.class)
-	public TokenResponse verifyOtp(String rawEmail, String code) {
+	public TokenIssuer.IssuedTokens verifyOtp(String rawEmail, String code, DeviceMeta device) {
 		String email = normalize(rawEmail);
 		Instant now = Instant.now();
 
@@ -153,7 +153,7 @@ public class OtpService {
 				.orElseGet(() -> createOrGetVerifiedUser(email));
 
 		log.info("Xác thực email thành công userId={}", user.getId());
-		return tokenIssuer.issue(user);
+		return tokenIssuer.issue(user, device);
 	}
 
 	@Transactional

@@ -14,6 +14,7 @@ import com.vmarket.auth.entity.UserRole;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRoleRepository;
+import com.vmarket.auth.security.DeviceMeta;
 import com.vmarket.auth.security.JwtService;
 import com.vmarket.auth.security.OpaqueTokenCodec;
 
@@ -39,29 +40,38 @@ public class TokenIssuer {
 	private final OpaqueTokenCodec tokenCodec;
 	private final AuthJwtProperties jwtProps;
 
+	/**
+	 * Kết quả phát token: {@link TokenResponse} trả về client (không chứa refresh
+	 * token) + raw refresh token để caller gắn vào cookie HttpOnly (PBL6-46).
+	 */
+	public record IssuedTokens(TokenResponse body, String rawRefreshToken) {
+	}
+
 	/** Sinh MỘT refresh token mới + access token, trả về response (đăng nhập / OTP). */
-	public TokenResponse issue(User user) {
+	public IssuedTokens issue(User user, DeviceMeta device) {
 		String rawRefresh = tokenCodec.generate();
+		Instant now = Instant.now();
 		RefreshToken token = new RefreshToken();
 		token.setUserId(user.getId());
 		token.setTokenHash(tokenCodec.hash(rawRefresh));
-		token.setExpiresAt(Instant.now().plus(jwtProps.getRefreshTtl()));
+		token.setExpiresAt(now.plus(jwtProps.getRefreshTtl()));
+		token.setUserAgent(device.userAgent());
+		token.setIpAddress(device.ipAddress());
+		token.setLastUsedAt(now);
 		refreshTokenRepository.save(token);
 
 		log.debug("Phát token cho userId={}", user.getId());
-		return responseFor(user, rawRefresh);
+		return new IssuedTokens(responseFor(user), rawRefresh);
 	}
 
 	/**
-	 * Chỉ dựng {@link TokenResponse} từ một refresh token đã được caller persist
-	 * (dùng cho luồng xoay vòng {@code /refresh}). KHÔNG tạo thêm dòng
-	 * {@code refresh_tokens}.
+	 * Chỉ dựng {@link TokenResponse} cho một user đã có refresh token hợp lệ (dùng
+	 * cho luồng xoay vòng {@code /refresh} — caller tự quản lý dòng {@code refresh_tokens}).
 	 */
-	public TokenResponse responseFor(User user, String rawRefreshToken) {
+	public TokenResponse responseFor(User user) {
 		List<String> roles = roleNamesOf(user.getId());
 		return TokenResponse.bearer(
 				jwtService.createAccessToken(user, roles),
-				rawRefreshToken,
 				jwtService.getAccessTtlSeconds(),
 				AccountStatus.of(user.isEmailVerified()),
 				roles);

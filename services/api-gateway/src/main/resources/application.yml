@@ -92,6 +92,12 @@ app:
       - /api/auth/login
       - /api/auth/register
       - /api/auth/refresh
+      # Quan ly phien (PBL6-46) - dinh danh qua cookie refresh_token, KHONG qua
+      # Authorization Bearer -> phai public o gateway giong /login,/refresh
+      # (auth-service tu xac thuc lai bang chinh cookie nay).
+      - /api/auth/logout
+      - /api/auth/sessions
+      - /api/auth/sessions/**
       - /api/auth/health
       - /actuator/**
       - /v3/api-docs/**
@@ -103,6 +109,16 @@ app:
     public-get-paths:
       - /api/products/**
       - /api/shops/**
+    # RBAC theo vai trò (PBL6-46) - route protected (da qua buoc xac thuc JWT o
+    # tren) con doi hoi it nhat MOT vai trò trong danh sach. Chua co route
+    # admin-only thuc te nao trong he thong tinh den luc nay -> de trong, cac
+    # service sau nay tu khai bao rule khi co endpoint can gioi han vai tro,
+    # theo mau:
+    #   role-required-paths:
+    #     - pattern: /api/shops/*/approve
+    #       methods: [POST]
+    #       roles: [ADMIN]
+    role-required-paths: []
   # Rate limit co ban (fixed-window theo IP). Xem RateLimitProperties.
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}

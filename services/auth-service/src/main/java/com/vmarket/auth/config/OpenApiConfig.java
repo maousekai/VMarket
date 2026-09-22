@@ -8,6 +8,8 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 
+import com.vmarket.auth.security.RefreshTokenCookieService;
+
 /**
  * Metadata OpenAPI/Swagger cho auth-service. Swagger UI: {@code /swagger-ui.html},
  * spec JSON: {@code /v3/api-docs}. Từng subtask FR-AUTH-* sẽ bổ sung annotation
@@ -32,6 +34,12 @@ public class OpenApiConfig {
 						.addSecuritySchemes("internalApiKey", new SecurityScheme()
 								.type(SecurityScheme.Type.APIKEY)
 								.in(SecurityScheme.In.HEADER)
-								.name(InternalApiProperties.HEADER)));
+								.name(InternalApiProperties.HEADER))
+						// Cookie HttpOnly refresh_token (PBL6-46) — /refresh và các endpoint quản lý
+						// phiên định danh qua cookie này, không qua Bearer.
+						.addSecuritySchemes("cookieAuth", new SecurityScheme()
+								.type(SecurityScheme.Type.APIKEY)
+								.in(SecurityScheme.In.COOKIE)
+								.name(RefreshTokenCookieService.COOKIE_NAME)));
 	}
 }

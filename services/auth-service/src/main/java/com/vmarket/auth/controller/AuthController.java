@@ -7,21 +7,28 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.vmarket.auth.config.AuthJwtProperties;
 import com.vmarket.auth.dto.ErrorResponse;
 import com.vmarket.auth.dto.LoginRequest;
-import com.vmarket.auth.dto.RefreshRequest;
 import com.vmarket.auth.dto.RegisterRequest;
 import com.vmarket.auth.dto.RegisterResponse;
 import com.vmarket.auth.dto.TokenResponse;
+import com.vmarket.auth.exception.ApiException;
+import com.vmarket.auth.security.DeviceMetaResolver;
+import com.vmarket.auth.security.RefreshTokenCookieService;
 import com.vmarket.auth.service.AuthenticationService;
 import com.vmarket.auth.service.RegistrationService;
+import com.vmarket.auth.service.TokenIssuer;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -33,6 +40,9 @@ public class AuthController {
 
 	private final RegistrationService registrationService;
 	private final AuthenticationService authenticationService;
+	private final DeviceMetaResolver deviceMetaResolver;
+	private final RefreshTokenCookieService refreshCookieService;
+	private final AuthJwtProperties jwtProps;
 
 	@Operation(summary = "Đăng ký tài khoản (FR-AUTH-01)",
 			description = "Tạo tài khoản mới với vai trò BUYER. Tài khoản ở trạng thái PENDING "
@@ -56,9 +66,10 @@ public class AuthController {
 	}
 
 	@Operation(summary = "Đăng nhập (FR-AUTH-02)",
-			description = "Xác thực email + mật khẩu, trả về access token (JWT) + refresh token. "
-					+ "Sai 5 lần liên tiếp → khoá tài khoản 15 phút. User chưa xác thực email vẫn "
-					+ "đăng nhập được (status = PENDING).")
+			description = "Xác thực email + mật khẩu, trả về access token (JWT). Refresh token được gắn "
+					+ "vào cookie HttpOnly `refresh_token` (không nằm trong body — PBL6-46). Sai 5 lần "
+					+ "liên tiếp → khoá tài khoản 15 phút. User chưa xác thực email vẫn đăng nhập được "
+					+ "(status = PENDING).")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Đăng nhập thành công",
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
@@ -70,22 +81,52 @@ public class AuthController {
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PostMapping("/login")
-	public TokenResponse login(@Valid @RequestBody LoginRequest request) {
-		return authenticationService.login(request);
+	public TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest,
+			HttpServletResponse httpResponse) {
+		TokenIssuer.IssuedTokens issued = authenticationService.login(request, deviceMetaResolver.resolve(httpRequest));
+		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
+		return issued.body();
 	}
 
 	@Operation(summary = "Làm mới access token (FR-AUTH-02)",
-			description = "Dùng refresh token để lấy cặp token mới (xoay vòng). Refresh token cũ "
-					+ "bị thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi.")
+			description = "Dùng refresh token trong cookie HttpOnly `refresh_token` để lấy access token "
+					+ "mới (xoay vòng — cookie được ghi đè bằng refresh token mới). Refresh token cũ bị "
+					+ "thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi. Lỗi do token "
+					+ "thật sự chết (hết hạn/reused/tài khoản khoá) đều xoá luôn cookie hiện tại — trình "
+					+ "duyệt không tiếp tục gửi lại một token không còn dùng được. Riêng "
+					+ "REFRESH_TOKEN_ROTATION_CONFLICT (thua một request /refresh khác chạy song song "
+					+ "cùng token cũ) KHÔNG xoá cookie — request thắng cuộc có thể đã ghi cookie mới hợp "
+					+ "lệ, xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Cấp token mới thành công",
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
 			@ApiResponse(responseCode = "401",
-					description = "INVALID_REFRESH_TOKEN / REFRESH_TOKEN_EXPIRED / REFRESH_TOKEN_REUSED",
+					description = "REFRESH_TOKEN_MISSING / INVALID_REFRESH_TOKEN / REFRESH_TOKEN_EXPIRED / "
+							+ "REFRESH_TOKEN_REUSED / REFRESH_TOKEN_ROTATION_CONFLICT",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "423", description = "Tài khoản đang bị khoá tạm (ACCOUNT_LOCKED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
+	@SecurityRequirement(name = "cookieAuth")
 	@PostMapping("/refresh")
-	public TokenResponse refresh(@Valid @RequestBody RefreshRequest request) {
-		return authenticationService.refresh(request);
+	public TokenResponse refresh(HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+		String rawRefreshToken = refreshCookieService.read(httpRequest)
+				.orElseThrow(() -> new ApiException("REFRESH_TOKEN_MISSING", HttpStatus.UNAUTHORIZED,
+						"Thiếu cookie refresh_token"));
+		TokenIssuer.IssuedTokens issued;
+		try {
+			issued = authenticationService.refresh(rawRefreshToken, deviceMetaResolver.resolve(httpRequest));
+		} catch (ApiException ex) {
+			// Token hỏng/hết hạn/bị đánh cắp/tài khoản bị khoá: xoá cookie ngay, đừng
+			// để client tiếp tục gửi lại một refresh token không còn dùng được.
+			// TRỪ rotation conflict (thua race /refresh song song): cookie hiện tại có
+			// thể đã là token mới hợp lệ do request thắng cuộc ghi — không được xoá.
+			if (!"REFRESH_TOKEN_ROTATION_CONFLICT".equals(ex.getCode())) {
+				refreshCookieService.clear(httpResponse);
+			}
+			throw ex;
+		}
+		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
+		return issued.body();
 	}
 }

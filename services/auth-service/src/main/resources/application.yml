@@ -57,6 +57,11 @@ auth:
   # ngay luc khoi dong (gia tri gia cho local o application-dev.yml).
   internal:
     api-key: ${INTERNAL_API_KEY}
+  # Cookie chua refresh token (PBL6-46). secure=true mac dinh (chi gui qua HTTPS) -
+  # dev override xuong false o application-dev.yml vi local chay HTTP thuan.
+  refresh-cookie:
+    secure: ${AUTH_REFRESH_COOKIE_SECURE:true}
+    same-site: ${AUTH_REFRESH_COOKIE_SAMESITE:Lax}
   # Gui email OTP. provider=log (mac dinh) chi ghi log, khong gui that -> chay
   # local/CI khong can API key. Doi sang 'brevo' + BREVO_API_KEY de gui that.
   email:
