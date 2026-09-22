@@ -13,9 +13,12 @@ import com.vmarket.auth.dto.ForgotPasswordResponse;
 import com.vmarket.auth.dto.MessageResponse;
 import com.vmarket.auth.email.EmailSender;
 import com.vmarket.auth.email.PasswordResetEmailContent;
+import com.vmarket.auth.entity.AccountActivity;
+import com.vmarket.auth.entity.AccountActivityType;
 import com.vmarket.auth.entity.PasswordResetToken;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.exception.ApiException;
+import com.vmarket.auth.repository.AccountActivityRepository;
 import com.vmarket.auth.repository.PasswordResetTokenRepository;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.UserRepository;
@@ -49,6 +52,7 @@ public class PasswordResetService {
 	private final EmailSender emailSender;
 	private final AuthPasswordResetProperties props;
 	private final PasswordResetTokenIssuer tokenIssuer;
+	private final AccountActivityRepository activityRepository;
 
 	/**
 	 * KHÔNG {@code @Transactional} ở mức method: {@link PasswordResetTokenIssuer#issue}
@@ -83,13 +87,20 @@ public class PasswordResetService {
 		return response();
 	}
 
-	// noRollbackFor: tăng bộ đếm sai / vô hiệu hoá mã (ghi rồi ném) phải được commit.
+	/**
+	 * noRollbackFor: tăng bộ đếm sai / vô hiệu hoá mã (ghi rồi ném) phải được commit.
+	 *
+	 * <p>Nạp user bằng {@code findByEmailForUpdate} và ghi mật khẩu bằng UPDATE đúng các
+	 * cột cần đổi: Admin khoá (FR-USER-04) phải chờ luồng này commit, và không còn
+	 * {@code save(user)} cả entity để ghi đè {@code suspended_*} bằng ảnh chụp cũ
+	 * (review PR #22, M1). Đặt lại mật khẩu vẫn KHÔNG gỡ khoá của Admin — chỉ gỡ khoá tạm.
+	 */
 	@Transactional(noRollbackFor = ApiException.class)
 	public MessageResponse resetPassword(String rawEmail, String code, String newPassword) {
 		String email = normalize(rawEmail);
 		Instant now = Instant.now();
 
-		User user = userRepository.findByEmail(email).orElse(null);
+		User user = userRepository.findByEmailForUpdate(email).orElse(null);
 		if (user == null) {
 			passwordEncoder.matches(code, DUMMY_HASH);
 			throw notFound();
@@ -140,12 +151,8 @@ public class PasswordResetService {
 			throw current.getConsumedAt() != null ? alreadyUsed() : tooManyAttempts();
 		}
 
-		user.setPasswordHash(passwordEncoder.encode(newPassword));
-		if (!user.isEmailVerified()) {
-			user.setEmailVerified(true);
-		}
-		userRepository.save(user);
-		userRepository.clearLock(user.getId());
+		userRepository.resetPasswordAndClearLock(user.getId(), passwordEncoder.encode(newPassword), now);
+		activityRepository.save(AccountActivity.of(user.getId(), AccountActivityType.PASSWORD_RESET, now));
 		int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
 
 		log.info("Đặt lại mật khẩu thành công userId={}, thu hồi {} phiên", user.getId(), revoked);

@@ -8,8 +8,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.vmarket.auth.entity.AccountActivity;
+import com.vmarket.auth.entity.AccountActivityType;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.exception.ApiException;
+import com.vmarket.auth.repository.AccountActivityRepository;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.UserRepository;
 
@@ -40,6 +43,12 @@ import lombok.extern.slf4j.Slf4j;
  * </ul>
  *
  * <p>{@code noRollbackFor = ApiException}: nhánh "tăng bộ đếm sai rồi ném" phải commit.
+ *
+ * <p><b>Chạy lần lượt với Admin khoá (FR-USER-04).</b> Nạp user bằng
+ * {@code findByIdForUpdate} (khoá dòng tới khi commit) và ghi mật khẩu bằng UPDATE đúng
+ * các cột cần đổi. Trước đây đọc thường rồi {@code save(user)}: Admin khoá xen vào lúc
+ * BCrypt đang chạy thì entity cũ ({@code suspended_*} = null) ghi đè mất lần khoá vừa
+ * commit (review PR #22, M1).
  */
 @Slf4j
 @Service
@@ -50,10 +59,11 @@ public class PasswordChangeService {
 	private final RefreshTokenRepository refreshTokenRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final AuthenticationService authenticationService;
+	private final AccountActivityRepository activityRepository;
 
 	@Transactional(noRollbackFor = ApiException.class)
 	public void changePassword(String userId, String currentPassword, String newPassword) {
-		User user = userRepository.findById(userId)
+		User user = userRepository.findByIdForUpdate(userId)
 				.orElseThrow(AccountAdminService::userNotFound);
 		Instant now = Instant.now();
 
@@ -89,10 +99,8 @@ public class PasswordChangeService {
 					"Mật khẩu mới phải khác mật khẩu hiện tại");
 		}
 
-		user.setPasswordHash(passwordEncoder.encode(newPassword));
-		user.setFailedLoginAttempts(0);
-		user.setLockedUntil(null);
-		userRepository.save(user);
+		userRepository.updatePasswordAndClearLock(userId, passwordEncoder.encode(newPassword), now);
+		activityRepository.save(AccountActivity.of(userId, AccountActivityType.PASSWORD_CHANGED, now));
 
 		int revoked = refreshTokenRepository.revokeAllActiveByUserId(userId, now);
 		log.info("Đổi mật khẩu thành công userId={}; thu hồi {} phiên", userId, revoked);

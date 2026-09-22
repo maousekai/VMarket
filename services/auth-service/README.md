@@ -157,10 +157,15 @@ lệ và **mọi** request nội bộ trả 401. `InternalApiContextPathTest` kh
 | Method & path | Mô tả |
 | --- | --- |
 | `PUT /internal/users/{id}/password` | FR-USER-03 — đổi mật khẩu `{currentPassword, newPassword}`. 204 / 400 (`VALIDATION_ERROR`, `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED`, `PASSWORD_NOT_SET`) / 404 `USER_NOT_FOUND` / 423 (`ACCOUNT_LOCKED`, `ACCOUNT_SUSPENDED`) |
-| `GET /internal/users/{id}` | FR-USER-04 — xem tài khoản (email, username, roles, trạng thái khoá). 200 / 404 |
-| `POST /internal/users/search` | FR-USER-04 — `{q, status, userIds, page, size}`: `status` VÀ (`q` khớp email/username HOẶC id ∈ `userIds`). 200 / 400 |
-| `PUT /internal/users/{id}/suspension` | FR-USER-04 — Admin khoá `{reason, actorId}`; thu hồi mọi refresh token; idempotent. 200 / 400 `CANNOT_LOCK_SELF` / 404 |
-| `DELETE /internal/users/{id}/suspension` | FR-USER-04 — mở khoá (gỡ cả khoá tạm do đăng nhập sai). 200 / 404 |
+| `GET /internal/users/{id}` | FR-USER-04 — xem tài khoản (email, username, roles, trạng thái khoá). 200 / 403 / 404 |
+| `POST /internal/users/search` | FR-USER-04 — `{q, status, userIds, page, size}`: `status` VÀ (`q` khớp email/username HOẶC id ∈ `userIds`). 200 / 400 / 403 |
+| `PUT /internal/users/{id}/suspension` | FR-USER-04 — Admin khoá `{reason}`; thu hồi mọi refresh token; idempotent; ghi lịch sử `SUSPENDED`. 200 / 400 `CANNOT_LOCK_SELF` / 403 / 404 |
+| `DELETE /internal/users/{id}/suspension` | FR-USER-04 — mở khoá (gỡ cả khoá tạm do đăng nhập sai); ghi lịch sử `UNSUSPENDED`. 200 / 403 / 404 |
+| `GET /internal/users/{id}/activities?page=&size=` | FR-USER-04 — lịch sử hoạt động cơ bản, mới nhất trước (`size` ≤ 100). 200 / 400 / 403 / 404 |
+
+Mọi API FR-USER-04 bắt buộc header **`X-Actor-Id`** = userId của Admin thực hiện (thiếu →
+400). auth-service kiểm tra lại **theo CSDL** rằng người đó còn tồn tại, không bị Admin
+khoá và còn vai trò ADMIN — sai một trong ba → **403 `ADMIN_ACCESS_REVOKED`** (xem bên dưới).
 
 Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "details": [...] } }`.
 Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 (đều cùng format trên).
@@ -226,8 +231,30 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - Mở khoá gỡ luôn khoá tạm do đăng nhập sai: người nhờ Admin mở khoá mong vào được ngay.
 - Admin không tự khoá được mình (`400 CANNOT_LOCK_SELF`) — khoá nhầm Admin cuối cùng thì
   không còn ai mở khoá được ngoài sửa tay CSDL.
-- **V7 chứ không phải V6:** V6 do PBL6-46 (quản lý phiên, PR #17) giữ. Merge PBL6-46
-  trước; nếu PBL6-13 merge trước thì phải đổi số một trong hai migration.
+- **Kiểm tra Admin thực hiện theo CSDL, không theo access token.** Token có thể cũ tới 15
+  phút: Admin vừa bị khoá / bị thu hồi vai trò vẫn cầm token ghi `ADMIN`. Trước đây Admin
+  A bị khoá dùng token cũ gọi mở khoá chính mình là trở lại ACTIVE vĩnh viễn (review PR
+  #22, M2). Nay mọi thao tác quản trị trả `403 ADMIN_ACCESS_REVOKED` nếu actor không còn là
+  Admin đang hoạt động; riêng mở khoá chính mình còn kiểm tra lại sau khi khoá dòng user
+  (Admin khác khoá A commit xen vào đúng lúc đó vẫn bị chặn).
+- **Khoá / mở khoá chạy lần lượt với các luồng khác trên cùng user (review PR #22, M1).**
+  Đăng nhập, xác thực OTP, refresh, đổi mật khẩu, đặt lại mật khẩu và Admin khoá / mở khoá
+  đều nạp user bằng `SELECT ... FOR UPDATE` (`findByIdForUpdate` / `findByEmailForUpdate`)
+  làm lần nạp đầu tiên trong transaction. Trước đây, luồng đọc "chưa bị khoá" rồi Admin
+  khoá commit xen vào thì: đổi / đặt lại mật khẩu `save(user)` bằng entity cũ → **xoá mất
+  lần khoá**; đăng nhập / OTP lưu một refresh token **còn hiệu lực sau khi khoá**. Đổi / đặt
+  lại mật khẩu giờ còn ghi bằng UPDATE đúng cột (`updatePasswordAndClearLock`,
+  `resetPasswordAndClearLock`), không lưu cả entity. Đánh đổi: đăng nhập song song của
+  **cùng một** tài khoản chạy lần lượt (chờ nhau một lượt BCrypt) — chấp nhận được.
+- **Lịch sử hoạt động cơ bản (migration V8, bảng `account_activities`).** Mỗi sự kiện làm
+  đổi trạng thái tài khoản ghi một dòng trong **cùng transaction** với thay đổi đó:
+  `SUSPENDED` (Admin + lý do), `UNSUSPENDED` (Admin), `LOGIN_LOCKED` (khoá tạm do sai 5
+  lần), `PASSWORD_CHANGED`, `PASSWORD_RESET`. `users.suspended_*` chỉ là trạng thái hiện
+  tại — mở khoá xoá chúng, nhưng lần khoá (ai, lúc nào, lý do) vẫn nằm trong lịch sử (review
+  PR #22, M3). Đăng nhập thành công **không** ghi: quá dày, không giúp xử lý vi phạm.
+- **V7, V8 chứ không phải V6:** V6 do PBL6-46 (quản lý phiên, PR #17) giữ. Merge PBL6-46
+  trước; nếu PBL6-13 merge trước thì DB đã chạy V7/V8 sẽ từ chối V6 "đến muộn" (Flyway
+  không bật `outOfOrder`) → phải đổi số migration chưa triển khai trước khi merge.
 
 **Giới hạn đã biết & đánh đổi có chủ đích (FR-USER-03 / FR-USER-04):**
 
@@ -263,6 +290,6 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - [ ] FR-AUTH-03 (Google OAuth 2.0) — chuyển backlog (PBL6-44 đổi phạm vi sang OTP)
 - [x] FR-AUTH-04 (PBL6-45): **Quên mật khẩu** (`/api/auth/password/*`, migration V5)
 - [x] PBL6-13 (FR-USER-03): API nội bộ `/internal/users/{id}/password` cho user-service đổi mật khẩu (không cần migration)
-- [x] PBL6-13 (FR-USER-04): API nội bộ Admin tìm kiếm / khoá / mở khoá tài khoản (migration V7)
+- [x] PBL6-13 (FR-USER-04): API nội bộ Admin tìm kiếm / khoá / mở khoá tài khoản / xem lịch sử hoạt động (migration V7, V8)
 - [ ] FR-AUTH-05/06 (PBL6-46): Phân quyền RBAC + quản lý phiên
 - [ ] PBL6-47: Testing, Swagger & PR review

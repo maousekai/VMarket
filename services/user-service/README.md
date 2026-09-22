@@ -43,6 +43,7 @@ Mọi endpoint **ghi dữ liệu** (POST/PUT/PATCH/DELETE) nhận thêm header t
 | GET | `/api/users/{userId}` | **[ADMIN]** Chi tiết một người dùng |
 | PUT | `/api/users/{userId}/lock` | **[ADMIN]** Khoá tài khoản, body `{ "reason" }` |
 | PUT | `/api/users/{userId}/unlock` | **[ADMIN]** Mở khoá tài khoản |
+| GET | `/api/users/{userId}/activities?page=&size=` | **[ADMIN]** Lịch sử hoạt động cơ bản, mới nhất trước |
 
 Body `PUT /api/users/me`: `{ "fullName", "avatarUrl", "phone", "dateOfBirth", "gender" }`.
 
@@ -303,22 +304,42 @@ trạng thái thật. Đổi mật khẩu thì không: thử lại bằng mật 
 ## Admin quản lý người dùng (FR-USER-04)
 
 Mọi endpoint `/api/users` (trừ `/me/**` và `/health`) yêu cầu vai trò **ADMIN** trong claim
-`roles` (`@PreAuthorize`); BUYER / SELLER nhận `403 FORBIDDEN` và không có lời gọi nào sang
-auth-service.
+`roles`; BUYER / SELLER nhận `403 FORBIDDEN` và không có lời gọi nào sang auth-service.
+Vai trò được kiểm **ở `SecurityConfig`** (không chỉ `@PreAuthorize` ở controller):
+`IdempotencyFilter` chạy ngay sau tầng phân quyền và phát lại response đã lưu trước khi
+request tới controller — chỉ kiểm ở controller thì token mới chỉ còn BUYER gửi lại đúng
+`Idempotency-Key` của một lần khoá cũ vẫn nhận lại 200 kèm dữ liệu Admin (review PR #22, m1).
+
+**Access token còn hạn không đủ để làm Admin.** Token có thể cũ tới 15 phút, nên mọi lời
+gọi sang auth-service mang `X-Actor-Id` = `sub` của token, và auth-service kiểm tra lại
+theo CSDL rằng người đó chưa bị khoá và còn vai trò ADMIN. Sai → `403
+ADMIN_ACCESS_REVOKED` (được chuyển tiếp nguyên mã; mọi 401/403 khác từ auth-service vẫn là
+lỗi cấu hình → 502). Nhờ vậy Admin đã bị khoá không tự mở khoá được bằng token cũ (review
+PR #22, M2).
 
 - **Danh sách lấy từ auth-service** — nơi có mọi tài khoản — rồi ghép hồ sơ vào. Người
   chưa từng mở trang hồ sơ vẫn hiện (khi đó `fullName`/`phone`/`avatarUrl` = `null`).
 - **`q` khớp một phần email, username, họ tên hoặc SĐT** (không phân biệt hoa thường):
-  user-service tìm userId khớp họ tên/SĐT (tối đa 500, mới nhất trước) rồi gửi kèm sang
-  auth-service để lọc "email/username khớp HOẶC id thuộc danh sách". Phân trang diễn ra
-  một chỗ nên `totalElements` luôn đúng.
+  user-service tìm userId khớp họ tên/SĐT rồi gửi kèm sang auth-service để lọc
+  "email/username khớp HOẶC id thuộc danh sách". Phân trang diễn ra một chỗ nên
+  `totalElements` đúng.
+- **Khớp hơn 500 hồ sơ theo họ tên/SĐT → `400 SEARCH_TOO_BROAD`**, Admin gõ cụ thể hơn.
+  Trước đây danh sách bị cắt còn 500 hồ sơ mới nhất rồi mới lọc trạng thái: tài khoản
+  LOCKED cũ hơn bị bỏ sót mà `totalElements` vẫn trông như đầy đủ, có khi bằng 0 (review
+  PR #22, m2). Báo lỗi rõ ràng thay vì trả một kết quả thiếu.
 - `status`: `ACTIVE` | `LOCKED` (bị Admin khoá). Khoá tạm do đăng nhập sai không đổi
   `status` — xem trường `loginLockedUntil`. `size` tối đa 100.
 - **Khoá:** lý do bắt buộc; `lockedBy` lấy từ token của Admin (không nhận từ body). Người
   bị khoá không đăng nhập / refresh / xác thực OTP / đổi mật khẩu được (423
-  `ACCOUNT_SUSPENDED`), mọi refresh token bị thu hồi ngay. Access token còn hạn (≤ 15
-  phút) vẫn dùng được tới khi hết hạn — JWT không thu hồi được. Khoá lần hai giữ nguyên
-  lần khoá đầu. Không tự khoá mình được (`400 CANNOT_LOCK_SELF`).
+  `ACCOUNT_SUSPENDED`), mọi refresh token bị thu hồi ngay — kể cả token của một lần đăng
+  nhập đang chạy song song (auth-service khoá dòng user, xem README của auth-service).
+  Access token còn hạn (≤ 15 phút) vẫn dùng được cho endpoint của người dùng tới khi hết
+  hạn — JWT không thu hồi được — nhưng không dùng được cho thao tác quản trị. Khoá lần hai
+  giữ nguyên lần khoá đầu. Không tự khoá mình được (`400 CANNOT_LOCK_SELF`).
+- **Lịch sử hoạt động** (`GET /api/users/{userId}/activities`): `SUSPENDED` (kèm Admin và
+  lý do), `UNSUSPENDED` (kèm Admin), `LOGIN_LOCKED`, `PASSWORD_CHANGED`, `PASSWORD_RESET` —
+  lưu ở auth-service trong cùng transaction với thay đổi. Mở khoá không xoá lịch sử các lần
+  khoá trước (review PR #22, M3).
 - **Khoá của Admin khác khoá tạm do đăng nhập sai:** cột riêng, không tự hết hạn, không bị
   gỡ bởi đăng nhập đúng hay "Quên mật khẩu". **Mở khoá** gỡ cả hai.
 - `userId` trên path phải là ULID 26 ký tự, sai định dạng → 400 ngay, không gọi sang
@@ -354,8 +375,10 @@ xạ 401→502 / 5xx→502, và quan trọng nhất: timeout **kết nối** →
 / đứt giữa chừng → 504 `PASSWORD_CHANGE_UNKNOWN` với thông báo không có chữ "thử lại").
 Admin (`AdminUserApiTest`): 401 khi không có token, 403 với BUYER/SELLER mà không gọi
 auth-service, tìm theo họ tên/SĐT, ghép hồ sơ, lọc trạng thái + phân trang, `userId` sai
-định dạng → 400, `adminId` lấy từ token khi khoá, chuyển tiếp `USER_NOT_FOUND` /
-`CANNOT_LOCK_SELF`. `Idempotency-Key`: gửi lại không tạo bản trùng, phát lại đúng
+định dạng → 400, `adminId` lấy từ token và gửi sang auth-service ở mọi thao tác, chuyển
+tiếp `USER_NOT_FOUND` / `CANNOT_LOCK_SELF` / `ADMIN_ACCESS_REVOKED`, `Idempotency-Key` của
+lần khoá không được phát lại cho token chỉ còn BUYER, 501 hồ sơ khớp → `SEARCH_TOO_BROAD`
+(không gọi auth-service), lịch sử hoạt động. `Idempotency-Key`: gửi lại không tạo bản trùng, phát lại đúng
 response cũ, cùng key khác nội dung bị chặn, request lỗi không khoá key, key treo quá
 hạn được nhả, hai người dùng trùng key không che nhau.
 

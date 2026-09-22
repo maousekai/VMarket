@@ -29,7 +29,10 @@ import lombok.extern.slf4j.Slf4j;
  *       HTTP status và thông báo: đó là câu trả lời đúng cho người dùng.</li>
  *   <li>auth-service trả 401/403 → <b>không</b> chuyển tiếp. Đó là lỗi cấu hình
  *       {@code INTERNAL_API_KEY} giữa hai service; trả 401 cho client sẽ khiến frontend
- *       tưởng access token của người dùng hết hạn và đăng xuất họ. → 502.</li>
+ *       tưởng access token của người dùng hết hạn và đăng xuất họ. → 502.
+ *       <b>Ngoại lệ duy nhất:</b> 403 {@value #ADMIN_ACCESS_REVOKED} — auth-service xác
+ *       nhận Admin gọi vào đã bị khoá / mất vai trò ADMIN (FR-USER-04). Đó là câu trả lời
+ *       đúng cho người gọi nên chuyển tiếp nguyên 403.</li>
  *   <li>auth-service 5xx / body không đọc được → 502 {@code AUTH_SERVICE_ERROR}.</li>
  *   <li><b>Chưa tới được auth-service</b> (connection refused, sai host, hết thời gian
  *       <i>kết nối</i>) → 503 {@code AUTH_SERVICE_UNAVAILABLE}. Request chắc chắn chưa
@@ -61,6 +64,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class AuthServiceClient {
 
+	/** 403 duy nhất được chuyển tiếp — Admin gọi vào không còn quyền theo CSDL auth-service. */
+	public static final String ADMIN_ACCESS_REVOKED = "ADMIN_ACCESS_REVOKED";
+
 	private final RestClient restClient;
 
 	public AuthServiceClient(RestClient restClient) {
@@ -89,19 +95,25 @@ public class AuthServiceClient {
 				AuthServiceClient::passwordChangeUnknown);
 	}
 
+	// FR-USER-04: mọi lời gọi quản trị mang header X-Actor-Id = Admin thực hiện (lấy từ
+	// access token). auth-service kiểm tra lại theo CSDL rằng người đó còn là Admin đang
+	// hoạt động — token có thể cũ tới 15 phút (review PR #22, M2).
+
 	/** FR-USER-04. */
-	public AuthAccount getAccount(String userId) {
+	public AuthAccount getAccount(String userId, String actorId) {
 		return call(() -> restClient.get()
 				.uri("/internal/users/{userId}", userId)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
 				.retrieve()
 				.body(AuthAccount.class),
 				AuthServiceClient::timedOutSafeToRetry);
 	}
 
 	/** FR-USER-04. POST nhưng chỉ đọc (tiêu chí tìm kiếm nằm trong body). */
-	public AuthAccountPage searchAccounts(AuthAccountSearch search) {
+	public AuthAccountPage searchAccounts(AuthAccountSearch search, String actorId) {
 		return call(() -> restClient.post()
 				.uri("/internal/users/search")
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
 				.contentType(MediaType.APPLICATION_JSON)
 				.body(search)
 				.retrieve()
@@ -118,19 +130,31 @@ public class AuthServiceClient {
 	public AuthAccount suspend(String userId, String reason, String actorId) {
 		return call(() -> restClient.put()
 				.uri("/internal/users/{userId}/suspension", userId)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
 				.contentType(MediaType.APPLICATION_JSON)
-				.body(new SuspendBody(reason, actorId))
+				.body(new SuspendBody(reason))
 				.retrieve()
 				.body(AuthAccount.class),
 				AuthServiceClient::timedOutSafeToRetry);
 	}
 
 	/** FR-USER-04 — mở khoá. Cũng lặp lại được, xem {@link #suspend}. */
-	public AuthAccount unsuspend(String userId) {
+	public AuthAccount unsuspend(String userId, String actorId) {
 		return call(() -> restClient.delete()
 				.uri("/internal/users/{userId}/suspension", userId)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
 				.retrieve()
 				.body(AuthAccount.class),
+				AuthServiceClient::timedOutSafeToRetry);
+	}
+
+	/** FR-USER-04 — lịch sử hoạt động cơ bản, mới nhất trước. */
+	public AuthAccountActivityPage getActivities(String userId, int page, int size, String actorId) {
+		return call(() -> restClient.get()
+				.uri("/internal/users/{userId}/activities?page={page}&size={size}", userId, page, size)
+				.header(AuthServiceProperties.ACTOR_ID_HEADER, actorId)
+				.retrieve()
+				.body(AuthAccountActivityPage.class),
 				AuthServiceClient::timedOutSafeToRetry);
 	}
 
@@ -188,6 +212,12 @@ public class AuthServiceClient {
 
 	private ApiException translate(RestClientResponseException ex) {
 		HttpStatusCode status = ex.getStatusCode();
+		if (status.value() == 403) {
+			ErrorBody body = readErrorBody(ex);
+			if (body != null && body.error() != null && ADMIN_ACCESS_REVOKED.equals(body.error().code())) {
+				return new ApiException(ADMIN_ACCESS_REVOKED, HttpStatus.FORBIDDEN, body.error().message());
+			}
+		}
 		if (status.value() == 401 || status.value() == 403) {
 			log.error("auth-service từ chối khoá nội bộ (HTTP {}) — kiểm tra INTERNAL_API_KEY hai service có trùng không",
 					status.value());
@@ -253,7 +283,7 @@ public class AuthServiceClient {
 	record ChangePasswordBody(String currentPassword, String newPassword) {
 	}
 
-	record SuspendBody(String reason, String actorId) {
+	record SuspendBody(String reason) {
 	}
 
 	/** Body lỗi chuẩn của dự án {@code { "error": { "code", "message" } }}. */

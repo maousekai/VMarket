@@ -28,6 +28,13 @@ public class AuthServiceProperties {
 	/** Header mang khoá nội bộ — khớp {@code InternalApiProperties.HEADER} của auth-service. */
 	public static final String INTERNAL_API_KEY_HEADER = "X-Internal-Api-Key";
 
+	/**
+	 * userId của Admin thực hiện thao tác quản trị (FR-USER-04), lấy từ access token —
+	 * khớp {@code InternalAccountController.ACTOR_HEADER} của auth-service. auth-service
+	 * dùng nó để kiểm tra lại theo CSDL rằng người này vẫn là Admin đang hoạt động.
+	 */
+	public static final String ACTOR_ID_HEADER = "X-Actor-Id";
+
 	/** Vd {@code http://auth-service:8081} trong mạng Docker, {@code http://localhost:8081} khi chạy mvnw. */
 	@NotBlank
 	private String baseUrl;

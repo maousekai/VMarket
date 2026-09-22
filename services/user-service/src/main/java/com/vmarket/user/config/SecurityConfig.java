@@ -51,6 +51,17 @@ public class SecurityConfig {
 			"/swagger-ui.html",
 	};
 
+	/** Hồ sơ, sổ địa chỉ, đổi mật khẩu của CHÍNH người đăng nhập — mọi vai trò. */
+	private static final String[] SELF_PATHS = { "/api/users/me", "/api/users/me/**" };
+
+	/**
+	 * Phần còn lại dưới {@code /api/users} là API quản trị (FR-USER-04): {@code GET /api/users},
+	 * {@code /api/users/{userId}}, {@code .../lock}, {@code .../unlock}, {@code .../activities}.
+	 * Khai sau {@link #PUBLIC_PATHS} và {@link #SELF_PATHS} vì matcher đầu tiên khớp sẽ thắng
+	 * ({@code /api/users/*} cũng khớp {@code /me} và {@code /health}).
+	 */
+	private static final String[] ADMIN_PATHS = { "/api/users", "/api/users/*", "/api/users/*/**" };
+
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http,
 			CorsConfigurationSource corsConfigurationSource,
@@ -66,6 +77,13 @@ public class SecurityConfig {
 				.formLogin(form -> form.disable())
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(PUBLIC_PATHS).permitAll()
+						.requestMatchers(SELF_PATHS).authenticated()
+						// Vai trò ADMIN phải chặn ở ĐÂY, không chỉ ở @PreAuthorize của
+						// controller: IdempotencyFilter (ngay sau AuthorizationFilter) phát lại
+						// response đã lưu TRƯỚC khi request tới controller. Trước đây token mới
+						// chỉ còn BUYER gửi lại đúng Idempotency-Key của lần khoá bằng token
+						// ADMIN vẫn nhận lại 200 kèm email / lý do khoá (review PR #22, m1).
+						.requestMatchers(ADMIN_PATHS).hasRole("ADMIN")
 						.anyRequest().authenticated())
 				// Đặt trước filter đăng nhập bằng form/username-password để danh tính
 				// từ token có mặt trong SecurityContext khi tầng phân quyền chạy.

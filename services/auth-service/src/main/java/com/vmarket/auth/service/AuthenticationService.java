@@ -14,9 +14,12 @@ import com.vmarket.auth.config.AuthJwtProperties;
 import com.vmarket.auth.dto.LoginRequest;
 import com.vmarket.auth.dto.RefreshRequest;
 import com.vmarket.auth.dto.TokenResponse;
+import com.vmarket.auth.entity.AccountActivity;
+import com.vmarket.auth.entity.AccountActivityType;
 import com.vmarket.auth.entity.RefreshToken;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.exception.ApiException;
+import com.vmarket.auth.repository.AccountActivityRepository;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.UserRepository;
 import com.vmarket.auth.security.OpaqueTokenCodec;
@@ -41,6 +44,13 @@ import lombok.extern.slf4j.Slf4j;
  * <p>{@code noRollbackFor = ApiException}: các nhánh "ghi rồi ném" (tăng bộ đếm
  * sai, thu hồi phiên khi phát hiện reuse) phải được commit dù request kết thúc
  * bằng lỗi.
+ *
+ * <p><b>Khoá dòng user trước khi phát token (FR-USER-04).</b> Cả {@code login} lẫn
+ * {@code refresh} nạp user bằng {@code ...ForUpdate}, nên Admin khoá tài khoản không thể
+ * commit xen giữa lúc đọc "chưa bị khoá" và lúc lưu refresh token mới: hoặc Admin chờ
+ * luồng này commit rồi thu hồi luôn token vừa phát, hoặc luồng này chờ Admin rồi đọc
+ * được trạng thái đã khoá (review PR #22, M1). Đăng nhập song song của CÙNG một tài
+ * khoản vì thế chạy lần lượt — chấp nhận được, và bộ đếm sai cũng chính xác hơn.
  */
 @Slf4j
 @Service
@@ -62,11 +72,12 @@ public class AuthenticationService {
 	private final OpaqueTokenCodec tokenCodec;
 	private final AuthJwtProperties jwtProps;
 	private final TokenIssuer tokenIssuer;
+	private final AccountActivityRepository activityRepository;
 
 	@Transactional(noRollbackFor = ApiException.class)
 	public TokenResponse login(LoginRequest request) {
 		String email = request.email().trim().toLowerCase(Locale.ROOT);
-		User user = userRepository.findByEmail(email).orElse(null);
+		User user = userRepository.findByEmailForUpdate(email).orElse(null);
 
 		if (user == null || !StringUtils.hasText(user.getPasswordHash())) {
 			// So sánh giả để thời gian phản hồi giống nhánh có user (chống timing oracle).
@@ -121,12 +132,13 @@ public class AuthenticationService {
 					"Refresh token đã hết hạn");
 		}
 
-		User user = userRepository.findById(token.getUserId())
+		User user = userRepository.findByIdForUpdate(token.getUserId())
 				.orElseThrow(() -> new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
 						"Tài khoản không tồn tại"));
 		if (user.isSuspended()) {
-			// Admin khoá (FR-USER-04) đã thu hồi phiên lúc khoá; thu hồi lại ở đây phòng
-			// token phát ra trong khoảnh khắc song song với thao tác khoá.
+			// Admin khoá (FR-USER-04) đã thu hồi phiên lúc khoá. Thu hồi lại ở đây là lớp
+			// phòng thủ thứ hai (vd. dữ liệu sửa tay trong CSDL), không phải chỗ chặn
+			// chính: khoá dòng ở trên đã loại bỏ việc token phát ra xen giữa lúc khoá.
 			int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
 			log.warn("Refresh bị từ chối do tài khoản bị Admin khoá (userId={}), thu hồi {} phiên",
 					user.getId(), revoked);
@@ -180,6 +192,7 @@ public class AuthenticationService {
 		}
 		Instant lockedUntil = now.plus(LOCK_DURATION);
 		userRepository.lockUntil(user.getId(), lockedUntil);
+		activityRepository.save(AccountActivity.of(user.getId(), AccountActivityType.LOGIN_LOCKED, now));
 		int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
 		log.warn("Khoá tài khoản userId={} do {} lần đăng nhập sai; thu hồi {} phiên",
 				user.getId(), MAX_FAILED_ATTEMPTS, revoked);

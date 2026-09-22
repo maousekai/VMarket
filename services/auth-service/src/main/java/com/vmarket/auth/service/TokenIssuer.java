@@ -47,6 +47,12 @@ public class TokenIssuer {
 	 * mọi luồng đăng nhập — để luồng mới thêm sau (Google...) không thể quên kiểm tra.
 	 * Caller đã xác thực danh tính (mật khẩu/OTP đúng) trước khi gọi, nên người đoán
 	 * sai mật khẩu không dò được tài khoản nào đang bị khoá.
+	 *
+	 * <p><b>Hợp đồng với caller:</b> {@code user} phải được nạp bằng
+	 * {@code UserRepository.findByIdForUpdate} / {@code findByEmailForUpdate} trong CÙNG
+	 * transaction. Chỉ khi dòng user bị khoá tới lúc commit thì kiểm tra dưới đây mới còn
+	 * đúng lúc refresh token được lưu — nếu không, Admin có thể khoá + thu hồi phiên xen
+	 * vào giữa và token này thoát lưới (review PR #22, M1).
 	 */
 	public TokenResponse issue(User user) {
 		if (user.isSuspended()) {

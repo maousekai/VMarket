@@ -29,6 +29,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import com.vmarket.user.client.AuthAccount;
+import com.vmarket.user.client.AuthAccountActivityPage;
 import com.vmarket.user.client.AuthAccountPage;
 import com.vmarket.user.client.AuthAccountSearch;
 import com.vmarket.user.client.AuthServiceClient;
@@ -94,9 +95,10 @@ class AuthServiceClientTest {
 		server.expect(requestTo(ACCOUNT_URI))
 				.andExpect(method(HttpMethod.GET))
 				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(header(AuthServiceProperties.ACTOR_ID_HEADER, ADMIN))
 				.andRespond(withSuccess(ACCOUNT_JSON, MediaType.APPLICATION_JSON));
 
-		AuthAccount account = client.getAccount(USER);
+		AuthAccount account = client.getAccount(USER, ADMIN);
 
 		assertThat(account.userId()).isEqualTo(USER);
 		assertThat(account.suspended()).isTrue();
@@ -107,13 +109,14 @@ class AuthServiceClientTest {
 	}
 
 	@Test
-	void suspend_guiDungPathHeaderBody() {
+	void suspend_guiDungPathHeaderBody_adminDiTrongHeader() {
 		server.expect(requestTo(ACCOUNT_URI + "/suspension"))
 				.andExpect(method(HttpMethod.PUT))
 				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(header(AuthServiceProperties.ACTOR_ID_HEADER, ADMIN))
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 				.andExpect(jsonPath("$.reason").value("Spam"))
-				.andExpect(jsonPath("$.actorId").value(ADMIN))
+				.andExpect(jsonPath("$.actorId").doesNotExist())
 				.andRespond(withSuccess(ACCOUNT_JSON, MediaType.APPLICATION_JSON));
 
 		AuthAccount account = client.suspend(USER, "Spam", ADMIN);
@@ -123,13 +126,14 @@ class AuthServiceClientTest {
 	}
 
 	@Test
-	void unsuspend_dungMethodDelete() {
+	void unsuspend_dungMethodDelete_guiAdminThucHien() {
 		server.expect(requestTo(ACCOUNT_URI + "/suspension"))
 				.andExpect(method(HttpMethod.DELETE))
 				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(header(AuthServiceProperties.ACTOR_ID_HEADER, ADMIN))
 				.andRespond(withSuccess(ACCOUNT_JSON, MediaType.APPLICATION_JSON));
 
-		client.unsuspend(USER);
+		client.unsuspend(USER, ADMIN);
 
 		server.verify();
 	}
@@ -139,6 +143,7 @@ class AuthServiceClientTest {
 		server.expect(requestTo(BASE + "/internal/users/search"))
 				.andExpect(method(HttpMethod.POST))
 				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(header(AuthServiceProperties.ACTOR_ID_HEADER, ADMIN))
 				.andExpect(jsonPath("$.q").value("an"))
 				.andExpect(jsonPath("$.status").value("SUSPENDED"))
 				.andExpect(jsonPath("$.userIds[0]").value(USER))
@@ -147,12 +152,67 @@ class AuthServiceClientTest {
 				.andRespond(withSuccess("{\"items\":[" + ACCOUNT_JSON + "],\"page\":1,\"size\":10,"
 						+ "\"totalElements\":11,\"totalPages\":2}", MediaType.APPLICATION_JSON));
 
-		AuthAccountPage page = client.searchAccounts(new AuthAccountSearch("an", "SUSPENDED", List.of(USER), 1, 10));
+		AuthAccountPage page = client.searchAccounts(new AuthAccountSearch("an", "SUSPENDED", List.of(USER), 1, 10), ADMIN);
 
 		assertThat(page.items()).hasSize(1);
 		assertThat(page.totalElements()).isEqualTo(11);
 		assertThat(page.totalPages()).isEqualTo(2);
 		server.verify();
+	}
+
+	@Test
+	void getActivities_dungPathQueryHeader_docTrang() {
+		server.expect(requestTo(ACCOUNT_URI + "/activities?page=1&size=5"))
+				.andExpect(method(HttpMethod.GET))
+				.andExpect(header(AuthServiceProperties.INTERNAL_API_KEY_HEADER, KEY))
+				.andExpect(header(AuthServiceProperties.ACTOR_ID_HEADER, ADMIN))
+				.andRespond(withSuccess("""
+						{"items":[{"id":"01JBQ9YDX7K3M8N5P2R4T6V8D0","action":"SUSPENDED","actorId":"%s",
+						  "actorUsername":"admin","reason":"Spam","createdAt":"2026-09-14T10:00:00Z"}],
+						 "page":1,"size":5,"totalElements":6,"totalPages":2}
+						""".formatted(ADMIN), MediaType.APPLICATION_JSON));
+
+		AuthAccountActivityPage page = client.getActivities(USER, 1, 5, ADMIN);
+
+		assertThat(page.items()).hasSize(1);
+		assertThat(page.items().get(0).action()).isEqualTo("SUSPENDED");
+		assertThat(page.items().get(0).reason()).isEqualTo("Spam");
+		assertThat(page.items().get(0).createdAt()).isEqualTo(Instant.parse("2026-09-14T10:00:00Z"));
+		assertThat(page.totalElements()).isEqualTo(6);
+		server.verify();
+	}
+
+	/**
+	 * 403 {@code ADMIN_ACCESS_REVOKED}: auth-service xác nhận Admin gọi vào đã bị khoá /
+	 * mất vai trò (FR-USER-04, review PR #22 M2) — câu trả lời đúng cho người gọi, chuyển
+	 * tiếp nguyên 403 thay vì coi là lỗi cấu hình khoá nội bộ.
+	 */
+	@Test
+	void loi403AdminAccessRevoked_chuyenTiep403() {
+		server.expect(requestTo(ACCOUNT_URI + "/suspension"))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":{\"code\":\"ADMIN_ACCESS_REVOKED\",\"message\":\"Không còn quyền quản trị\"}}"));
+
+		assertThatThrownBy(() -> client.unsuspend(USER, ADMIN))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("ADMIN_ACCESS_REVOKED");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+					assertThat(ex.getMessage()).isEqualTo("Không còn quyền quản trị");
+				});
+	}
+
+	/** 403 khác (vd. khoá nội bộ không đủ quyền) vẫn là lỗi cấu hình → 502, không chuyển tiếp. */
+	@Test
+	void loi403Khac_van502() {
+		server.expect(requestTo(ACCOUNT_URI))
+				.andRespond(withStatus(HttpStatus.FORBIDDEN).contentType(MediaType.APPLICATION_JSON)
+						.body("{\"error\":{\"code\":\"FORBIDDEN\",\"message\":\"Không có quyền\"}}"));
+
+		assertThatThrownBy(() -> client.getAccount(USER, ADMIN))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("AUTH_SERVICE_ERROR");
+					assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+				});
 	}
 
 	/** Lỗi nghiệp vụ là câu trả lời đúng cho người dùng → chuyển tiếp nguyên mã. */

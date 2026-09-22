@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -17,13 +18,19 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.vmarket.auth.dto.internal.AccountActivityPageResponse;
+import com.vmarket.auth.dto.internal.AccountActivityResponse;
 import com.vmarket.auth.dto.internal.AccountPageResponse;
 import com.vmarket.auth.dto.internal.AccountResponse;
 import com.vmarket.auth.dto.internal.AccountSearchRequest;
+import com.vmarket.auth.entity.AccountActivity;
+import com.vmarket.auth.entity.AccountActivityType;
 import com.vmarket.auth.entity.Role;
+import com.vmarket.auth.entity.RoleName;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.entity.UserRole;
 import com.vmarket.auth.exception.ApiException;
+import com.vmarket.auth.repository.AccountActivityRepository;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
@@ -35,17 +42,32 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * FR-USER-04 — phần dữ liệu tài khoản của "Admin quản lý người dùng": tìm kiếm, xem,
- * khoá / mở khoá.
+ * khoá / mở khoá, xem lịch sử hoạt động cơ bản.
  *
  * <p>Endpoint công khai cho Admin nằm ở user-service; service này chỉ phục vụ qua API
  * nội bộ vì email, username, vai trò và trạng thái khoá đều thuộc CSDL auth-service
- * (database-per-service). Không kiểm tra vai trò ADMIN ở đây — việc đó là của
- * user-service trước khi gọi; ở đây chỉ tin lời gọi đã qua {@code INTERNAL_API_KEY}.
+ * (database-per-service).
+ *
+ * <p><b>Kiểm tra Admin thực hiện ở ĐÂY, theo CSDL.</b> user-service đã kiểm vai trò
+ * ADMIN trong access token, nhưng token đó có thể đã cũ tới 15 phút: Admin vừa bị khoá
+ * hay vừa bị thu hồi vai trò vẫn cầm token ghi {@code ADMIN}. Trước đây Admin A bị khoá
+ * dùng token cũ gọi mở khoá chính mình là trở lại ACTIVE vĩnh viễn (review PR #22, M2).
+ * Nay mọi thao tác nhận {@code actorId} và từ chối 403 {@code ADMIN_ACCESS_REVOKED} nếu
+ * actor không còn tồn tại, đang bị khoá, hoặc không còn vai trò ADMIN.
  *
  * <p><b>Khoá bởi Admin khác khoá tạm do đăng nhập sai:</b> dùng cột {@code suspended_*}
  * riêng, không tự hết hạn, không bị gỡ bởi đăng nhập đúng hay đặt lại mật khẩu. Khoá
  * xong thu hồi mọi refresh token (SRS FR-AUTH-06); access token đang còn sống vẫn dùng
- * được tới khi hết hạn (≤ 15 phút, NFR-SEC-02) vì JWT không thu hồi được.
+ * được tới khi hết hạn (≤ 15 phút, NFR-SEC-02) vì JWT không thu hồi được — nhưng không
+ * còn dùng được cho thao tác quản trị (xem trên).
+ *
+ * <p><b>Khoá / mở khoá chạy lần lượt với các luồng khác trên cùng user:</b> nạp user
+ * mục tiêu bằng {@code findByIdForUpdate}, cùng khoá dòng mà đăng nhập, OTP, refresh,
+ * đổi / đặt lại mật khẩu dùng (review PR #22, M1).
+ *
+ * <p><b>Lịch sử</b> ({@code account_activities}) ghi trong cùng transaction với thay
+ * đổi: khoá (ai, lý do), mở khoá (ai), cùng các sự kiện do luồng khác ghi — xem
+ * {@link AccountActivityType}. {@code suspended_*} chỉ là trạng thái hiện tại.
  */
 @Slf4j
 @Service
@@ -56,15 +78,17 @@ public class AccountAdminService {
 	private final RoleRepository roleRepository;
 	private final UserRoleRepository userRoleRepository;
 	private final RefreshTokenRepository refreshTokenRepository;
+	private final AccountActivityRepository activityRepository;
 
 	@Transactional(readOnly = true)
-	public AccountResponse get(String userId) {
-		User user = mustFind(userId);
-		return AccountResponse.from(user, rolesByUserId(List.of(userId)).getOrDefault(userId, List.of()), Instant.now());
+	public AccountResponse get(String userId, String actorId) {
+		requireAdmin(actorId);
+		return toResponse(mustFind(userId));
 	}
 
 	@Transactional(readOnly = true)
-	public AccountPageResponse search(AccountSearchRequest request) {
+	public AccountPageResponse search(AccountSearchRequest request, String actorId) {
+		requireAdmin(actorId);
 		// Mới tạo trước; id (ULID, tăng theo thời gian) làm khoá phụ để thứ tự ổn định
 		// giữa các trang khi nhiều tài khoản trùng created_at.
 		var pageable = PageRequest.of(request.page(), request.size(),
@@ -82,29 +106,68 @@ public class AccountAdminService {
 
 	@Transactional
 	public AccountResponse suspend(String userId, String reason, String actorId) {
+		requireAdmin(actorId);
 		if (userId.equals(actorId)) {
 			// Chặn Admin tự khoá mình: khoá nhầm tài khoản Admin cuối cùng thì không còn
 			// ai mở khoá được ngoài sửa tay CSDL.
 			throw new ApiException("CANNOT_LOCK_SELF", HttpStatus.BAD_REQUEST,
 					"Không thể tự khoá tài khoản của chính mình");
 		}
-		mustFind(userId);
+		mustFindForUpdate(userId);
 		Instant now = Instant.now();
-		if (userRepository.suspendIfActive(userId, now, reason.trim(), actorId) == 1) {
+		String trimmedReason = reason.trim();
+		if (userRepository.suspendIfActive(userId, now, trimmedReason, actorId) == 1) {
+			activityRepository.save(
+					AccountActivity.of(userId, AccountActivityType.SUSPENDED, actorId, trimmedReason, now));
 			int revoked = refreshTokenRepository.revokeAllActiveByUserId(userId, now);
 			log.warn("Admin {} khoá tài khoản userId={}; thu hồi {} phiên", actorId, userId, revoked);
 		} else {
 			log.info("Tài khoản userId={} đã bị khoá từ trước, giữ nguyên lần khoá đầu", userId);
 		}
-		return get(userId);
+		return toResponse(mustFind(userId));
 	}
 
 	@Transactional
-	public AccountResponse unsuspend(String userId) {
+	public AccountResponse unsuspend(String userId, String actorId) {
+		requireAdmin(actorId);
+		User target = mustFindForUpdate(userId);
+		boolean wasSuspended = target.isSuspended();
+		if (wasSuspended && userId.equals(actorId)) {
+			// requireAdmin đọc TRƯỚC khi khoá dòng: Admin khác khoá A commit đúng vào
+			// khoảng đó thì chỉ lần đọc dưới khoá này mới thấy. Không chặn ở đây thì A
+			// vẫn tự gỡ được lần khoá vừa xong.
+			throw adminAccessRevoked(actorId);
+		}
+		Instant now = Instant.now();
+		userRepository.unsuspend(userId, now);
+		if (wasSuspended) {
+			activityRepository.save(AccountActivity.of(userId, AccountActivityType.UNSUSPENDED, actorId, null, now));
+			log.info("Admin {} mở khoá tài khoản userId={}", actorId, userId);
+		} else {
+			log.info("Admin {} mở khoá tài khoản userId={} vốn không bị Admin khoá (chỉ gỡ khoá tạm nếu có)",
+					actorId, userId);
+		}
+		return toResponse(mustFind(userId));
+	}
+
+	/** Lịch sử hoạt động cơ bản của một tài khoản, mới nhất trước. */
+	@Transactional(readOnly = true)
+	public AccountActivityPageResponse activities(String userId, String actorId, int page, int size) {
+		requireAdmin(actorId);
 		mustFind(userId);
-		userRepository.unsuspend(userId, Instant.now());
-		log.info("Mở khoá tài khoản userId={}", userId);
-		return get(userId);
+		Page<AccountActivity> result = activityRepository.findByUserId(userId,
+				PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
+
+		Map<String, String> actorUsernames = usernamesOf(result.getContent().stream()
+				.map(AccountActivity::getActorId)
+				.filter(Objects::nonNull)
+				.distinct()
+				.toList());
+		List<AccountActivityResponse> items = result.getContent().stream()
+				.map(a -> AccountActivityResponse.from(a, a.getActorId() == null ? null : actorUsernames.get(a.getActorId())))
+				.toList();
+		return new AccountActivityPageResponse(items, result.getNumber(), result.getSize(),
+				result.getTotalElements(), result.getTotalPages());
 	}
 
 	static ApiException userNotFound() {
@@ -113,8 +176,36 @@ public class AccountAdminService {
 
 	// --- helpers -------------------------------------------------------------
 
+	/**
+	 * Actor phải tồn tại, không bị Admin khoá và còn vai trò ADMIN — theo CSDL, không theo
+	 * access token. Truy vấn vô hướng: không nạp entity nên không làm hỏng lần nạp
+	 * {@code findByIdForUpdate} sau đó trong cùng transaction.
+	 */
+	private void requireAdmin(String actorId) {
+		if (userRepository.countActiveWithRole(actorId, RoleName.ADMIN) == 0) {
+			throw adminAccessRevoked(actorId);
+		}
+	}
+
+	private static ApiException adminAccessRevoked(String actorId) {
+		log.warn("Từ chối thao tác quản trị: actorId={} không còn là Admin đang hoạt động", actorId);
+		return new ApiException("ADMIN_ACCESS_REVOKED", HttpStatus.FORBIDDEN,
+				"Tài khoản của bạn không còn quyền quản trị (đã bị khoá hoặc bị thu hồi vai trò ADMIN). "
+						+ "Vui lòng đăng nhập lại");
+	}
+
 	private User mustFind(String userId) {
 		return userRepository.findById(userId).orElseThrow(AccountAdminService::userNotFound);
+	}
+
+	/** Khoá dòng user mục tiêu tới khi commit — xem {@code UserRepository#findByIdForUpdate}. */
+	private User mustFindForUpdate(String userId) {
+		return userRepository.findByIdForUpdate(userId).orElseThrow(AccountAdminService::userNotFound);
+	}
+
+	private AccountResponse toResponse(User user) {
+		return AccountResponse.from(user, rolesByUserId(List.of(user.getId())).getOrDefault(user.getId(), List.of()),
+				Instant.now());
 	}
 
 	/**
@@ -171,5 +262,14 @@ public class AccountAdminService {
 		}
 		result.values().forEach(list -> list.sort(null));
 		return result;
+	}
+
+	/** userId → username cho các Admin xuất hiện trong một trang lịch sử (một truy vấn). */
+	private Map<String, String> usernamesOf(Collection<String> userIds) {
+		if (userIds.isEmpty()) {
+			return Map.of();
+		}
+		return userRepository.findAllById(userIds).stream()
+				.collect(Collectors.toMap(User::getId, User::getUsername));
 	}
 }
