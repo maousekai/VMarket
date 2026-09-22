@@ -137,7 +137,7 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | ------------------------ | -------------------------------------------------------- |
 | `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
 | `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse` + cookie `refresh_token`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
-| `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token bằng cookie `refresh_token` (xoay vòng). 200 / 401 (`REFRESH_TOKEN_MISSING`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`) |
+| `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token bằng cookie `refresh_token` (xoay vòng). 200 / 401 (`REFRESH_TOKEN_MISSING`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`, `REFRESH_TOKEN_ROTATION_CONFLICT`) |
 | `POST /api/auth/logout`  | FR-AUTH-06 — thu hồi phiên hiện tại (cookie `refresh_token`) + xoá cookie. 200 (`MessageResponse`, idempotent) |
 | `GET /api/auth/sessions` | FR-AUTH-06 — liệt kê phiên/thiết bị đang hoạt động của user gọi. 200 (`SessionSummary[]`) / 401 (`REFRESH_TOKEN_MISSING`, `SESSION_NOT_FOUND`) |
 | `DELETE /api/auth/sessions/{id}` | FR-AUTH-06 — thu hồi một phiên cụ thể (ownership-checked). 200 / 401 / 404 `TARGET_SESSION_NOT_FOUND` |
@@ -179,6 +179,9 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
   trong body JSON (PBL6-46), giảm rủi ro bị đánh cắp qua XSS so với lưu ở
   localStorage/biến JS. `/refresh` xoay vòng (đọc cookie, ghi đè cookie mới): token
   cũ bị thu hồi; **dùng lại token đã thu hồi → thu hồi toàn bộ phiên của user**.
+  Hai request `/refresh` chạy song song cùng token cũ (2 tab, request trùng lặp) →
+  request thua trả `401 REFRESH_TOKEN_ROTATION_CONFLICT` nhưng **không** xoá cookie
+  (cookie hiện tại có thể đã là token mới do request thắng cuộc ghi).
 - Khoá tài khoản: sai mật khẩu **5 lần liên tiếp** → khoá **15 phút** (423). Đăng nhập
   đúng → reset bộ đếm.
 - User `email_verified = false` **vẫn đăng nhập được**, response `status = PENDING`

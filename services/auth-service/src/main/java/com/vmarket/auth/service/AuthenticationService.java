@@ -106,7 +106,12 @@ public class AuthenticationService {
 			boolean withinGrace = token.getReplacedBy() != null
 					&& token.getRevokedAt().isAfter(now.minus(ROTATION_GRACE));
 			if (withinGrace) {
-				throw new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
+				// Thua một request /refresh khác đang chạy song song với CÙNG token cũ
+				// (2 tab, request trùng lặp...) — token thay thế đã tồn tại và hợp lệ, đây
+				// KHÔNG phải dùng lại token đã chết. Dùng mã riêng để AuthController biết
+				// không được xoá cookie hiện tại (cookie đó có thể đã là token mới của
+				// request thắng cuộc — xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống).
+				throw new ApiException("REFRESH_TOKEN_ROTATION_CONFLICT", HttpStatus.UNAUTHORIZED,
 						"Refresh token đã được dùng, hãy dùng token mới nhất");
 			}
 			int revoked = refreshTokenRepository.revokeAllActiveByUserId(token.getUserId(), now);
@@ -142,8 +147,11 @@ public class AuthenticationService {
 		refreshTokenRepository.save(replacement);
 
 		if (refreshTokenRepository.revokeIfActive(token.getId(), now, replacement.getId()) == 0) {
+			// SELECT ở trên còn thấy token active, nhưng một request /refresh khác đã
+			// thu hồi nó trước khi UPDATE này chạy (race y hệt nhánh withinGrace ở trên,
+			// chỉ khác điểm phát hiện) — cùng mã lỗi để AuthController không xoá cookie.
 			refreshTokenRepository.delete(replacement);
-			throw new ApiException("INVALID_REFRESH_TOKEN", HttpStatus.UNAUTHORIZED,
+			throw new ApiException("REFRESH_TOKEN_ROTATION_CONFLICT", HttpStatus.UNAUTHORIZED,
 					"Refresh token không hợp lệ");
 		}
 

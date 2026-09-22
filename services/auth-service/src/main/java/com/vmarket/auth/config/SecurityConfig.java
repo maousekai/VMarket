@@ -1,7 +1,10 @@
 package com.vmarket.auth.config;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -13,11 +16,13 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 import com.vmarket.auth.dto.ErrorResponse;
 import com.vmarket.auth.security.InternalApiKeyFilter;
+import com.vmarket.auth.security.SessionOriginGuardFilter;
 
 import jakarta.servlet.http.HttpServletResponse;
 import tools.jackson.databind.ObjectMapper;
@@ -45,6 +50,17 @@ import tools.jackson.databind.ObjectMapper;
  * phân biệt service gọi. Đủ cho một endpoint nội bộ; khi có endpoint thứ hai/thứ ba nên
  * chuyển sang danh sách khoá (giữ khoá cũ + mới để xoay khoá mà không phải deploy đồng
  * thời hai service) hoặc scope theo service.
+ *
+ * <p><b>CSRF (PBL6-46, NFR-SEC-05):</b> {@code csrf().disable()} không có nghĩa là
+ * không phòng CSRF — lớp phòng thủ chính là cookie {@code refresh_token} đặt
+ * {@code SameSite=Lax} ({@link com.vmarket.auth.security.RefreshTokenCookieService})
+ * cộng với CORS allowlist ở {@link CorsConfig} (trình duyệt không đính cookie vào
+ * request cross-site không-an-toàn, và request cross-origin qua fetch/XHR bị CORS chặn
+ * trước khi tới handler). Đây là quyết định chủ đích, không phải bỏ sót — dùng CSRF
+ * token cổ điển đòi client phải đọc/gửi lại token cho mọi request, không hợp với API
+ * JSON thuần không có server-rendered form. Lớp phòng thủ thứ hai:
+ * {@link com.vmarket.auth.security.SessionOriginGuardFilter} xác minh header
+ * {@code Origin}/{@code Referer} cho 3 endpoint đổi trạng thái phiên.
  */
 @Configuration
 public class SecurityConfig {
@@ -66,13 +82,30 @@ public class SecurityConfig {
 			"/swagger-ui.html",
 	};
 
+	/**
+	 * Path đổi trạng thái phiên (PBL6-46) được {@link SessionOriginGuardFilter} bảo vệ.
+	 * CỐ Ý dùng {@code /*} (đúng một segment con) chứ không phải {@code /**} — {@code /**}
+	 * khớp cả path cha KHÔNG có segment con ({@code /api/auth/sessions} — GET liệt kê
+	 * phiên, chỉ đọc, không cần chặn), vì {@code PathPattern} coi {@code **} là "0 hoặc
+	 * nhiều segment".
+	 */
+	private static final String[] SESSION_STATE_CHANGING_PATHS = {
+			"/api/auth/logout",
+			"/api/auth/sessions/*",
+	};
+
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource,
-			InternalApiProperties internalApiProperties, ObjectMapper objectMapper) throws Exception {
+			InternalApiProperties internalApiProperties, ObjectMapper objectMapper,
+			@Value("${app.cors.allowed-origins}") List<String> allowedOrigins) throws Exception {
 		// MỘT matcher dùng cho cả hai việc: filter quyết định có đọc khoá hay không, và
 		// tầng phân quyền quyết định đường dẫn nào cần vai trò nội bộ. Hai bên tự so
 		// chuỗi riêng thì sớm muộn sẽ lệch (xem javadoc InternalApiKeyFilter).
 		RequestMatcher internalPaths = PathPatternRequestMatcher.withDefaults().matcher(INTERNAL_PATHS);
+		RequestMatcher sessionStateChangingPaths = new OrRequestMatcher(
+				Arrays.stream(SESSION_STATE_CHANGING_PATHS)
+						.map(pattern -> PathPatternRequestMatcher.withDefaults().matcher(pattern))
+						.toArray(RequestMatcher[]::new));
 
 		http
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -81,6 +114,9 @@ public class SecurityConfig {
 				.httpBasic(basic -> basic.disable())
 				.formLogin(form -> form.disable())
 				.addFilterBefore(new InternalApiKeyFilter(internalApiProperties, internalPaths),
+						UsernamePasswordAuthenticationFilter.class)
+				.addFilterBefore(
+						new SessionOriginGuardFilter(allowedOrigins, sessionStateChangingPaths, objectMapper),
 						UsernamePasswordAuthenticationFilter.class)
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(internalPaths).hasRole(InternalApiKeyFilter.ROLE)
