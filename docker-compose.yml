@@ -14,9 +14,18 @@
 #       nen khong dinh CORS.
 # - Business service van them block rieng khi can, DUNG CHUNG config qua
 #   anchor `*common-environment` (xem mau block ben duoi).
-# - Tat ca service cung nam trong network chung "vmarket-network" (PBL6-9),
+# - Tat ca service cung nam trong network chung "VMarket-network" (PBL6-9),
 #   goi nhau bang ten service (vd: http://auth-service:8081).
 # - Moi gia tri cau hinh lay tu file .env (copy tu .env.example).
+#
+# QUY UOC TEN TREN DOCKER:
+# - Container + network dat ten "VMarket-*" (vd VMarket-postgres,
+#   VMarket-network) cho khop ten du an.
+# - Project compose ("vmarket"), image (vmarket-<service>) va volume BAT BUOC
+#   viet thuong: Docker tu choi chu hoa o ten project va ten image ("must be
+#   lowercase"). Volume giu ten cu de khong phai chuyen du lieu.
+# - Goi nhau trong network bang TEN SERVICE (postgres, auth-service...), khong
+#   dung ten container -> doi ten container khong anh huong cau hinh ket noi.
 #
 # TỐI ƯU TÀI NGUYÊN:
 # - Ha tang nhe mac dinh ~1.5GB RAM. Elasticsearch nang (~1GB) dat
@@ -58,7 +67,7 @@ x-common-environment: &common-environment
 #    build:
 #      context: .
 #      dockerfile: services/<service-name>/Dockerfile
-#    container_name: vmarket-<ten>
+#    container_name: VMarket-<ten>
 #    mem_limit: 512m
 #    environment:
 #      <<: *common-environment
@@ -94,7 +103,7 @@ services:
   # PostgreSQL - CSDL quan he cho: auth, user, shop, order, payment, delivery, review
   postgres:
     image: postgres:17-alpine
-    container_name: vmarket-postgres
+    container_name: VMarket-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vmarket}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
@@ -118,7 +127,7 @@ services:
   # MongoDB - CSDL cho: product, notification, chatbot
   mongo:
     image: mongo:8.0
-    container_name: vmarket-mongo
+    container_name: VMarket-mongo
     ports:
       # Port host: MONGO_HOST_PORT (27018 - tranh xung dot voi mongod cai
       # local tren may). Port trong container luon la 27017.
@@ -137,7 +146,7 @@ services:
   # Redis - cho: cart, delivery (vi tri shipper), recommendation (cache)
   redis:
     image: redis:7.4-alpine
-    container_name: vmarket-redis
+    container_name: VMarket-redis
     command: ["redis-server", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -155,7 +164,7 @@ services:
   # RabbitMQ - Event Bus giua cac service (UI: http://localhost:15672)
   rabbitmq:
     image: rabbitmq:4.1-management
-    container_name: vmarket-rabbitmq
+    container_name: VMarket-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
@@ -177,7 +186,7 @@ services:
   #   docker compose --profile search up -d
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
-    container_name: vmarket-elasticsearch
+    container_name: VMarket-elasticsearch
     profiles: ["search"]
     environment:
       discovery.type: single-node
@@ -202,7 +211,7 @@ services:
     build:
       context: .
       dockerfile: services/auth-service/Dockerfile
-    container_name: vmarket-auth-service
+    container_name: VMarket-auth-service
     networks:
       - vmarket-network
     mem_limit: 512m
@@ -254,7 +263,7 @@ services:
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
-    container_name: vmarket-user-service
+    container_name: VMarket-user-service
     networks:
       - vmarket-network
     mem_limit: 512m
@@ -292,7 +301,7 @@ services:
     build:
       context: .
       dockerfile: services/shop-service/Dockerfile
-    container_name: vmarket-shop-service
+    container_name: VMarket-shop-service
     networks:
       - vmarket-network
     mem_limit: 512m
@@ -325,7 +334,7 @@ services:
     build:
       context: .
       dockerfile: services/api-gateway/Dockerfile
-    container_name: vmarket-gateway
+    container_name: VMarket-gateway
     networks:
       - vmarket-network
     mem_limit: 384m
@@ -362,7 +371,7 @@ services:
         # Chi dien URL khi co chu dinh cho browser goi THANG Gateway o origin
         # khac - luc do BE phai cho phep origin FE trong CORS_ALLOWED_ORIGINS.
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-    container_name: vmarket-frontend
+    container_name: VMarket-frontend
     networks:
       - vmarket-network
     mem_limit: 64m
@@ -378,7 +387,9 @@ services:
 # thuoc ten project compose; cac service goi nhau bang ten service trong network.
 networks:
   vmarket-network:
-    name: vmarket-network
+    # Khoa `vmarket-network` chi dung noi bo trong file nay; ten that tren Docker
+    # la `name:` ben duoi (xem QUY UOC TEN o dau file).
+    name: VMarket-network
     driver: bridge
 
 volumes:
