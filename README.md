@@ -215,6 +215,8 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | Auth      | `curl http://localhost:8081/api/auth/health`          | `{"status":"UP",...}`       |
 | User      | `curl http://localhost:8082/api/users/health`         | `{"status":"UP",...}`       |
 | User (cần token) | `curl http://localhost:8082/api/users/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
+| Shop      | `curl http://localhost:8083/api/shops/health`         | `{"status":"UP",...}`       |
+| Shop (cần token) | `curl http://localhost:8083/api/shops/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
 | Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |
 | RabbitMQ  | mở `http://localhost:15672`                           | đăng nhập guest/guest       |
@@ -225,3 +227,4 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 - [Quy ước git/commit/PR](CONTRIBUTING.md)
 - [Template Dockerfile + CI/CD cho service mới](docs/templates/README.md)
 - [README Auth Service](services/auth-service/README.md)
+- [README Shop Service](services/shop-service/README.md)

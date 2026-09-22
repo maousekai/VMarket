@@ -286,6 +286,38 @@ services:
       retries: 10
       start_period: 40s
 
+  # Shop Service (PBL6-14) - vong doi gian hang: dang ky, duyet, dinh chi.
+  # Phat ShopApproved / ShopSuspended len RabbitMQ (exchange vmarket.events).
+  shop-service:
+    build:
+      context: .
+      dockerfile: services/shop-service/Dockerfile
+    container_name: vmarket-shop-service
+    networks:
+      - vmarket-network
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_shop
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      # shop-service chi VERIFY token do auth-service ky (HS256 doi xung) - PHAI
+      # trung AUTH_JWT_SECRET cua block auth-service, lech la moi API tra 401.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+    ports:
+      # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
+      - "${SHOP_SERVICE_PORT:-8083}:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8083/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   # API Gateway - diem vao duy nhat cua he thong (browser goi vao localhost:8080).
   # Gateway goi cac business service chay tren may host qua host.docker.internal;
   # auth-service da container hoa nen goi truc tiep qua ten service trong network.
@@ -304,6 +336,7 @@ services:
       # service tiep theo.
       AUTH_SERVICE_URL: http://auth-service:8081
       USER_SERVICE_URL: http://user-service:8082
+      SHOP_SERVICE_URL: http://shop-service:8083
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
