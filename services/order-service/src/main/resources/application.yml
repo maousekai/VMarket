@@ -10,8 +10,19 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      # Schema do Flyway quan ly. 'validate' de Hibernate chi doi chieu mapping voi
+      # schema thuc te, khong tu sua DDL (giong user-service).
+      ddl-auto: validate
     show-sql: true
+  flyway:
+    enabled: true
+    # {vendor} = ten CSDL dang chay (postgresql / h2). Migration dung duoc o moi
+    # CSDL nam o db/migration; cai nao phu thuoc cu phap rieng Postgres thi dat o
+    # db/vendor/postgresql (Flyway bo qua khi chay tren H2).
+    locations: classpath:db/migration,classpath:db/vendor/{vendor}
+    # Cho phep migrate tren DB da co bang (vmarket_order duoc tao san boi container)
+    baseline-on-migrate: true
+    baseline-version: 0
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -27,6 +38,35 @@ management:
       exposure:
         include: health,info
 
+# springdoc dung path mac dinh: /swagger-ui.html va /v3/api-docs
+# (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # API noi bo cart-service: doc gio hang khi dat hang (FR-ORDER-01) va xoa gio
+  # sau khi tao don thanh cong. Cart-service khong verify JWT — no tin header
+  # X-User-Id ma gateway gan vao; order-service da tu verify token nen gui dung
+  # userId da xac thuc (sub cua token) vao header do.
+  cart-service:
+    base-url: ${CART_SERVICE_URL:http://localhost:8085}
+    connect-timeout: ${CART_SERVICE_CONNECT_TIMEOUT:2s}
+    read-timeout: ${CART_SERVICE_READ_TIMEOUT:5s}
+  # API cong khai cua user-service: chi doc dia chi giao hang mac dinh. KHONG dung
+  # khoá noi bo vi user-service khong mo endpoint /internal nao cho order-service.
+  user-service:
+    base-url: ${USER_SERVICE_URL:http://localhost:8082}
+
+# JWT - order-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
+# hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va
+# chung bien moi truong AUTH_JWT_SECRET voi auth-service; dat ten khac se dan toi
+# canh hai service cung chay ma token ben nay ben kia khong doc duoc.
+#
+# secret KHONG co gia tri mac dinh o file nen -> moi moi truong (ke ca prod) thieu
+# AUTH_JWT_SECRET se fail ngay luc khoi dong (placeholder khong resolve + @NotBlank
+# tren OrderJwtProperties). Gia tri gia cho local nam o application-dev.yml.
+#
+# KHONG khai access-ttl / refresh-ttl: thoi han la viec cua ben phat hanh token.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
