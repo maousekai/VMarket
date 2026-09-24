@@ -8,12 +8,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.shop.dto.PageResponse;
+import com.vmarket.shop.dto.ShopProfileChangeResponse;
 import com.vmarket.shop.dto.ShopResponse;
 import com.vmarket.shop.dto.ShopStatusHistoryResponse;
 import com.vmarket.shop.entity.Shop;
 import com.vmarket.shop.entity.ShopAction;
 import com.vmarket.shop.entity.ShopStatus;
 import com.vmarket.shop.exception.ApiException;
+import com.vmarket.shop.repository.ShopProfileChangeRepository;
 import com.vmarket.shop.repository.ShopRepository;
 import com.vmarket.shop.repository.ShopSpecifications;
 import com.vmarket.shop.repository.ShopStatusHistoryRepository;
@@ -40,6 +42,7 @@ public class ShopModerationService {
 
 	private final ShopRepository shopRepository;
 	private final ShopStatusHistoryRepository historyRepository;
+	private final ShopProfileChangeRepository profileChangeRepository;
 	private final ShopStatusTransitioner transitioner;
 
 	@Transactional(readOnly = true)
@@ -60,6 +63,23 @@ public class ShopModerationService {
 		return historyRepository.findByShopIdOrderByCreatedAtAscIdAsc(shopId).stream()
 				.map(ShopStatusHistoryResponse::from)
 				.toList();
+	}
+
+	/**
+	 * Nhật ký sửa nội dung hồ sơ (ra soát PR #24, mục A) — mới nhất trước.
+	 *
+	 * <p>Người bán sửa được hồ sơ kể cả khi gian hàng đang hoạt động mà không phải qua
+	 * duyệt lại; đây là chỗ Admin đối chiếu nội dung hiện tại với nội dung mình đã duyệt,
+	 * và đình chỉ nếu người bán "thay ruột" sau khi được duyệt.
+	 *
+	 * <p>Phân trang chứ không trả hết: một gian hàng sửa hồ sơ nhiều lần thì nhật ký dài
+	 * hơn lịch sử trạng thái rất nhiều (mỗi trường một dòng).
+	 */
+	@Transactional(readOnly = true)
+	public PageResponse<ShopProfileChangeResponse> profileHistory(String shopId, int page, int size) {
+		mustFind(shopId);
+		var result = profileChangeRepository.findByShopId(shopId, PageRequest.of(page, size, NEWEST_FIRST));
+		return PageResponse.from(result, ShopProfileChangeResponse::from);
 	}
 
 	/** Chờ duyệt → Hoạt động; phát {@code ShopApproved}. */

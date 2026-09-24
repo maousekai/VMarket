@@ -21,6 +21,11 @@ public final class ShopSpecifications {
 	 * với {@link Shop#nameKeyOf} — không cần {@code lower()} phía CSDL. Ký tự {@code %}
 	 * và {@code _} trong từ khoá được escape: người dùng gõ "50%" là tìm đúng "50%",
 	 * không phải "mọi tên bắt đầu bằng 50".
+	 *
+	 * <p>TODO (khi số gian hàng lớn): {@code LIKE '%tu-khoa%'} không dùng được B-tree
+	 * index nên PostgreSQL phải quét toàn bảng. Lúc đó bật extension {@code pg_trgm} và
+	 * tạo GIN index trên {@code name_key}. Ở quy mô hiện tại (danh sách kiểm duyệt của
+	 * Admin) thì quét bảng vẫn rẻ hơn chi phí duy trì thêm index.
 	 */
 	public static Specification<Shop> matching(ShopStatus status, String keyword) {
 		return (root, query, cb) -> {

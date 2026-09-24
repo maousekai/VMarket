@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.vmarket.shop.dto.ErrorResponse;
 import com.vmarket.shop.dto.PageResponse;
 import com.vmarket.shop.dto.ReasonRequest;
+import com.vmarket.shop.dto.ShopProfileChangeResponse;
 import com.vmarket.shop.dto.ShopResponse;
 import com.vmarket.shop.dto.ShopStatusHistoryResponse;
 import com.vmarket.shop.entity.ShopStatus;
@@ -107,6 +108,27 @@ public class AdminShopController {
 	public List<ShopStatusHistoryResponse> history(
 			@PathVariable @Pattern(regexp = ShopIds.PATTERN, message = ShopIds.MESSAGE) String shopId) {
 		return moderationService.history(shopId);
+	}
+
+	@Operation(summary = "Nhật ký sửa nội dung hồ sơ",
+			description = "Người bán sửa được hồ sơ kể cả khi gian hàng đang hoạt động và KHÔNG phải duyệt lại "
+					+ "(FR-SHOP-02). Đây là chỗ đối chiếu nội dung hiện tại với nội dung đã duyệt: mỗi trường bị "
+					+ "đổi là một dòng, kèm giá trị cũ / mới và trạng thái gian hàng lúc sửa. Mới nhất trước.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Thành công",
+					content = @Content(schema = @Schema(implementation = PageResponse.class))),
+			@ApiResponse(responseCode = "400", description = "Tham số không hợp lệ (VALIDATION_ERROR)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "404", description = "Không tìm thấy gian hàng (SHOP_NOT_FOUND)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+	})
+	@GetMapping("/{shopId}/profile-history")
+	public PageResponse<ShopProfileChangeResponse> profileHistory(
+			@PathVariable @Pattern(regexp = ShopIds.PATTERN, message = ShopIds.MESSAGE) String shopId,
+			@RequestParam(defaultValue = "0") @Min(value = 0, message = "page phải >= 0") int page,
+			@RequestParam(defaultValue = "20") @Min(value = 1, message = "size phải >= 1")
+			@Max(value = MAX_PAGE_SIZE, message = "size tối đa 100") int size) {
+		return moderationService.profileHistory(shopId, page, size);
 	}
 
 	@Operation(summary = "Duyệt gian hàng",

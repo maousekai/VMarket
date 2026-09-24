@@ -20,7 +20,7 @@ import org.springframework.test.context.TestPropertySource;
 import com.vmarket.shop.entity.Shop;
 
 /**
- * Chạy Flyway THẬT ({@code V1__init_shop_schema.sql}) trên H2 (MODE=PostgreSQL) và để
+ * Chạy Flyway THẬT (V1, V2) trên H2 (MODE=PostgreSQL) và để
  * Hibernate {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra
  * — cùng khuôn với {@code FlywayMigrationTest} của auth-service / user-service.
  *
@@ -46,8 +46,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("1");
-		assertThat(flyway.info().applied()).hasSize(1);
+		assertThat(current.getVersion().getVersion()).isEqualTo("2");
+		assertThat(flyway.info().applied()).hasSize(2);
 	}
 
 	@Test
@@ -63,6 +63,12 @@ class FlywayMigrationTest {
 					"created_at" }) {
 				assertThat(columnExists(c, "shop_status_history", column))
 						.as("shop_status_history.%s", column).isTrue();
+			}
+			// V2 - nhat ky sua noi dung ho so (ra soat PR #24, muc A)
+			for (String column : new String[] { "shop_id", "field_name", "old_value", "new_value",
+					"status_at_change", "changed_by", "created_at" }) {
+				assertThat(columnExists(c, "shop_profile_changes", column))
+						.as("shop_profile_changes.%s", column).isTrue();
 			}
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.

@@ -3,7 +3,8 @@
 Vòng đời gian hàng: đăng ký (FR-SHOP-01), người bán quản lý gian hàng (FR-SHOP-02),
 trang gian hàng công khai (FR-SHOP-03), Admin duyệt / từ chối / đình chỉ và phát sự
 kiện `ShopApproved` / `ShopSuspended` (FR-SHOP-04).
-Cổng `8083`, CSDL PostgreSQL `vmarket_shop` (bảng `shops`, `shop_status_history`).
+Cổng `8083`, CSDL PostgreSQL `vmarket_shop` (bảng `shops`, `shop_status_history`,
+`shop_profile_changes`).
 
 ## Vòng đời gian hàng
 
@@ -43,6 +44,7 @@ chối — Admin phải chủ động "gỡ đình chỉ". Mọi bước (kể c
 | GET | `/api/shops/admin?status=&keyword=&page=&size=` | ADMIN | Danh sách (lọc trạng thái, tên), mới nộp trước |
 | GET | `/api/shops/admin/{shopId}` | ADMIN | Chi tiết hồ sơ |
 | GET | `/api/shops/admin/{shopId}/status-history` | ADMIN | Lịch sử trạng thái |
+| GET | `/api/shops/admin/{shopId}/profile-history?page=&size=` | ADMIN | Nhật ký sửa nội dung hồ sơ (mới nhất trước) |
 | POST | `/api/shops/admin/{shopId}/approve` | ADMIN | Duyệt |
 | POST | `/api/shops/admin/{shopId}/reject` | ADMIN | Từ chối — body `{ "reason": "..." }` |
 | POST | `/api/shops/admin/{shopId}/suspend` | ADMIN | Đình chỉ — body `{ "reason": "..." }` |
@@ -74,7 +76,7 @@ Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "detai
 | `SHOP_NOT_FOUND` | 404 | Chưa đăng ký / không tồn tại / (trang công khai) chưa hoạt động |
 | `SHOP_SUSPENDED` | 409 | Người bán sửa gian hàng đang bị đình chỉ |
 | `INVALID_STATUS_TRANSITION` | 409 | Hành động không hợp lệ với trạng thái hiện tại |
-| `CONCURRENT_MODIFICATION` | 409 | Hai thao tác cùng sửa một gian hàng (vd Admin duyệt đúng lúc người bán lưu) — tải lại rồi thử lại |
+| `CONCURRENT_MODIFICATION` | 409 | Hai thao tác cùng sửa một gian hàng (vd Admin duyệt đúng lúc người bán lưu) — tải lại rồi thử lại. Xem `ShopConcurrentUpdateTest` |
 
 ### Những điều dễ hiểu nhầm
 
@@ -83,10 +85,21 @@ Body lỗi mọi endpoint: `{ "error": { "code": "...", "message": "...", "detai
    trên object đó rồi `PUT` lại toàn bộ — cùng ngữ nghĩa với `PUT /api/users/me`.
 2. **Sửa gian hàng đang hoạt động không phải chờ duyệt lại.** Chỉ hồ sơ mới / gửi lại
    mới qua kiểm duyệt. Gian hàng **bị đình chỉ thì không sửa được**.
-3. **`/me/**` không đòi vai trò SELLER** — quyền ở đây là quyền sở hữu (`owner_id = sub`).
+
+   > Đánh đổi có chủ ý (rà soát PR #24, mục A): đưa gian hàng đang hoạt động về "Chờ
+   > duyệt" sau mỗi lần sửa mô tả thì nó biến mất khỏi người mua và đơn hàng đứng lại.
+   > Đổi lại, nội dung đã duyệt có thể bị thay bằng nội dung vi phạm — nên **mọi trường
+   > bị đổi đều được ghi vết**: `GET /api/shops/admin/{shopId}/profile-history` cho Admin
+   > xem giá trị cũ / mới, ai sửa, lúc nào và **trạng thái gian hàng lúc sửa**
+   > (`statusAtChange = ACTIVE` là trường hợp đáng soi). Vi phạm thì đình chỉ (FR-SHOP-04).
+3. **Tên gian hàng bị giữ chỗ kể cả khi hồ sơ bị từ chối / đình chỉ.** `uq_shops_name_key`
+   không phân biệt trạng thái — cố ý, để người bị từ chối không mất tên vào tay người khác
+   trong lúc sửa hồ sơ, và để tên của gian hàng bị đình chỉ không bị người khác chiếm.
+   Nếu sau này muốn "nhả" tên thì phải sửa cả ràng buộc lẫn `ShopService.ensureNameAvailable`.
+4. **`/me/**` không đòi vai trò SELLER** — quyền ở đây là quyền sở hữu (`owner_id = sub`).
    Người vừa nộp hồ sơ chưa có SELLER mà vẫn phải xem / sửa được hồ sơ của mình. Vai trò
    SELLER do auth-service cấp khi nhận `ShopApproved`.
-4. **Trang công khai không có thông tin liên hệ** (email, số điện thoại, địa chỉ kho,
+5. **Trang công khai không có thông tin liên hệ** (email, số điện thoại, địa chỉ kho,
    `ownerId`) — chỉ còn tỉnh/thành làm khu vực. Danh sách sản phẩm lấy ở Product Catalog
    (`GET /api/products?shopId=...`), điểm đánh giá ở Review Service.
 
@@ -146,12 +159,17 @@ cd services
 
 Chạy trên H2 (MODE=PostgreSQL), không cần PostgreSQL / RabbitMQ: `EventPublisher` được
 mock để kiểm tra đúng sự kiện + payload được phát. `FlywayMigrationTest` chạy migration
-thật rồi để Hibernate `validate` đối chiếu entity.
+thật rồi để Hibernate `validate` đối chiếu entity. `ShopConcurrentUpdateTest` mở hai
+transaction thật trên hai luồng để ép đúng tình huống Admin duyệt xen giữa lúc người bán
+lưu hồ sơ.
 
 ## Chưa làm trong PR này
 
 - **FR-SHOP-05 Thống kê gian hàng (ưu tiên TB)** — doanh thu, số đơn theo trạng thái, sản
   phẩm bán chạy đều là dữ liệu của Order Service, hiện mới là skeleton và chưa phát
-  `OrderPlaced` / `OrderStatusChanged`. Làm khi Order Service có dữ liệu (xem worklog PBL6-14).
+  `OrderPlaced` / `OrderStatusChanged`. Người làm Order Service (PBL6-17) xác nhận hướng rẻ
+  hơn là **Order cung cấp API thống kê theo `shopId`** để shop-service gọi sang, thay vì
+  shop-service nghe sự kiện tự dựng read model. Chốt trước khi làm, mở ticket riêng
+  (xem worklog PBL6-14).
 - **Cấp vai trò SELLER khi nhận `ShopApproved`** thuộc auth-service (consumer), **ẩn/hiện
   sản phẩm** thuộc product-service — ticket của các service đó.

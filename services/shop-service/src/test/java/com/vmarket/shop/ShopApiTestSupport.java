@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 import com.vmarket.events.EventPublisher;
 import com.vmarket.shop.config.ShopJwtProperties;
+import com.vmarket.shop.repository.ShopProfileChangeRepository;
 import com.vmarket.shop.repository.ShopRepository;
 import com.vmarket.shop.repository.ShopStatusHistoryRepository;
 
@@ -42,11 +43,15 @@ abstract class ShopApiTestSupport {
 	@Autowired ShopJwtProperties jwtProperties;
 	@Autowired ShopRepository shopRepository;
 	@Autowired ShopStatusHistoryRepository historyRepository;
+	@Autowired ShopProfileChangeRepository profileChanges;
 
 	@MockitoBean EventPublisher eventPublisher;
 
 	@BeforeEach
 	void cleanDatabase() {
+		// Xoá tường minh cả hai bảng con: schema của test do Hibernate sinh nên không có
+		// khoá ngoại ON DELETE CASCADE như migration thật.
+		profileChanges.deleteAll();
 		historyRepository.deleteAll();
 		shopRepository.deleteAll();
 	}

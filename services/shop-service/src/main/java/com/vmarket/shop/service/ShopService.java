@@ -1,6 +1,7 @@
 package com.vmarket.shop.service;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +45,7 @@ public class ShopService {
 	private final ShopRepository shopRepository;
 	private final ShopStatusHistoryRepository historyRepository;
 	private final ShopStatusTransitioner transitioner;
+	private final ShopProfileAuditor profileAuditor;
 
 	/** FR-SHOP-01 — nộp hồ sơ mở gian hàng. Mỗi tài khoản một gian hàng. */
 	@Transactional
@@ -77,7 +79,12 @@ public class ShopService {
 	 *
 	 * <p>Được sửa khi "Chờ duyệt" (sửa lỗi trước khi Admin xem), "Bị từ chối" (sửa rồi
 	 * gửi lại) và "Hoạt động". Sửa gian hàng đang hoạt động <b>không</b> đưa nó về chờ
-	 * duyệt lại — FR-SHOP-02 cho người bán tự quản lý thông tin của mình.
+	 * duyệt lại — FR-SHOP-02 cho người bán tự quản lý thông tin của mình, và đưa về chờ
+	 * duyệt thì một lần sửa mô tả cũng làm gian hàng biến mất khỏi người mua.
+	 *
+	 * <p>Đổi lại, nội dung đã được duyệt có thể bị thay bằng nội dung vi phạm. Nên mọi
+	 * trường bị đổi đều được ghi vết cho Admin đối chiếu — xem {@link ShopProfileAuditor}
+	 * và {@code GET /api/shops/admin/{shopId}/profile-history}.
 	 */
 	@Transactional
 	public ShopResponse updateMine(String ownerId, ShopRequest request) {
@@ -88,7 +95,9 @@ public class ShopService {
 		}
 		ensureNameAvailable(request.name(), shop.getId());
 
+		Map<String, String> before = ShopProfileAuditor.snapshot(shop);
 		apply(shop, request);
+		profileAuditor.record(shop, before, ShopProfileAuditor.snapshot(shop), ownerId);
 		// saveAndFlush: đụng @Version / UNIQUE thì lỗi bung ra ở đây (được dịch thành 409),
 		// và updatedAt trong response là giá trị thật đã ghi xuống.
 		Shop saved = shopRepository.saveAndFlush(shop);

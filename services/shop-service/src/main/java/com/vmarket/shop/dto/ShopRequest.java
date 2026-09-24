@@ -79,6 +79,13 @@ public record ShopRequest(
 		@Size(max = 255, message = "Địa chỉ chi tiết tối đa 255 ký tự")
 		String streetAddress) {
 
-	/** Rỗng (bỏ trống ô nhập) hoặc URL http(s) không chứa khoảng trắng. */
-	static final String HTTP_URL = "^(https?://\\S+)?$";
+	/**
+	 * Bỏ trống ô nhập hoặc URL http(s) không chứa khoảng trắng.
+	 *
+	 * <p>Nhánh rỗng là {@code \s*} chứ không phải chuỗi rỗng: form gửi lên một ô chỉ có
+	 * dấu cách vẫn là "bỏ trống" dưới mắt người dùng, nhưng nếu ở đây bắt lỗi thì họ
+	 * nhận thông báo "URL phải bắt đầu bằng http://" cho một ô nhìn như trống rỗng.
+	 * Service chuẩn hoá chuỗi trắng thành {@code null} nên CSDL không lưu khoảng trắng.
+	 */
+	static final String HTTP_URL = "^(\\s*|https?://\\S+)$";
 }
