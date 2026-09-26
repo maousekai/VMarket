@@ -1,0 +1,14 @@
+# Cau hinh chi cho profile 'dev' (local). Khong dung o prod.
+# Gia tri gia ro rang de chay 'mvnw spring-boot:run' khong can set bien moi truong.
+# Khi chay qua docker compose, cac bien tu .env / anchor common-environment ghi de.
+auth:
+  jwt:
+    # PHAI trung voi gia tri dev cua auth-service, neu khong token do auth-service
+    # phat ra se bi cart-service tu choi voi chu ky khong hop le.
+    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
+
+app:
+  internal-api:
+    # PHAI trung voi INTERNAL_API_KEY cua order-service (ben goi) — lech nhau thi
+    # order-service doc/xoa gio khi dat hang se nhan 401.
+    api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}

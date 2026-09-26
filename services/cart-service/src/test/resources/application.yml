@@ -1,0 +1,34 @@
+# Cau hinh test - khong dung Redis / product-service / RabbitMQ that.
+# Luu y: file nay o test classpath nen GHI DE hoan toan application.yml chinh khi
+# chay test -> phai tu chua du cac khoa can thiet.
+spring:
+  application:
+    name: cart-service
+  data:
+    redis:
+      # Khong co ket noi Redis nao duoc mo luc khoi dong (StringRedisTemplate ket noi
+      # luoi khi co lenh dau tien) - gia tri nay chi de bean duoc tao.
+      host: localhost
+      port: 6379
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  cart:
+    ttl-days: 30
+  products:
+    base-url: http://product-service.test:8084
+    api-key: test-only-internal-api-key-0123456789-0123456789
+  internal-api:
+    # Khoa nay duoc test dung lam "khoa dung"; test sai khoa dung gia tri khac.
+    api-key: test-only-internal-api-key-0123456789-0123456789
+
+auth:
+  jwt:
+    # Du 32 byte cho HS256 (Keys.hmacShaKeyFor tu choi khoa ngan hon).
+    secret: test-only-secret-0123456789-0123456789-0123456789
