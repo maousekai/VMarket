@@ -20,8 +20,9 @@ import lombok.extern.slf4j.Slf4j;
  * Chuyển mọi exception thành body chuẩn {@code { "error": { "code", "message" } }}.
  * Không bao giờ lộ stack trace ra client.
  *
- * <p>401/403 do header danh tính không hợp lệ được bắt từ
- * {@link ApiException} (controller tự kiểm tra {@code X-User-Id}).
+ * <p>401/403 <b>không</b> đi qua đây khi nguyên nhân nằm ở tầng xác thực: Spring
+ * Security chặn từ filter, trước khi request tới controller — lúc đó
+ * {@code SecurityConfig} tự ghi body lỗi cùng hình dạng này.
  */
 @Slf4j
 @RestControllerAdvice

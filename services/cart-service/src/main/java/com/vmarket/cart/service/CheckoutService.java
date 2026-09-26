@@ -38,6 +38,20 @@ public class CheckoutService {
 	public static final String TYPE_SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE";
 	public static final String TYPE_CART_EMPTY = "CART_EMPTY";
 
+	/**
+	 * Sản phẩm đã thuộc gian hàng khác so với {@code shopId} lưu trong giỏ.
+	 * {@code shopId} trong giỏ do client gửi lúc thêm hàng nên phải đối chiếu với
+	 * dữ liệu thật, nếu không item bị nhóm vào sai gian hàng (FR-CART-02) mà
+	 * validate vẫn báo {@code ok=true}.
+	 */
+	public static final String TYPE_SHOP_CHANGED = "SHOP_CHANGED";
+
+	/**
+	 * Product Catalog trả dữ liệu thiếu trường bắt buộc (vd không có giá) — không
+	 * kiểm tra được đơn giá, và KHÔNG nên coi là "hết hàng" hay "giá đổi".
+	 */
+	public static final String TYPE_PRODUCT_DATA_INVALID = "PRODUCT_DATA_INVALID";
+
 	private final CartService cartService;
 	private final ProductCatalogClient productCatalogClient;
 
@@ -83,11 +97,36 @@ public class CheckoutService {
 			}
 
 			ProductSnapshot product = snapshot.get();
+
+			// shopId trong giỏ do CLIENT gửi lúc thêm hàng, nên phải đối chiếu với dữ
+			// liệu thật của Product Catalog: nếu không, item bị nhóm vào sai gian hàng
+			// (FR-CART-02) mà validate vẫn trả ok=true (P2 của review PR #23).
+			// Chỉ so khi cả hai phía đều có giá trị — product-service cũ có thể chưa trả
+			// shopId, khi đó bỏ qua chứ không chặn oan.
+			if (product.shopId() != null && item.shopId() != null
+					&& !product.shopId().equals(item.shopId())) {
+				issues.add(new CheckoutIssueDto(
+						item.productId(), item.variantId(), TYPE_SHOP_CHANGED,
+						"Sản phẩm hiện thuộc gian hàng khác, hãy xoá khỏi giỏ và thêm lại",
+						item.unitPrice(), null, item.quantity(), null));
+				continue;
+			}
+
 			PriceStock current = resolvePriceStock(product, item.variantId());
 			if (current == null) {
 				issues.add(new CheckoutIssueDto(
 						item.productId(), item.variantId(), TYPE_NOT_FOUND,
 						"Biến thể không còn tồn tại, hãy xoá khỏi giỏ hàng",
+						item.unitPrice(), null, item.quantity(), null));
+				continue;
+			}
+
+			// Thiếu giá = phản hồi sai hợp đồng, không phải giá 0. Không kiểm tra thì
+			// compareTo(null) ném NPE → HTTP 500 (P2 của review PR #23).
+			if (current.price() == null) {
+				issues.add(new CheckoutIssueDto(
+						item.productId(), item.variantId(), TYPE_PRODUCT_DATA_INVALID,
+						"Dữ liệu sản phẩm không hợp lệ (thiếu giá), vui lòng thử lại sau",
 						item.unitPrice(), null, item.quantity(), null));
 				continue;
 			}

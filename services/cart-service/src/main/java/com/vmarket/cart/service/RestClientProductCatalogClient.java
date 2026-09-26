@@ -39,12 +39,12 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 
 	@Override
 	public Optional<ProductSnapshot> findProduct(String productId) {
+		ProductSnapshot snapshot;
 		try {
-			ProductSnapshot snapshot = restClient.get()
+			snapshot = restClient.get()
 					.uri("/api/products/{productId}", productId)
 					.retrieve()
 					.body(ProductSnapshot.class);
-			return Optional.ofNullable(snapshot);
 		} catch (HttpStatusCodeException ex) {
 			HttpStatusCode status = ex.getStatusCode();
 			if (status.value() == 404) {
@@ -58,6 +58,24 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 			log.warn("Không kết nối được product-service: {}", ex.getMessage());
 			throw new ProductCatalogUnavailableException(
 					"Không kết nối được product-service", ex);
+		} catch (RuntimeException ex) {
+			// Không đọc được JSON, sai kiểu dữ liệu, Content-Type lạ... — lỗi phía phản
+			// hồi chứ không phải bug của cart-service. Trước đây nó nổi lên thành HTTP
+			// 500; nay thành issue SERVICE_UNAVAILABLE để người dùng hiểu là "chưa kiểm
+			// tra được, thử lại sau" (P2 của review PR #23).
+			log.warn("Phản hồi product-service không đọc được cho productId={}: {}",
+					productId, ex.getMessage());
+			throw new ProductCatalogUnavailableException(
+					"Phản hồi product-service không đọc được", ex);
 		}
+
+		if (snapshot == null) {
+			// 200 nhưng không có nội dung: KHÔNG phải "sản phẩm đã bị xoá" (đó là 404),
+			// mà là phản hồi sai hợp đồng — coi như chưa kiểm tra được, không phải NOT_FOUND.
+			log.warn("product-service trả body rỗng cho productId={}", productId);
+			throw new ProductCatalogUnavailableException(
+					"product-service trả phản hồi rỗng", null);
+		}
+		return Optional.of(snapshot);
 	}
 }

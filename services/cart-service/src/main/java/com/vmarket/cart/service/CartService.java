@@ -14,6 +14,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import com.vmarket.cart.CartLimits;
 import com.vmarket.cart.config.CartProperties;
 import com.vmarket.cart.dto.AddCartItemRequest;
 import com.vmarket.cart.dto.CartGroupDto;
@@ -93,13 +94,27 @@ public class CartService {
 			List<StoredItem> items = new ArrayList<>(doc.items());
 			StoredItem existing = findItem(items, request.productId(), request.variantId());
 			if (existing != null) {
-				int newQuantity = existing.quantity() + request.quantity();
+				// Tính bằng long: quantity của dòng cũ có thể tới trần, cộng thêm
+				// quantity mới bằng int sẽ tràn thành số âm (2147483647 + 1). Số âm
+				// làm tổng tiền âm và khiến kiểm tra tồn kho ở FR-CART-03 luôn "đủ".
+				long merged = (long) existing.quantity() + request.quantity();
+				if (merged > CartLimits.MAX_QUANTITY_PER_ITEM) {
+					throw ApiException.badRequest("CART_QUANTITY_LIMIT_EXCEEDED",
+							"Số lượng tối đa " + CartLimits.MAX_QUANTITY_PER_ITEM + " cho mỗi sản phẩm");
+				}
+				int newQuantity = (int) merged;
 				items.set(items.indexOf(existing), new StoredItem(
 						existing.productId(), existing.variantId(), existing.shopId(),
 						newQuantity, request.unitPrice(), existing.addedAt(), now));
 				log.debug("addItem: cộng dồn productId={} variantId={} → quantity={}",
 						request.productId(), request.variantId(), newQuantity);
 			} else {
+				// Chặn trần số dòng hàng: vừa bảo vệ dữ liệu giỏ ở mức hợp lý, vừa
+				// giữ tổng quantity trong khoảng int an toàn (xem CartLimits).
+				if (items.size() >= CartLimits.MAX_ITEMS_PER_CART) {
+					throw ApiException.badRequest("CART_ITEM_LIMIT_EXCEEDED",
+							"Giỏ hàng đã đạt tối đa " + CartLimits.MAX_ITEMS_PER_CART + " sản phẩm");
+				}
 				items.add(new StoredItem(request.productId(), normalizeVariant(request.variantId()),
 						request.shopId(), request.quantity(), request.unitPrice(), now, now));
 				log.debug("addItem: thêm mới productId={} variantId={}",
@@ -123,6 +138,12 @@ public class CartService {
 			StoredItem existing = findItem(items, productId, variantId);
 			if (existing == null) {
 				throw ApiException.notFound("CART_ITEM_NOT_FOUND", "Sản phẩm không có trong giỏ hàng");
+			}
+			// Kiểm lại ở tầng service (không chỉ dựa vào @Max của DTO) để mọi lời gọi
+			// nội bộ khác cũng không ghi được số lượng ngoài biên.
+			if (quantity < 1 || quantity > CartLimits.MAX_QUANTITY_PER_ITEM) {
+				throw ApiException.badRequest("CART_QUANTITY_LIMIT_EXCEEDED",
+						"Số lượng phải từ 1 tới " + CartLimits.MAX_QUANTITY_PER_ITEM);
 			}
 			items.set(items.indexOf(existing), new StoredItem(
 					existing.productId(), existing.variantId(), existing.shopId(),
@@ -209,8 +230,11 @@ public class CartService {
 
 	private void save(String userId, CartDocument doc) {
 		try {
-			redis.opsForValue().set(key(userId), objectMapper.writeValueAsString(doc));
-			redis.expire(key(userId), Duration.ofDays(properties.getTtlDays()));
+			// SET kèm thời hạn trong MỘT lệnh: trước đây là SET rồi EXPIRE, hỏng giữa
+			// hai lệnh thì key đã ghi mà không có TTL (sống vĩnh viễn), còn lần ghi đè
+			// thì xoá TTL cũ trước khi lệnh EXPIRE kịp chạy (P2 của review PR #23).
+			redis.opsForValue().set(key(userId), objectMapper.writeValueAsString(doc),
+					Duration.ofDays(properties.getTtlDays()));
 		} catch (org.springframework.data.redis.RedisConnectionFailureException ex) {
 			log.error("Không kết nối được Redis khi ghi giỏ userId={}", userId, ex);
 			throw new CartStorageException("Redis không khả dụng", ex);
