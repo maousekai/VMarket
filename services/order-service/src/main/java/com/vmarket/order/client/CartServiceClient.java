@@ -21,11 +21,12 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Gọi API {@code /api/cart/**} của cart-service khi đặt hàng (FR-ORDER-01).
  *
- * <p><b>Danh tính:</b> cart-service KHÔNG verify JWT — nó tin header
- * {@code X-User-Id} mà API Gateway gắn vào sau khi xác thực. Order-service đã tự
- * verify token (NFR-SEC-03) nên gửi thẳng {@code userId} (claim {@code sub} của
- * token) vào header đó; giá trị luôn đến từ token đã kiểm tra chữ ký, không phải
- * từ client.
+ * <p><b>Danh tính:</b> từ PBL6-16 (soát xét PR #23), cart-service TỰ verify JWT và
+ * chỉ tin header {@code X-User-Id} khi request kèm khoá nội bộ
+ * {@code X-Internal-Api-Key} (xem {@code CartServiceProperties}). Order-service đã
+ * tự verify token (NFR-SEC-03) nên gửi {@code userId} là claim {@code sub} của
+ * token đã kiểm chữ ký — không phải giá trị client tự khai. Khoá nội bộ được gắn
+ * một lần ở {@code DownstreamClientConfig} cho mọi request của client này.
  *
  * <p><b>Ánh xạ lỗi</b> — cùng triết lý với {@code AuthServiceClient} của
  * user-service:
@@ -48,7 +49,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CartServiceClient {
 
-	/** Khớp {@code CartController.HEADER_USER_ID} của cart-service. */
+	/**
+	 * Khớp {@code InternalApiProperties.USER_ID_HEADER} của cart-service — chỉ có
+	 * hiệu lực khi request kèm khoá nội bộ {@code X-Internal-Api-Key}.
+	 */
 	public static final String HEADER_USER_ID = "X-User-Id";
 
 	private final RestClient restClient;

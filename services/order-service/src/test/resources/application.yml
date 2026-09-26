@@ -24,6 +24,7 @@ app:
     # test client dung MockRestServiceServer - khong co request that nao toi dia chi
     # nay.
     base-url: http://cart-service.test:8085
+    internal-api-key: test-only-internal-api-key-0123456789-0123456789
   user-service:
     base-url: http://user-service.test:8082
 

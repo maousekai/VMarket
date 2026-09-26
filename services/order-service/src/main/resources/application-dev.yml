@@ -18,6 +18,9 @@ app:
   cart-service:
     # Local mvnw: cart-service chay cong 8085.
     base-url: ${CART_SERVICE_URL:http://localhost:8085}
+    # PHAI trung INTERNAL_API_KEY cua cart-service (ben nhan) — cart-service chi tin
+    # header X-User-Id khi request kem khoa noi bo nay.
+    internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
 
   user-service:
     # Local mvnw: user-service chay cong 8082.

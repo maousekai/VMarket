@@ -32,6 +32,9 @@ public class DownstreamClientConfig {
 	CartServiceClient cartServiceClient(CartServiceProperties properties) {
 		return new CartServiceClient(builder(properties.getConnectTimeout(), properties.getReadTimeout())
 				.baseUrl(properties.getBaseUrl())
+				// Khoá nội bộ: cart-service chỉ tin header X-User-Id khi request kèm
+				// khoá này (PBL6-16 — bịt lỗi mạo danh danh tính của PR #23).
+				.defaultHeader(CartServiceProperties.INTERNAL_API_KEY_HEADER, properties.getInternalApiKey())
 				.build());
 	}
 

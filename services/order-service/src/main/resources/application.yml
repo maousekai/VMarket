@@ -44,12 +44,16 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
-  # API noi bo cart-service: doc gio hang khi dat hang (FR-ORDER-01) va xoa gio
-  # sau khi tao don thanh cong. Cart-service khong verify JWT — no tin header
-  # X-User-Id ma gateway gan vao; order-service da tu verify token nen gui dung
-  # userId da xac thuc (sub cua token) vao header do.
+  # API noi bo cart-service: doc gio hang khi dat hang (FR-ORDER-01) va xoa gio sau
+  # khi tao don thanh cong. Tu PBL6-16, cart-service TU verify JWT va chi tin header
+  # X-User-Id khi request kem khoa noi bo -> order-service gui X-Internal-Api-Key
+  # (xem DownstreamClientConfig) cung userId da xac thuc (sub cua token).
+  #
+  # internal-api-key KHONG co gia tri mac dinh o file nen -> thieu INTERNAL_API_KEY
+  # la fail ngay luc khoi dong. PHAI trung voi gia tri cua cart-service.
   cart-service:
     base-url: ${CART_SERVICE_URL:http://localhost:8085}
+    internal-api-key: ${INTERNAL_API_KEY}
     connect-timeout: ${CART_SERVICE_CONNECT_TIMEOUT:2s}
     read-timeout: ${CART_SERVICE_READ_TIMEOUT:5s}
   # API cong khai cua user-service: chi doc dia chi giao hang mac dinh. KHONG dung
