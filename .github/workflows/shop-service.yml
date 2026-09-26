@@ -16,6 +16,9 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/shop-service/**"
+      # PBL6-14: shop-service phu thuoc thu vien su kien dung chung (payload
+      # ShopApproved / ShopSuspended nam o day) -> doi hop dong thi phai test lai
+      - "services/shared-events/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
       - "services/pom.xml"
       - "services/mvnw"
@@ -26,6 +29,7 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/shop-service/**"
+      - "services/shared-events/**"
       - "services/pom.xml"
       - "services/mvnw"
       - ".github/workflows/shop-service.yml"

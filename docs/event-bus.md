@@ -117,13 +117,44 @@ channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_
 | Sự kiện | Phát | Nhận |
 |---|---|---|
 | `ProductCreated` / `ProductUpdated` / `ProductDeleted` | Product Catalog | AI Search, Recommendation |
-| `ShopApproved` / `ShopSuspended` | Shop | Notification |
+| `ShopApproved` / `ShopSuspended` | Shop | Auth, Product, Notification |
 | `OrderPlaced` | Order | Notification, Delivery |
 | `StockReserved` / `StockReleased` | Product Catalog | Order |
 | `PaymentSucceeded` / `PaymentFailed` | Payment | Order, Notification |
 | `DeliveryAssigned` | Delivery | Notification |
 | `ReviewCreated` | Review | Notification, Product |
 | `UserBehaviorTracked` | Gateway / Clients | Recommendation |
+
+### 5.1. `ShopApproved` / `ShopSuspended` (PBL6-14)
+
+Shop Service phát khi Admin duyệt / đình chỉ gian hàng (FR-SHOP-04). Record Java:
+`com.vmarket.events.ShopApproved` / `ShopSuspended`. Phát **sau khi commit** nên không
+có sự kiện "ma" cho thay đổi bị rollback; đổi lại là tối đa một lần (xem §7).
+
+```json
+{ "eventType": "ShopApproved", "payload": {
+    "shopId": "01JBQ9YDX7K3M8N5P2R4T6V8W0",
+    "ownerId": "01JBQ9YDX7K3M8N5P2R4T6V8W1",
+    "shopName": "Tiệm Gốm Hội An",
+    "approvedBy": "01JBQ9YDX7K3M8N5P2R4T6V8WA",
+    "reinstated": false } }
+
+{ "eventType": "ShopSuspended", "payload": {
+    "shopId": "01JBQ9YDX7K3M8N5P2R4T6V8W0",
+    "ownerId": "01JBQ9YDX7K3M8N5P2R4T6V8W1",
+    "shopName": "Tiệm Gốm Hội An",
+    "suspendedBy": "01JBQ9YDX7K3M8N5P2R4T6V8WA",
+    "reason": "Bán hàng giả" } }
+```
+
+| Trường | Ý nghĩa |
+|---|---|
+| `ownerId` | userId chủ gian hàng — Auth cấp / giữ vai trò SELLER cho người này |
+| `reinstated` | `false` = duyệt hồ sơ mới (hoặc hồ sơ gửi lại); `true` = gỡ đình chỉ. Product xử lý như nhau (hiện sản phẩm), Notification gửi nội dung khác nhau |
+| `reason` | Lý do đình chỉ Admin nhập (luôn có) |
+
+Thời điểm duyệt / đình chỉ = `timestamp` của envelope. Từ chối hồ sơ và gửi lại hồ sơ
+**không** phát sự kiện (SRS §8.1 không định nghĩa).
 
 ## 6. Demo end-to-end (PBL6-39)
 
