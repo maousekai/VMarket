@@ -1,0 +1,108 @@
+package com.vmarket.user;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+
+import javax.sql.DataSource;
+
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
+
+/**
+ * Chạy Flyway THẬT (V1 → V4) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
+ *
+ * <p>Nếu context khởi động được nghĩa là: (1) script migration chạy không lỗi,
+ * (2) mapping entity khớp với cột/kiểu trong migration. Đây là điểm mà bộ test còn
+ * lại (Flyway tắt + {@code create-drop}) không kiểm được — chúng chạy trên schema
+ * do Hibernate tự sinh, nên một lỗi trong {@code V1__init_user_schema.sql} vẫn để
+ * CI xanh cho tới khi deploy thật lên PostgreSQL.
+ *
+ * <p>DB riêng ({@code jdbc:h2:mem:user_flyway_it}) để không đụng schema của các test
+ * khác. Test end-to-end trên PostgreSQL thật (Testcontainers) để dành PBL6-47.
+ *
+ * <p>Giống {@code com.vmarket.auth.FlywayMigrationTest} bên auth-service — cố ý
+ * chép cùng một khuôn để hai service kiểm migration theo đúng một cách.
+ *
+ * <p><b>Trên H2 chỉ thấy V1, V2 và V4 — thiếu V3.</b> {@code locations} có
+ * placeholder {@code {vendor}}; chạy trên H2 thì {@code db/vendor/h2} không tồn tại
+ * nên {@code db/vendor/postgresql/V3__addresses_one_default_per_user.sql} (partial
+ * index, cú pháp riêng của Postgres) không được nạp. Trên PostgreSQL thật sẽ có đủ
+ * bốn — con số 3 dưới đây là <b>đúng cho H2</b>, không phải số migration của prod.
+ */
+@SpringBootTest
+@TestPropertySource(properties = {
+		"spring.datasource.url=jdbc:h2:mem:user_flyway_it;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
+		"spring.flyway.enabled=true",
+		"spring.flyway.locations=classpath:db/migration,classpath:db/vendor/{vendor}",
+		"spring.jpa.hibernate.ddl-auto=validate",
+})
+class FlywayMigrationTest {
+
+	@Autowired Flyway flyway;
+	@Autowired DataSource dataSource;
+
+	@Test
+	void migrations_applied_upToLatestVersion() {
+		var current = flyway.info().current();
+		assertThat(current).isNotNull();
+		assertThat(current.getVersion().getVersion()).isEqualTo("4");
+		assertThat(flyway.info().applied()).hasSize(3);
+	}
+
+	@Test
+	void columns_present_and_entitiesValidateAgainstMigratedSchema() throws Exception {
+		try (Connection c = dataSource.getConnection()) {
+			// V1 - user_profiles (FR-USER-01)
+			assertThat(columnExists(c, "user_profiles", "user_id")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "full_name")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "avatar_url")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "phone")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "date_of_birth")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "gender")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "created_at")).isTrue();
+			assertThat(columnExists(c, "user_profiles", "updated_at")).isTrue();
+			// V2 - addresses (FR-USER-02)
+			assertThat(columnExists(c, "addresses", "user_id")).isTrue();
+			assertThat(columnExists(c, "addresses", "recipient_name")).isTrue();
+			assertThat(columnExists(c, "addresses", "phone")).isTrue();
+			assertThat(columnExists(c, "addresses", "province")).isTrue();
+			assertThat(columnExists(c, "addresses", "district")).isTrue();
+			assertThat(columnExists(c, "addresses", "ward")).isTrue();
+			assertThat(columnExists(c, "addresses", "street_address")).isTrue();
+			assertThat(columnExists(c, "addresses", "note")).isTrue();
+			assertThat(columnExists(c, "addresses", "is_default")).isTrue();
+			// V4 - idempotency_keys (Idempotency-Key cho mọi endpoint ghi)
+			assertThat(columnExists(c, "idempotency_keys", "user_id")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "idempotency_key")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "request_method")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "request_path")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "request_fingerprint")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "response_status")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "response_body")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "response_content_type")).isTrue();
+			assertThat(columnExists(c, "idempotency_keys", "completed_at")).isTrue();
+		}
+		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
+	}
+
+	private static boolean columnExists(Connection c, String table, String column) throws Exception {
+		DatabaseMetaData meta = c.getMetaData();
+		for (String t : new String[] { table, table.toUpperCase() }) {
+			for (String col : new String[] { column, column.toUpperCase() }) {
+				try (ResultSet rs = meta.getColumns(null, null, t, col)) {
+					if (rs.next()) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+}

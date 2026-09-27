@@ -10,8 +10,25 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      # Schema do Flyway quan ly. 'validate' de Hibernate chi doi chieu mapping voi
+      # schema thuc te, khong tu sua DDL (giong auth-service).
+      ddl-auto: validate
     show-sql: true
+  flyway:
+    enabled: true
+    # {vendor} = ten CSDL dang chay (postgresql / h2). Migration dung duoc o moi
+    # CSDL nam o db/migration; rieng cai phu thuoc cu phap Postgres (partial index
+    # cua FR-USER-02) nam o db/vendor/postgresql. Chay tren H2 thi db/vendor/h2
+    # khong ton tai va Flyway bo qua - xem V3__addresses_one_default_per_user.sql.
+    #
+    # db/vendor PHAI nam ngoai db/migration: Flyway quet de quy nen mot thu muc con
+    # cua db/migration se bi nap o MOI vendor (no con log "Discarding location ...
+    # as it is a sub-location of ..." roi van chay file do) - dung y tach vendor mat
+    # sach.
+    locations: classpath:db/migration,classpath:db/vendor/{vendor}
+    # Cho phep migrate tren DB da co bang (vmarket_user duoc tao san boi container)
+    baseline-on-migrate: true
+    baseline-version: 0
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -27,6 +44,43 @@ management:
       exposure:
         include: health,info
 
+# springdoc dung path mac dinh: /swagger-ui.html va /v3/api-docs
+# (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # Header Idempotency-Key cho cac endpoint ghi (POST/PUT/PATCH/DELETE). Header la
+  # TUY CHON: thieu no thi request chay y nhu truoc, chi la khong co bao ve.
+  idempotency:
+    enabled: ${IDEMPOTENCY_ENABLED:true}
+    # Qua moc nay ma request van chua xong thi coi nhu tien trinh xu ly no da chet
+    # va nha key ra. Phai dai hon thoi gian xu ly that cua endpoint cham nhat.
+    claim-timeout: ${IDEMPOTENCY_CLAIM_TIMEOUT:5m}
+    # Giu ket qua bao lau de con phat lai. Retry cua client xay ra trong vai giay
+    # toi vai phut; mot ngay la rong rai.
+    retention: ${IDEMPOTENCY_RETENTION:1d}
+  # API noi bo cua auth-service (PBL6-13): doi mat khau (FR-USER-03) va Admin quan ly
+  # tai khoan (FR-USER-04) - mat khau / trang thai khoa nam o CSDL vmarket_auth nen
+  # user-service goi REST noi bo, KHONG doc cheo CSDL (SRS 5.4).
+  # internal-api-key KHONG co mac dinh o file nen -> thieu INTERNAL_API_KEY la fail
+  # ngay luc khoi dong. PHAI trung voi gia tri cua auth-service.
+  auth-service:
+    base-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    internal-api-key: ${INTERNAL_API_KEY}
+    connect-timeout: ${AUTH_SERVICE_CONNECT_TIMEOUT:2s}
+    read-timeout: ${AUTH_SERVICE_READ_TIMEOUT:5s}
+
+# JWT - user-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
+# hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va
+# chung bien moi truong AUTH_JWT_SECRET voi auth-service; dat ten khac se dan toi
+# canh hai service cung chay ma token ben nay ben kia khong doc duoc.
+#
+# secret KHONG co gia tri mac dinh o file nen -> moi moi truong (ke ca prod) thieu
+# AUTH_JWT_SECRET se fail ngay luc khoi dong (placeholder khong resolve + @NotBlank
+# tren UserJwtProperties). Gia tri gia cho local dev nam o application-dev.yml.
+#
+# KHONG khai access-ttl / refresh-ttl: thoi han la viec cua ben phat hanh token.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}

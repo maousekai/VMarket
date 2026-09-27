@@ -1,4 +1,6 @@
-# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL that
+# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL / Docker.
+# Luu y: file nay o test classpath nen GHI DE hoan toan application.yml chinh khi
+# chay test -> phai tu chua du cac khoa can thiet.
 spring:
   application:
     name: user-service
@@ -9,4 +11,22 @@ spring:
     password: ""
   jpa:
     hibernate:
+      # Test dung schema do Hibernate sinh tu entity (khong chay migration Postgres).
       ddl-auto: create-drop
+  flyway:
+    enabled: false
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  auth-service:
+    # ChangePasswordApiTest / AdminUserApiTest mock AuthServiceClient (@MockitoBean);
+    # AuthServiceClientTest dung MockRestServiceServer - khong co request that nao toi
+    # dia chi nay.
+    base-url: http://auth-service.test:8081
+    internal-api-key: test-only-internal-api-key-0123456789-0123456789
+
+auth:
+  jwt:
+    # Du 32 byte cho HS256 (Keys.hmacShaKeyFor tu choi khoa ngan hon).
+    secret: test-only-secret-0123456789-0123456789-0123456789

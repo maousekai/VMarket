@@ -1,4 +1,6 @@
-# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL that
+# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL / RabbitMQ / Docker.
+# Luu y: file nay o test classpath nen GHI DE hoan toan application.yml chinh khi
+# chay test -> phai tu chua du cac khoa can thiet.
 spring:
   application:
     name: shop-service
@@ -9,4 +11,18 @@ spring:
     password: ""
   jpa:
     hibernate:
+      # Test dung schema do Hibernate sinh tu entity. Migration that duoc kiem rieng
+      # o FlywayMigrationTest (Flyway bat + ddl-auto=validate).
       ddl-auto: create-drop
+    open-in-view: false
+  flyway:
+    enabled: false
+
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+
+auth:
+  jwt:
+    # Du 32 byte cho HS256 (Keys.hmacShaKeyFor tu choi khoa ngan hon).
+    secret: test-only-secret-0123456789-0123456789-0123456789

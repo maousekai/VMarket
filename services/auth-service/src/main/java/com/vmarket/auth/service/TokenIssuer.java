@@ -11,6 +11,7 @@ import com.vmarket.auth.dto.TokenResponse;
 import com.vmarket.auth.entity.RefreshToken;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.entity.UserRole;
+import com.vmarket.auth.exception.ApiException;
 import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRoleRepository;
@@ -39,8 +40,25 @@ public class TokenIssuer {
 	private final OpaqueTokenCodec tokenCodec;
 	private final AuthJwtProperties jwtProps;
 
-	/** Sinh MỘT refresh token mới + access token, trả về response (đăng nhập / OTP). */
+	/**
+	 * Sinh MỘT refresh token mới + access token, trả về response (đăng nhập / OTP).
+	 *
+	 * <p>Từ chối tài khoản bị Admin khoá (FR-USER-04) ngay tại đây — điểm chung của
+	 * mọi luồng đăng nhập — để luồng mới thêm sau (Google...) không thể quên kiểm tra.
+	 * Caller đã xác thực danh tính (mật khẩu/OTP đúng) trước khi gọi, nên người đoán
+	 * sai mật khẩu không dò được tài khoản nào đang bị khoá.
+	 *
+	 * <p><b>Hợp đồng với caller:</b> {@code user} phải được nạp bằng
+	 * {@code UserRepository.findByIdForUpdate} / {@code findByEmailForUpdate} trong CÙNG
+	 * transaction. Chỉ khi dòng user bị khoá tới lúc commit thì kiểm tra dưới đây mới còn
+	 * đúng lúc refresh token được lưu — nếu không, Admin có thể khoá + thu hồi phiên xen
+	 * vào giữa và token này thoát lưới (review PR #22, M1).
+	 */
 	public TokenResponse issue(User user) {
+		if (user.isSuspended()) {
+			log.warn("Từ chối phát token cho tài khoản bị Admin khoá userId={}", user.getId());
+			throw ApiException.accountSuspended();
+		}
 		String rawRefresh = tokenCodec.generate();
 		RefreshToken token = new RefreshToken();
 		token.setUserId(user.getId());

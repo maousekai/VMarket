@@ -57,7 +57,8 @@ $Groups = @(
   @{ Name = "CORS origins";      Root = "CORS_ALLOWED_ORIGINS"; Service = @("CORS_ALLOWED_ORIGINS", "APP_CORS_ALLOWED_ORIGINS") },
   @{ Name = "JWT secret";        Root = "AUTH_JWT_SECRET";      Service = @("AUTH_JWT_SECRET") },
   @{ Name = "JWT access TTL";    Root = "AUTH_JWT_ACCESS_TTL";  Service = @("AUTH_JWT_ACCESS_TTL") },
-  @{ Name = "JWT refresh TTL";   Root = "AUTH_JWT_REFRESH_TTL"; Service = @("AUTH_JWT_REFRESH_TTL") }
+  @{ Name = "JWT refresh TTL";   Root = "AUTH_JWT_REFRESH_TTL"; Service = @("AUTH_JWT_REFRESH_TTL") },
+  @{ Name = "Internal API key";  Root = "INTERNAL_API_KEY";     Service = @("INTERNAL_API_KEY") }
 )
 
 Write-Info ">> [1/3] .env goc  <->  services\<svc>\.env.example"
@@ -121,7 +122,7 @@ $MustBeEmpty = @(
   "DB_HOST", "DB_USERNAME", "DB_PASSWORD",
   "MONGO_HOST", "REDIS_HOST",
   "RABBITMQ_HOST", "RABBITMQ_USERNAME", "RABBITMQ_PASSWORD",
-  "AUTH_JWT_SECRET",
+  "AUTH_JWT_SECRET", "INTERNAL_API_KEY",
   "CORS_ALLOWED_ORIGINS", "APP_CORS_ALLOWED_ORIGINS"
 )
 

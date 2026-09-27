@@ -19,6 +19,9 @@ spring:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  auth-service:
+    # Khong co mac dinh o prod: thieu bien -> fail ngay luc khoi dong.
+    base-url: ${AUTH_SERVICE_URL}
 
 logging:
   level:

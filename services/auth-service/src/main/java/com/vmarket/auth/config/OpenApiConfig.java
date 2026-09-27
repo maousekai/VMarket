@@ -27,6 +27,11 @@ public class OpenApiConfig {
 						.addSecuritySchemes("bearerAuth", new SecurityScheme()
 								.type(SecurityScheme.Type.HTTP)
 								.scheme("bearer")
-								.bearerFormat("JWT")));
+								.bearerFormat("JWT"))
+						// API nội bộ /internal/** (PBL6-13) — service-to-service, không phải JWT người dùng.
+						.addSecuritySchemes("internalApiKey", new SecurityScheme()
+								.type(SecurityScheme.Type.APIKEY)
+								.in(SecurityScheme.In.HEADER)
+								.name(InternalApiProperties.HEADER)));
 	}
 }

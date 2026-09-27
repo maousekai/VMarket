@@ -25,3 +25,28 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  cart:
+    # TTL của giỏ trong Redis (ngày) - refresh mỗi lần ghi
+    ttl-days: ${CART_TTL_DAYS:30}
+  products:
+    # Product Catalog để kiểm tra giá/tồn kho trước thanh toán (FR-CART-03)
+    base-url: ${PRODUCT_SERVICE_URL:http://localhost:8084}
+    # Đối với INTERNAL_API_KEY gốc repo (docker-compose.yml)
+    api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
+  # Khoá xác thực cuộc gọi NỘI BỘ service-to-service (order-service đọc/xoá giỏ khi
+  # đặt hàng). KHÔNG có giá trị mặc định ở file nền -> thiếu INTERNAL_API_KEY là
+  # fail ngay lúc khởi động thay vì chạy với khoá đoán được. Giá trị giả cho local
+  # nằm ở application-dev.yml.
+  internal-api:
+    api-key: ${INTERNAL_API_KEY}
+
+# JWT - cart-service TỰ verify token do auth-service ký (HS256, khoá đối xứng nên
+# hai bên phải dùng CHUNG một chuỗi bí mật). Dùng chung prefix `auth.jwt` và chung
+# biến môi trường AUTH_JWT_SECRET với auth-service / user-service / shop-service.
+#
+# secret KHÔNG có giá trị mặc định ở file nền -> mọi môi trường (kể cả prod) thiếu
+# AUTH_JWT_SECRET sẽ fail ngay lúc khởi động (placeholder không resolve + @NotBlank
+# trên CartJwtProperties). Giá trị giả cho local dev nằm ở application-dev.yml.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}

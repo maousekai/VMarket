@@ -2,6 +2,7 @@
 
 # Shell scripts phải là LF
 *.sh text eol=lf
+*.envsh text eol=lf
 mvnw text eol=lf
 
 # Windows scripts là CRLF

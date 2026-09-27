@@ -125,6 +125,24 @@ class OtpVerifyApiTest {
 	}
 
 	@Test
+	void verify_suspendedAccount_correctCode_423_noTokens() throws Exception {
+		User existing = new User();
+		existing.setEmail(EMAIL);
+		existing.setUsername("an.nguyen");
+		existing.setEmailVerified(true);
+		existing.setSuspendedAt(Instant.now());
+		userRepository.save(existing);
+
+		String code = requestOtpAndCaptureCode(EMAIL);
+		verify(EMAIL, code)
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"))
+				.andExpect(jsonPath("$.accessToken").doesNotExist());
+
+		assertThat(refreshTokenRepository.count()).isZero();
+	}
+
+	@Test
 	void verify_wrongCode_400_incrementsAttempts() throws Exception {
 		requestOtpAndCaptureCode(EMAIL);
 

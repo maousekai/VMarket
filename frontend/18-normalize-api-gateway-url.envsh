@@ -1,0 +1,28 @@
+#!/bin/sh
+# Chuan hoa API_GATEWAY_URL truoc khi 20-envsubst-on-templates.sh render
+# default.conf.template (so 18 < 20 nen chay truoc).
+#
+# Template ghep "proxy_pass $gateway$request_uri;" ma $request_uri luon bat dau
+# bang "/". Neu API_GATEWAY_URL co "/" o cuoi (vd http://api-gateway:8080/) thi
+# request sang Gateway thanh http://api-gateway:8080//api/auth/health -> co the
+# truot predicate Path=/api/auth/** cua Gateway va tra 404. Bo het "/" o cuoi de
+# ca hai cach viet deu dung.
+#
+# File .envsh duoc entrypoint cua image nginx SOURCE (khong chay tien trinh con)
+# nen export o day moi den duoc script envsubst chay sau. Vi bi source:
+#   - dung "return", KHONG dung "exit" (exit se dung ca entrypoint);
+#   - 15-local-resolvers.envsh da bat "set -u" nen bien phai doc qua ${VAR:-}.
+
+[ -n "${API_GATEWAY_URL:-}" ] || return 0
+
+normalized_gateway_url="$API_GATEWAY_URL"
+while [ "${normalized_gateway_url%/}" != "$normalized_gateway_url" ]; do
+    normalized_gateway_url="${normalized_gateway_url%/}"
+done
+
+if [ "$normalized_gateway_url" != "$API_GATEWAY_URL" ]; then
+    entrypoint_log "$0: API_GATEWAY_URL co '/' o cuoi, doi '$API_GATEWAY_URL' -> '$normalized_gateway_url'"
+    API_GATEWAY_URL="$normalized_gateway_url"
+    export API_GATEWAY_URL
+fi
+unset normalized_gateway_url

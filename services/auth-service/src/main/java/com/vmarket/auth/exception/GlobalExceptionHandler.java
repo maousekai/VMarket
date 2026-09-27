@@ -9,8 +9,10 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -51,6 +53,20 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
 		return ResponseEntity.badRequest()
 				.body(ErrorResponse.of("VALIDATION_ERROR", "Tham số '" + ex.getName() + "' sai kiểu dữ liệu"));
+	}
+
+	/** Thiếu header bắt buộc, vd. {@code X-Actor-Id} của API quản trị nội bộ (FR-USER-04). */
+	@ExceptionHandler(MissingRequestHeaderException.class)
+	public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("VALIDATION_ERROR", "Thiếu header '" + ex.getHeaderName() + "'"));
+	}
+
+	/** {@code @Min}/{@code @Max} trên tham số query (vd. phân trang lịch sử hoạt động). */
+	@ExceptionHandler(HandlerMethodValidationException.class)
+	public ResponseEntity<ErrorResponse> handleMethodValidation(HandlerMethodValidationException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("VALIDATION_ERROR", "Tham số không hợp lệ"));
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)

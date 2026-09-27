@@ -26,7 +26,7 @@ VMarket/
 │   ├── mvnw                   # Maven Wrapper dùng chung (build từ đây cho cả 11 module)
 │   ├── api-gateway/           # Spring Cloud Gateway (8080)
 │   ├── auth-service/          # Xác thực, phân quyền RBAC (8081, PostgreSQL)
-│   ├── user-service/          # Hồ sơ, sổ địa chỉ (8082, PostgreSQL)
+│   ├── user-service/          # Hồ sơ, sổ địa chỉ, đổi mật khẩu, Admin quản lý người dùng (8082, PostgreSQL)
 │   ├── shop-service/          # Gian hàng (8083, PostgreSQL)
 │   ├── product-service/       # Danh mục, sản phẩm, tồn kho (8084, MongoDB)
 │   ├── cart-service/          # Giỏ hàng (8085, Redis)
@@ -186,16 +186,23 @@ chung. Chi tiết: [`docs/templates/README.md`](docs/templates/README.md).
 ```bash
 cd frontend
 npm install
-copy .env.example .env            # VITE_API_BASE_URL=http://localhost:8080 (gateway)
 npm run dev                       # http://localhost:5173
 ```
+
+Dev server tự proxy `/api` sang gateway `http://localhost:8080` (xem
+`vite.config.js`), nên không cần `.env`. Chỉ copy `.env.example` thành `.env`
+khi muốn đổi đích proxy (`VITE_DEV_API_TARGET`).
 
 Hoặc chạy frontend bằng Docker (image tự build, phục vụ bằng nginx):
 
 ```bash
 docker compose up -d --build frontend   # http://localhost:5173
-# Muon doi URL API: sua build.args.VITE_API_BASE_URL cua service frontend trong docker-compose.yml
 ```
+
+Trong container, nginx vừa phục vụ file tĩnh (SPA fallback cho react-router)
+vừa **reverse proxy `/api/*` sang API Gateway** — browser gọi cùng origin nên
+không dính CORS. Đổi đích proxy bằng biến `API_GATEWAY_URL` trong `.env`
+(runtime, **không cần build lại image**).
 
 Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết nối API thành công" khi gateway + auth-service đang chạy.
 
@@ -206,6 +213,10 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | Hạ tầng   | `docker compose ps`                                   | các container healthy       |
 | Gateway   | `curl http://localhost:8080/actuator/health`          | `{"status":"UP"}`           |
 | Auth      | `curl http://localhost:8081/api/auth/health`          | `{"status":"UP",...}`       |
+| User      | `curl http://localhost:8082/api/users/health`         | `{"status":"UP",...}`       |
+| User (cần token) | `curl http://localhost:8082/api/users/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
+| Shop      | `curl http://localhost:8083/api/shops/health`         | `{"status":"UP",...}`       |
+| Shop (cần token) | `curl http://localhost:8083/api/shops/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
 | Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |
 | RabbitMQ  | mở `http://localhost:15672`                           | đăng nhập guest/guest       |
@@ -216,3 +227,4 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 - [Quy ước git/commit/PR](CONTRIBUTING.md)
 - [Template Dockerfile + CI/CD cho service mới](docs/templates/README.md)
 - [README Auth Service](services/auth-service/README.md)
+- [README Shop Service](services/shop-service/README.md)

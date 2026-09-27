@@ -50,6 +50,25 @@ class EventsJsonTest {
 		assertThat(raw).contains("\"payload\":");
 	}
 
+	/**
+	 * Khoá tên trường trên dây của sự kiện gian hàng (PBL6-14): Auth / Product /
+	 * Notification đọc đúng các khoá này, đổi tên field của record là phá hợp đồng.
+	 */
+	@Test
+	void shopEvents_roundTrip_andWireFieldNames() {
+		ShopApproved approved = new ShopApproved("01S", "01U", "Tiệm Gốm Hội An", "01A", false);
+		ShopSuspended suspended = new ShopSuspended("01S", "01U", "Tiệm Gốm Hội An", "01A", "Bán hàng giả");
+
+		String approvedRaw = new String(json.write(
+				new EventEnvelope("evt-3", EventType.SHOP_APPROVED, 1730000000000L, approved)), StandardCharsets.UTF_8);
+		assertThat(approvedRaw).contains("\"shopId\":\"01S\"", "\"ownerId\":\"01U\"",
+				"\"shopName\":\"Tiệm Gốm Hội An\"", "\"approvedBy\":\"01A\"", "\"reinstated\":false");
+
+		EventEnvelope parsed = json.readEnvelope(json.write(
+				new EventEnvelope("evt-4", EventType.SHOP_SUSPENDED, 1730000000000L, suspended)));
+		assertThat(json.convert(parsed.payload(), ShopSuspended.class)).isEqualTo(suspended);
+	}
+
 	@Test
 	void readEnvelope_malformedBody_throwsEventBusException() {
 		assertThatThrownBy(() -> json.readEnvelope("not-json".getBytes(StandardCharsets.UTF_8)))
