@@ -42,6 +42,7 @@ class JwtAuthenticationFilterTest {
 				"/api/auth/health",
 				"/actuator/**"));
 		security.setPublicGetPaths(List.of("/api/products/**"));
+		security.setInternalDenyPaths(List.of("/api/*/internal/**"));
 
 		filter = new JwtAuthenticationFilter(new JwtService(jwtProps), security);
 	}
@@ -181,5 +182,26 @@ class JwtAuthenticationFilterTest {
 		MockHttpServletResponse res = new MockHttpServletResponse();
 		filter.doFilter(request("GET", "/api/auth/me", null), res, new MockFilterChain());
 		assertThat(res.getStatus()).isEqualTo(401);
+	}
+
+	@Test
+	void internalPath_withoutToken_rejectedAsNotFound() throws Exception {
+		// Path nội bộ service-to-service bị gateway chặn ở MỌI method, kể cả khi
+		// rơi vào public-get-paths — trả 404 như resource không tồn tại.
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		filter.doFilter(request("POST", "/api/products/internal/shop-access/reconcile", null), res,
+				new MockFilterChain());
+		assertThat(res.getStatus()).isEqualTo(404);
+	}
+
+	@Test
+	void internalPath_withValidToken_stillRejectedAsNotFound() throws Exception {
+		// Kể cả khi kèm JWT hợp lệ thì endpoint nội bộ vẫn không được truy cập qua
+		// gateway — bắt buộc gọi trực tiếp giữa các service trong mạng nội bộ.
+		String valid = token(Instant.now(), Instant.now().plusSeconds(60));
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		filter.doFilter(request("GET", "/api/products/internal/shop-access/shops", "Bearer " + valid), res,
+				new MockFilterChain());
+		assertThat(res.getStatus()).isEqualTo(404);
 	}
 }

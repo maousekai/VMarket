@@ -33,6 +33,22 @@ public class GatewaySecurityProperties {
 	/** Path chỉ public cho GET/HEAD. */
 	private List<String> publicGetPaths = new ArrayList<>();
 
+	/**
+	 * Path nội bộ giữa các service bị gateway CHẶN ở mọi method (trả 404).
+	 * Endpoint này được thiết kế để service gọi trực tiếp nhau trong mạng nội bộ,
+	 * không bao giờ đi qua cổng công khai — lớp defense-in-depth bên cạnh
+	 * {@code X-Internal-Api-Key} của từng service (PBL6-15 Review 3).
+	 */
+	private List<String> internalDenyPaths = new ArrayList<>();
+
+	public List<String> getInternalDenyPaths() {
+		return internalDenyPaths;
+	}
+
+	public void setInternalDenyPaths(List<String> internalDenyPaths) {
+		this.internalDenyPaths = internalDenyPaths;
+	}
+
 	public List<String> getPublicPaths() {
 		return publicPaths;
 	}

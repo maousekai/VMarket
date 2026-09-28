@@ -8,9 +8,8 @@ import org.slf4j.LoggerFactory;
  * khớp {@code eventType}, đồng thời chuyển payload JSON sang đúng kiểu Java mà
  * từng consumer khai báo.
  *
- * <p>Suy giảm có kiểm soát (NFR-REL-02): nếu một consumer ném lỗi, dispatcher chỉ
- * log và tiếp tục các consumer còn lại (không làm chết toàn bộ listener). Việc
- * retry/DLQ sẽ được bổ sung ở giai đoạn sau.
+ * <p>Nếu một consumer lỗi, dispatcher vẫn chạy các consumer còn lại rồi ném lỗi
+ * tổng hợp để listener áp dụng retry/DLQ (NFR-REL-02).
  */
 public class EventConsumerDispatcher {
 
@@ -26,19 +25,24 @@ public class EventConsumerDispatcher {
 
 	/** Phân phối envelope cho mọi consumer khớp eventType. */
 	public void dispatch(EventEnvelope envelope) {
+		RuntimeException firstFailure = null;
 		for (EventConsumer<?> consumer : registry.consumersFor(envelope.eventType())) {
-			handle(consumer, envelope);
+			try {
+				handle(consumer, envelope);
+			} catch (RuntimeException ex) {
+				if (firstFailure == null) firstFailure = ex;
+				log.error("Lỗi khi xử lý sự kiện {} trên consumer {}: {}",
+						envelope.eventType(), consumer.getClass().getName(), ex.getMessage(), ex);
+			}
+		}
+		if (firstFailure != null) {
+			throw new EventBusException("Có consumer xử lý thất bại cho " + envelope.eventType(), firstFailure);
 		}
 	}
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private <T> void handle(EventConsumer<T> consumer, EventEnvelope envelope) {
-		try {
-			T payload = json.convert(envelope.payload(), consumer.payloadType());
-			consumer.handle(payload, envelope);
-		} catch (Exception ex) {
-			log.error("Lỗi khi xử lý sự kiện {} trên consumer {}: {}",
-					envelope.eventType(), consumer.getClass().getName(), ex.getMessage(), ex);
-		}
+		T payload = json.convert(envelope.payload(), consumer.payloadType());
+		consumer.handle(payload, envelope);
 	}
 }

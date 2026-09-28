@@ -36,6 +36,6 @@ class EventBusAutoConfigurationTest {
 		TopicExchange exchange = new TopicExchange("vmarket.events");
 
 		Declarables declarables = configuration.eventDeclarables(properties, exchange);
-		assertThat(declarables.getDeclarables()).hasSize(3); // 1 Queue + 2 Bindings
+		assertThat(declarables.getDeclarables()).hasSize(6); // queue + DLQ infrastructure + 2 bindings
 	}
 }

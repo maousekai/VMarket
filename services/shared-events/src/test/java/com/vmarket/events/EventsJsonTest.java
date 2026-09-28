@@ -3,7 +3,6 @@ package com.vmarket.events;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -15,7 +14,7 @@ class EventsJsonTest {
 
 	@Test
 	void envelope_roundTrip_preservesFieldsAndPayload() {
-		ProductCreated payload = new ProductCreated("01P", "01S", "Áo thun", new BigDecimal("100000"),
+		ProductCreated payload = new ProductCreated("01P", "01S", "Áo thun", 100000L,
 				"ACTIVE", List.of("https://cdn.vmarket/img/1.jpg"));
 
 		EventEnvelope envelope = new EventEnvelope("evt-1", EventType.PRODUCT_CREATED, 1730000000000L, payload);
@@ -32,7 +31,8 @@ class EventsJsonTest {
 		assertThat(converted.productId()).isEqualTo("01P");
 		assertThat(converted.shopId()).isEqualTo("01S");
 		assertThat(converted.name()).isEqualTo("Áo thun");
-		assertThat(converted.price()).isEqualByComparingTo("100000");
+		assertThat(converted.price()).isEqualTo(100000L);
+		assertThat(converted.currency()).isEqualTo("VND");
 		assertThat(converted.status()).isEqualTo("ACTIVE");
 		assertThat(converted.imageUrls()).containsExactly("https://cdn.vmarket/img/1.jpg");
 	}

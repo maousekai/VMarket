@@ -1,6 +1,7 @@
 package com.vmarket.events;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +39,7 @@ class EventConsumerDispatcherTest {
 
 		// Mô phỏng đúng luồng thật: serialize → đọc lại (payload thành Map) → dispatch
 		EventEnvelope envelope = new EventEnvelope("evt", EventType.PRODUCT_CREATED, 0L,
-				new ProductCreated("p9", "s9", "Quần", java.math.BigDecimal.valueOf(200000), "ACTIVE", List.of()));
+				new ProductCreated("p9", "s9", "Quần", 200000L, "ACTIVE", List.of()));
 		EventEnvelope received = json.readEnvelope(json.write(envelope));
 
 		dispatcher.dispatch(received);
@@ -85,12 +86,12 @@ class EventConsumerDispatcherTest {
 		EventConsumerDispatcher dispatcher = new EventConsumerDispatcher(registry, json);
 
 		EventEnvelope envelope = new EventEnvelope("evt", EventType.PRODUCT_CREATED, 0L,
-				new ProductCreated("p9", "s9", "Quần", java.math.BigDecimal.valueOf(200000), "ACTIVE", List.of()));
+				new ProductCreated("p9", "s9", "Quần", 200000L, "ACTIVE", List.of()));
 		EventEnvelope received = json.readEnvelope(json.write(envelope));
 
-		// Dispatch không được ném ngoại lệ và succeedingConsumer vẫn phải nhận được sự kiện (NFR-REL-02)
-		dispatcher.dispatch(received);
+		assertThatThrownBy(() -> dispatcher.dispatch(received)).isInstanceOf(EventBusException.class);
 
+		// Consumer độc lập vẫn chạy; exception được trả lên listener để retry/DLQ.
 		assertThat(succeedingConsumer.received).hasSize(1);
 		assertThat(succeedingConsumer.received.get(0).productId()).isEqualTo("p9");
 	}

@@ -5,7 +5,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -25,7 +24,7 @@ class RabbitEventPublisherTest {
 
 	@Test
 	void publish_sendsEnvelopeToExchangeWithRoutingKeyAsType() {
-		ProductCreated payload = new ProductCreated("p1", "s1", "Áo thun", new BigDecimal("100000"),
+		ProductCreated payload = new ProductCreated("p1", "s1", "Áo thun", 100000L,
 				"ACTIVE", List.of("https://cdn/1.jpg"));
 
 		publisher.publish(EventType.PRODUCT_CREATED, payload);
