@@ -72,6 +72,11 @@ class PostgresFlywayIntegrationTest {
 
 	@DynamicPropertySource
 	static void datasource(DynamicPropertyRegistry registry) {
+		// src/test/resources/application.yml khoa cung driver-class-name=org.h2.Driver
+		// cho toan bo test classpath (xem comment trong file do) -> phai ghi de rieng
+		// o day, neu khong driver H2 se tu choi jdbcUrl postgresql:// (that bai luc
+		// khoi dong context, khong phai luc chay test).
+		registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
