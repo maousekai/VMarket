@@ -108,11 +108,19 @@ docker run -p 8081:8081 -e DB_HOST=host.docker.internal vmarket-auth-service
 
 ## Chạy test
 
-Test dùng H2 in-memory (MODE PostgreSQL) nên không cần PostgreSQL thật:
+Phần lớn test dùng H2 in-memory (MODE PostgreSQL) nên không cần PostgreSQL thật:
 
 ```bash
 ..\mvnw.cmd test
 ```
+
+**`PostgresFlywayIntegrationTest` (PBL6-47)** chạy Flyway + đăng ký tài khoản
+trên PostgreSQL THẬT qua Testcontainers (`disabledWithoutDocker = true` — tự
+bỏ qua nếu máy không có Docker đang chạy, không làm `mvn test` fail cứng).
+Xác nhận những điều H2 (chỉ giả lập cú pháp Postgres) không tự kiểm được: tên
+constraint UNIQUE Postgres thật sinh ra (`users_email_key`,
+`users_username_key`) khớp đúng với logic suy luận trường trùng trong
+`RegistrationService.duplicateConflict`.
 
 Swagger UI: `http://localhost:8081/swagger-ui.html` — spec JSON: `/v3/api-docs`.
 
@@ -315,4 +323,7 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 - [x] PBL6-13 (FR-USER-03): API nội bộ `/internal/users/{id}/password` cho user-service đổi mật khẩu (không cần migration)
 - [x] PBL6-13 (FR-USER-04): API nội bộ Admin tìm kiếm / khoá / mở khoá tài khoản / xem lịch sử hoạt động (migration V7, V8)
 - [x] FR-AUTH-05/06 (PBL6-46): **Phân quyền RBAC (gateway) + quản lý phiên** (`/api/auth/logout`, `/api/auth/sessions/*`, migration V6)
-- [ ] PBL6-47: Testing, Swagger & PR review
+- [x] PBL6-47: **Testing, Swagger & PR review** — `PostgresFlywayIntegrationTest`
+  (Testcontainers, đóng lại TODO lặp lại từ PBL6-41), `HealthController` gắn
+  annotation Swagger còn thiếu, `OpenApiDocsSmokeTest`, rà soát code toàn bộ
+  service. Subtask cuối của PBL6-12.

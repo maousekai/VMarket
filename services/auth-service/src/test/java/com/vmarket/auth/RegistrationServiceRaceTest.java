@@ -27,6 +27,12 @@ import com.vmarket.auth.service.RegistrationService;
  * Kiểm tra nhánh xử lý va chạm (2 request cùng email/username qua được pre-check,
  * DB ném vi phạm ràng buộc UNIQUE). Nhánh này không đi qua test tích hợp trên H2
  * vì tên constraint H2 khác PostgreSQL — nên test bằng mock thuần, không cần DB.
+ *
+ * <p>Giả định tên constraint thật ({@code users_email_key}/{@code users_username_key})
+ * có chứa chuỗi con "email"/"username" đã được xác nhận trên Postgres THẬT bởi
+ * {@link PostgresFlywayIntegrationTest} (PBL6-47, Testcontainers) — lớp này vẫn
+ * giữ nguyên bằng mock vì còn kiểm cả nhánh {@code REGISTRATION_CONFLICT} (tên
+ * constraint không xác định được), không phải vì giả định chưa được kiểm.
  */
 class RegistrationServiceRaceTest {
 
