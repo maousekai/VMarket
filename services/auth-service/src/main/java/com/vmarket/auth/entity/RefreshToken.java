@@ -45,6 +45,23 @@ public class RefreshToken extends BaseEntity {
 	@Column(name = "replaced_by", length = BaseEntity.ID_LENGTH)
 	private String replacedBy;
 
+	/** User-Agent của thiết bị đã phát/xoay vòng token này (hiển thị ở danh sách phiên). */
+	@Column(name = "user_agent", length = 255)
+	private String userAgent;
+
+	/** IP của thiết bị đã phát/xoay vòng token này (best-effort, chỉ để hiển thị). */
+	@Column(name = "ip_address", length = 45)
+	private String ipAddress;
+
+	/**
+	 * Lần gần nhất token này được dùng (phát/xoay vòng) — dùng để sắp xếp danh sách
+	 * phiên. Nullable (expand-contract): chỉ có thể NULL với dòng do một instance
+	 * auth-service CŨ (trước PBL6-46) tạo trong lúc rolling deploy; code hiện tại
+	 * luôn tự điền giá trị này.
+	 */
+	@Column(name = "last_used_at")
+	private Instant lastUsedAt;
+
 	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;

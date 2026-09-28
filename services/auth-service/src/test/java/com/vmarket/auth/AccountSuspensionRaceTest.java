@@ -26,7 +26,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import com.vmarket.auth.dto.LoginRequest;
-import com.vmarket.auth.dto.RefreshRequest;
 import com.vmarket.auth.entity.EmailOtp;
 import com.vmarket.auth.entity.PasswordResetToken;
 import com.vmarket.auth.entity.Role;
@@ -40,6 +39,7 @@ import com.vmarket.auth.repository.RefreshTokenRepository;
 import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
 import com.vmarket.auth.repository.UserRoleRepository;
+import com.vmarket.auth.security.DeviceMeta;
 import com.vmarket.auth.security.OpaqueTokenCodec;
 import com.vmarket.auth.service.AccountAdminService;
 import com.vmarket.auth.service.AuthenticationService;
@@ -70,6 +70,7 @@ class AccountSuspensionRaceTest {
 	private static final String PASSWORD = "Abcd1234@";
 	private static final String NEW_PASSWORD = "Newpass1@";
 	private static final String REASON = "Vi phạm";
+	private static final DeviceMeta DEVICE = new DeviceMeta("test-agent", "127.0.0.1");
 
 	@MockitoSpyBean OpaqueTokenCodec tokenCodec;
 	@MockitoSpyBean PasswordEncoder passwordEncoder;
@@ -121,7 +122,7 @@ class AccountSuspensionRaceTest {
 		doAnswer(pauseOnFirstCall()).when(tokenCodec).generate();
 
 		boolean suspendWaited = raceWithSuspend(
-				() -> authenticationService.login(new LoginRequest(an.getEmail(), PASSWORD)));
+				() -> authenticationService.login(new LoginRequest(an.getEmail(), PASSWORD), DEVICE));
 
 		assertSuspendedWithNoActiveSession();
 		assertThat(suspendWaited).as("Admin khoá phải chờ đăng nhập đang giữ dòng user").isTrue();
@@ -136,7 +137,7 @@ class AccountSuspensionRaceTest {
 		emailOtpRepository.save(otp);
 		doAnswer(pauseOnFirstCall()).when(tokenCodec).generate();
 
-		boolean suspendWaited = raceWithSuspend(() -> otpService.verifyOtp(an.getEmail(), "123456"));
+		boolean suspendWaited = raceWithSuspend(() -> otpService.verifyOtp(an.getEmail(), "123456", DEVICE));
 
 		assertSuspendedWithNoActiveSession();
 		assertThat(suspendWaited).as("Admin khoá phải chờ xác thực OTP đang giữ dòng user").isTrue();
@@ -144,10 +145,11 @@ class AccountSuspensionRaceTest {
 
 	@Test
 	void refresh_biKhoaXenGiua_tokenMoiVanBiThuHoi() throws Exception {
-		String refreshToken = authenticationService.login(new LoginRequest(an.getEmail(), PASSWORD)).refreshToken();
+		String refreshToken = authenticationService.login(new LoginRequest(an.getEmail(), PASSWORD), DEVICE)
+				.rawRefreshToken();
 		doAnswer(pauseOnFirstCall()).when(tokenCodec).generate();
 
-		boolean suspendWaited = raceWithSuspend(() -> authenticationService.refresh(new RefreshRequest(refreshToken)));
+		boolean suspendWaited = raceWithSuspend(() -> authenticationService.refresh(refreshToken, DEVICE));
 
 		assertSuspendedWithNoActiveSession();
 		assertThat(suspendWaited).as("Admin khoá phải chờ refresh đang giữ dòng user").isTrue();
