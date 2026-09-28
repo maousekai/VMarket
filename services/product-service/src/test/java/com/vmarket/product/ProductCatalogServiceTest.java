@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.vmarket.product.dto.ProductRequest;
+import com.vmarket.product.dto.ProductResponse;
 import com.vmarket.events.ProductCreated;
 import com.vmarket.product.exception.ApiException;
 import com.vmarket.product.event.ProductEventPublisher;
@@ -27,9 +29,11 @@ import com.vmarket.product.event.ProductEventFactory;
 import com.vmarket.product.model.Category;
 import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
+import com.vmarket.product.model.ProductUpdateKey;
 import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.repository.ProductCatalogQuery;
 import com.vmarket.product.repository.ProductRepository;
+import com.vmarket.product.repository.ProductUpdateKeyRepository;
 import com.vmarket.product.service.BrandService;
 import com.vmarket.product.service.CategoryService;
 import com.vmarket.product.service.ProductCatalogService;
@@ -42,6 +46,7 @@ import tools.jackson.databind.ObjectMapper;
 @ExtendWith(MockitoExtension.class)
 class ProductCatalogServiceTest {
 	@Mock ProductRepository repository;
+	@Mock ProductUpdateKeyRepository updateKeys;
 	@Mock ProductCatalogQuery query;
 	@Mock CategoryService categoryService;
 	@Mock BrandService brandService;
@@ -52,7 +57,7 @@ class ProductCatalogServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new ProductCatalogService(repository, query, categoryService, brandService,
+		service = new ProductCatalogService(repository, updateKeys, query, categoryService, brandService,
 				new ProductMapper(), publisher, new ProductEventFactory(),
 				new ProductDerivedFields(), shopAccessService, projections, new ObjectMapper());
 	}
@@ -108,7 +113,7 @@ class ProductCatalogServiceTest {
 		Product product = product("seller-owner", 0);
 		when(repository.findById("product-1")).thenReturn(Optional.of(product));
 
-		assertThatThrownBy(() -> service.update("product-1", "seller-other", request("variant-1", 10)))
+		assertThatThrownBy(() -> service.update("product-1", "seller-other", "update-1", request("variant-1", 10)))
 				.isInstanceOf(ApiException.class)
 				.hasMessageContaining("không sở hữu");
 		verify(repository, never()).save(any());
@@ -120,9 +125,46 @@ class ProductCatalogServiceTest {
 		when(repository.findById("product-1")).thenReturn(Optional.of(product));
 		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
 
-		assertThatThrownBy(() -> service.update("product-1", "seller-1", request("variant-1", 4)))
+		assertThatThrownBy(() -> service.update("product-1", "seller-1", "update-1", request("variant-1", 4)))
 				.isInstanceOf(ApiException.class)
 				.hasMessageContaining("tạm giữ");
+	}
+
+	@Test
+	void updateRetryDoesNotRestoreStockChangedAfterFirstResponse() {
+		Product product = product("seller-1", 0);
+		ProductUpdateKey[] storedKey = new ProductUpdateKey[1];
+		when(updateKeys.findByScopedKey("seller-1:update-1"))
+				.thenAnswer(invocation -> Optional.ofNullable(storedKey[0]));
+		when(updateKeys.save(any())).thenAnswer(invocation -> storedKey[0] = invocation.getArgument(0));
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
+		when(repository.save(product)).thenReturn(product);
+
+		service.update("product-1", "seller-1", "update-1", request("variant-1", 10));
+		product.getVariants().get(0).setStock(8);
+		ProductResponse replay = service.update("product-1", "seller-1", "update-1", request("variant-1", 10));
+
+		assertThat(replay.variants().get(0).stock()).isEqualTo(8);
+		verify(repository, times(1)).save(product);
+		verify(publisher, times(1)).publishUpdated(any());
+	}
+
+	@Test
+	void removingSoldVariantKeepsHiddenSnapshotForReturns() {
+		Product product = product("seller-1", 0);
+		product.getVariants().get(0).setSoldCount(2);
+		when(repository.findById("product-1")).thenReturn(Optional.of(product));
+		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
+		when(repository.save(product)).thenReturn(product);
+		ProductRequest replacement = new ProductRequest("shop-1", "Áo thun", "Mô tả",
+				List.of("https://img/1.jpg"), "cat-1", null, ProductStatus.ACTIVE, "VND",
+				List.of(new ProductRequest.VariantRequest(null, "SKU-2", new HashMap<>(), 120000L, 5)));
+
+		ProductResponse response = service.update("product-1", "seller-1", "update-2", replacement);
+
+		assertThat(product.getVariants()).anyMatch(variant -> variant.getId().equals("variant-1") && variant.isDeleted());
+		assertThat(response.variants()).extracting(ProductResponse.VariantResponse::sku).containsExactly("SKU-2");
 	}
 
 	@Test
@@ -148,7 +190,7 @@ class ProductCatalogServiceTest {
 		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
 		when(repository.save(product)).thenReturn(product);
 
-		service.update("product-1", "seller-1", request("variant-1", 10));
+		service.update("product-1", "seller-1", "update-1", request("variant-1", 10));
 
 		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
 		assertThat(product.getStatusBeforeModeration()).isEqualTo(ProductStatus.ACTIVE);
@@ -162,7 +204,7 @@ class ProductCatalogServiceTest {
 		when(repository.findById("product-1")).thenReturn(Optional.of(product));
 		when(categoryService.getPublicRequired("cat-1")).thenReturn(activeCategory());
 		when(repository.save(product)).thenReturn(product);
-		service.update("product-1", "seller-1", request("variant-1", 10));
+		service.update("product-1", "seller-1", "update-1", request("variant-1", 10));
 		assertThat(product.getStatus()).isEqualTo(ProductStatus.HIDDEN);
 		assertThat(product.getStatusBeforeShopSuspension()).isEqualTo(ProductStatus.ACTIVE);
 		product.applyShopSuspension(false);

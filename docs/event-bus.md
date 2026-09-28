@@ -23,7 +23,7 @@ mục Elasticsearch (FR-SRCH-04), Recommendation nhận để cập nhật đặ
 | Exchange | **1 topic exchange** chung cho cả hệ: `vmarket.events` (durable) | `vmarket.events` |
 | Routing key | `=` **tên sự kiện** (PascalCase, khớp SRS §8.1) | `ProductCreated` |
 | Queue | `{tên-service}.events.v{n}` (durable, do chính service nhận khai báo) | `product.events.v2` |
-| Binding | Queue bind tới exchange theo từng routing key mà service nhận | `ai-search.events` ← `ProductCreated` |
+| Binding | Queue bind tới exchange theo từng routing key mà service nhận | `ai-search.events.v2` ← `ProductCreated` |
 | Dead-letter | `{exchange}.dlx` và `{queue}.dead` | `vmarket.events.dlx`, `product.events.v2.dead` |
 
 - Exchange, queue, binding **durable** (không tự xoá) để không mất sự kiện.
@@ -44,6 +44,10 @@ Kiểm tra `messages_ready` và `messages_unacknowledged` của queue cũ đều
 trước khi xóa queue cũ và bật lại publisher. Giữ nguyên `eventId` khi chuyển;
 consumer xử lý các event trùng theo khóa nghiệp vụ. Không xóa queue cũ khi còn
 message hoặc khi Shovel chưa xác nhận đích đã nhận.
+
+AI Search áp dụng cùng quy trình khi chuyển `ai-search.events` sang
+`ai-search.events.v2`: khai báo queue v2 cùng DLX, Shovel toàn bộ message từ queue
+cũ với acknowledgement `on-confirm`, kiểm tra queue cũ đã drain, rồi mới xóa.
 
 ## 3. Lược đồ thông điệp (message schema)
 
@@ -125,14 +129,14 @@ sẽ bị mất thay vì rơi vào `{queue}.dead`:
 ```python
 channel.exchange_declare(exchange="vmarket.events", exchange_type="topic", durable=True)
 channel.exchange_declare(exchange="vmarket.events.dlx", exchange_type="topic", durable=True)
-channel.queue_declare(queue="ai-search.events", durable=True, arguments={
+channel.queue_declare(queue="ai-search.events.v2", durable=True, arguments={
     "x-dead-letter-exchange": "vmarket.events.dlx",
-    "x-dead-letter-routing-key": "ai-search.events.dead",
+    "x-dead-letter-routing-key": "ai-search.events.v2.dead",
 })
-channel.queue_declare(queue="ai-search.events.dead", durable=True)
-channel.queue_bind(queue="ai-search.events.dead", exchange="vmarket.events.dlx",
-                   routing_key="ai-search.events.dead")
-channel.queue_bind(queue="ai-search.events", exchange="vmarket.events", routing_key="ProductCreated")
+channel.queue_declare(queue="ai-search.events.v2.dead", durable=True)
+channel.queue_bind(queue="ai-search.events.v2.dead", exchange="vmarket.events.dlx",
+                   routing_key="ai-search.events.v2.dead")
+channel.queue_bind(queue="ai-search.events.v2", exchange="vmarket.events", routing_key="ProductCreated")
 ```
 
 CẢNH BÁO (bài học PBL6-15 Review 3): consumer catalog (AI Search,
@@ -206,7 +210,7 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
    recommendation-service: `uvicorn main:app`).
 3. Kiểm tra queue đã được khai báo TRƯỚC khi phát event:
    `rabbitmqctl list_bindings source_name routing_key destination_name` — phải thấy
-   `ai-search.events` / `recommendation.events` bind với `ProductCreated`. Thiếu binding ⇒
+   `ai-search.events.v2` / `recommendation.events` bind với `ProductCreated`. Thiếu binding ⇒
    outbox sẽ park event (xem §7).
 4. Đồng bộ một `ShopApproved`, sau đó tạo sản phẩm qua API Seller thật.
 5. Quan sát `ProductCreated` schema v4 trong AI Search; event giữ nguyên `eventId`

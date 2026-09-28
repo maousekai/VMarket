@@ -10,7 +10,8 @@ import com.vmarket.product.model.ProductVariant;
 @Component
 public class ProductDerivedFields {
 	public void refresh(Product product) {
-		List<ProductVariant> variants = product.getVariants() == null ? List.of() : product.getVariants();
+		List<ProductVariant> variants = product.getVariants() == null ? List.of()
+				: product.getVariants().stream().filter(variant -> !variant.isDeleted()).toList();
 		product.setMinPrice(variants.stream().map(ProductVariant::getPrice)
 				.min(Long::compareTo).orElse(null));
 		product.setMaxPrice(variants.stream().map(ProductVariant::getPrice)

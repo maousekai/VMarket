@@ -20,9 +20,15 @@ public class ProductVariant {
 	private long stock;
 	private long reservedStock;
 	private long soldCount;
+	private boolean deleted;
 
 	public ProductVariant(String id, String sku, Map<String, String> attributes, long price,
 			long stock, long reservedStock, long soldCount) {
-		this(id, sku, attributes, price, "VND", stock, reservedStock, soldCount);
+		this(id, sku, attributes, price, "VND", stock, reservedStock, soldCount, false);
+	}
+
+	public ProductVariant(String id, String sku, Map<String, String> attributes, long price,
+			String currency, long stock, long reservedStock, long soldCount) {
+		this(id, sku, attributes, price, currency, stock, reservedStock, soldCount, false);
 	}
 }

@@ -26,4 +26,7 @@ public class ReturnRestock {
 	private String orderId;
 	private List<InventoryReservation.ReservationItem> items = new ArrayList<>();
 	private Instant createdAt;
+	/** Missing on legacy records means false, so completed returns are never replayed. */
+	private boolean pending;
+	private Instant processedAt;
 }

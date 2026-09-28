@@ -164,7 +164,10 @@ public class InventoryService {
 	}
 
 	private InventoryResponse confirmReservation(InventoryReservation reservation) {
-		if (reservation.getStatus() == ReservationStatus.CONFIRMED) return toResponse(reservation);
+		if (reservation.getStatus() == ReservationStatus.CONFIRMED) {
+			processPendingReturns(reservation);
+			return toResponse(reservation);
+		}
 		if (reservation.getStatus() != ReservationStatus.RESERVED) {
 			throw conflict("Chỉ có thể xác nhận tồn kho đang được tạm giữ");
 		}
@@ -187,7 +190,9 @@ public class InventoryService {
 		changedProducts.forEach(product -> publisher.publishUpdated(eventFactory.updated(product)));
 		reservation.setStatus(ReservationStatus.CONFIRMED);
 		reservation.setUpdatedAt(Instant.now());
-		return toResponse(reservationRepository.save(reservation));
+		InventoryReservation saved = reservationRepository.save(reservation);
+		processPendingReturns(saved);
+		return toResponse(saved);
 	}
 
 	@Transactional
@@ -232,20 +237,38 @@ public class InventoryService {
 		if (returnId == null || returnId.isBlank()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_RETURN", "returnId không được để trống");
 		}
-		if (returnRestockRepository.existsByReturnId(returnId)) return;
+		if (returnRestockRepository.findByReturnId(returnId.trim()).isPresent()) return;
+		List<InventoryRequest.InventoryItem> items = normalize(request.items());
+		Instant now = Instant.now();
+		ReturnRestock restock = new ReturnRestock(null, returnId.trim(), orderId.trim(), items.stream()
+				.map(item -> new ReservationItem(item.productId(), item.variantId(), item.quantity())).toList(), now, false, null);
 		InventoryReservation reservation = reservationRepository.findByOrderId(orderId).orElse(null);
-		if (reservation == null) {
-			// Out-of-order (Review 3 - F5): ReturnResolved tới trước khi có reservation —
-			// bỏ qua có kiểm soát: chưa có reservation nghĩa là chưa từng trừ kho,
-			// nên không có gì cần nhập lại.
+		if (reservation == null || reservation.getStatus() == ReservationStatus.RESERVED
+				|| reservation.getStatus() == ReservationStatus.PENDING_CONFIRM) {
+			restock.setPending(true);
+			returnRestockRepository.save(restock);
 			metrics.counter("vmarket.outbox.out-of-order", "action", "restockReturn").increment();
-			log.info("Bỏ qua restockReturn cho đơn {} chưa có reservation (event tới sai thứ tự)", orderId);
+			log.info("Stored pending return {} for order {} until inventory is confirmed", returnId, orderId);
 			return;
 		}
 		if (reservation.getStatus() != ReservationStatus.CONFIRMED) {
 			throw conflict("Chỉ có thể nhập lại hàng từ đơn đã chốt tồn kho");
 		}
-		List<InventoryRequest.InventoryItem> items = normalize(request.items());
+		processReturn(reservation, restock, items);
+	}
+
+	private void processPendingReturns(InventoryReservation reservation) {
+		for (ReturnRestock restock : returnRestockRepository
+				.findAllByOrderIdAndPendingTrue(reservation.getOrderId())) {
+			List<InventoryRequest.InventoryItem> items = restock.getItems().stream()
+					.map(item -> new InventoryRequest.InventoryItem(
+							item.getProductId(), item.getVariantId(), item.getQuantity())).toList();
+			processReturn(reservation, restock, items);
+		}
+	}
+
+	private void processReturn(InventoryReservation reservation, ReturnRestock restock,
+			List<InventoryRequest.InventoryItem> items) {
 		validateReturnQuantities(reservation, items);
 		Map<String, Product> products = loadAndValidate(items, false);
 		for (InventoryRequest.InventoryItem item : items) {
@@ -264,9 +287,10 @@ public class InventoryService {
 		}
 		List<Product> changedProducts = productRepository.saveAll(products.values());
 		changedProducts.forEach(product -> publisher.publishUpdated(eventFactory.updated(product)));
-		returnRestockRepository.save(new ReturnRestock(null, returnId.trim(), orderId.trim(), items.stream()
-				.map(item -> new ReservationItem(item.productId(), item.variantId(), item.quantity())).toList(), Instant.now()));
-		publisher.publishStockReleased(new StockReleased(orderId, items.stream()
+		restock.setProcessedAt(Instant.now());
+		restock.setPending(false);
+		returnRestockRepository.save(restock);
+		publisher.publishStockReleased(new StockReleased(reservation.getOrderId(), items.stream()
 				.map(item -> new StockItem(item.productId(), item.variantId(), item.quantity())).toList()));
 	}
 
@@ -284,6 +308,10 @@ public class InventoryService {
 				throw conflict("Sản phẩm không ở trạng thái đang bán: " + product.getId());
 			}
 			ProductVariant variant = findVariant(product, item.variantId());
+			if (checkAvailable && variant.isDeleted()) {
+				throw new ApiException(HttpStatus.NOT_FOUND, "VARIANT_NOT_FOUND",
+						"Không tìm thấy biến thể " + item.variantId());
+			}
 			if (checkAvailable && variant.getStock() - variant.getReservedStock() < item.quantity()) {
 				throw new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK",
 						"Không đủ tồn kho cho biến thể " + item.variantId());
@@ -320,6 +348,7 @@ public class InventoryService {
 			purchased.put(item.getProductId() + "\u0000" + item.getVariantId(), (long) item.getQuantity());
 		}
 		for (ReturnRestock previous : returnRestockRepository.findAllByOrderId(reservation.getOrderId())) {
+			if (previous.isPending()) continue;
 			for (ReservationItem item : previous.getItems()) {
 				String key = item.getProductId() + "\u0000" + item.getVariantId();
 				purchased.computeIfPresent(key, (ignored, remaining) -> remaining - item.getQuantity());

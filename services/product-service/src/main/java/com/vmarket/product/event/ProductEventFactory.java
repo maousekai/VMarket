@@ -30,7 +30,7 @@ public class ProductEventFactory {
 	}
 
 	private List<ProductVariantSnapshot> variants(Product product) {
-		return product.getVariants() == null ? List.of() : product.getVariants().stream().map(this::variant).toList();
+		return safeVariants(product).stream().map(this::variant).toList();
 	}
 
 	private List<String> copyImages(Product product) {
@@ -54,7 +54,8 @@ public class ProductEventFactory {
 	}
 
 	private List<ProductVariant> safeVariants(Product product) {
-		return product.getVariants() == null ? List.of() : product.getVariants();
+		return product.getVariants() == null ? List.of()
+				: product.getVariants().stream().filter(variant -> !variant.isDeleted()).toList();
 	}
 
 	private ProductVariantSnapshot variant(ProductVariant variant) {

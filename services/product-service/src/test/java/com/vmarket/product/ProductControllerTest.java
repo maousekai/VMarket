@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -36,6 +37,19 @@ class ProductControllerTest {
 				.andExpect(status().isCreated());
 
 		verify(service).create(eq("seller-1"), eq("create-1"), any(ProductRequest.class));
+	}
+
+	@Test
+	void updatePassesIdempotencyKeyToService() throws Exception {
+		mockMvc.perform(put("/api/products/product-1")
+				.header("X-User-Id", "seller-1")
+				.header("X-User-Roles", "ROLE_SELLER")
+				.header("Idempotency-Key", "update-1")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(validBody("[\"https://img/1.jpg\"]")))
+				.andExpect(status().isOk());
+
+		verify(service).update(eq("product-1"), eq("seller-1"), eq("update-1"), any(ProductRequest.class));
 	}
 
 	@Test

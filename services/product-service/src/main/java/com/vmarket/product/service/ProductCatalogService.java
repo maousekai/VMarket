@@ -32,14 +32,17 @@ import com.vmarket.product.model.Brand;
 import com.vmarket.product.model.Category;
 import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
+import com.vmarket.product.model.ProductUpdateKey;
 import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.repository.ProductCatalogQuery;
 import com.vmarket.product.repository.ProductRepository;
+import com.vmarket.product.repository.ProductUpdateKeyRepository;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ProductCatalogService {
 	private final ProductRepository repository;
+	private final ProductUpdateKeyRepository updateKeys;
 	private final ProductCatalogQuery query;
 	private final CategoryService categoryService;
 	private final BrandService brandService;
@@ -51,12 +54,14 @@ public class ProductCatalogService {
 	private final CatalogProjectionService projections;
 	private final ObjectMapper json;
 
-	public ProductCatalogService(ProductRepository repository, ProductCatalogQuery query,
+	public ProductCatalogService(ProductRepository repository, ProductUpdateKeyRepository updateKeys,
+			ProductCatalogQuery query,
 			CategoryService categoryService, BrandService brandService, ProductMapper mapper,
 			ProductEventPublisher publisher, ProductEventFactory eventFactory,
 			ProductDerivedFields derivedFields, ShopAccessService shopAccessService,
 			CatalogProjectionService projections, ObjectMapper json) {
 		this.repository = repository;
+		this.updateKeys = updateKeys;
 		this.query = query;
 		this.categoryService = categoryService;
 		this.brandService = brandService;
@@ -71,10 +76,7 @@ public class ProductCatalogService {
 
 	@Transactional
 	public ProductResponse create(String sellerId, String idempotencyKey, ProductRequest request) {
-		if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
-			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key không hợp lệ");
-		}
-		String creationKey = sellerId + ":" + idempotencyKey.trim();
+		String creationKey = sellerId + ":" + validatedIdempotencyKey(idempotencyKey);
 		String requestHash = requestHash(request);
 		var previous = repository.findByCreationKey(creationKey);
 		if (previous.isPresent()) {
@@ -113,7 +115,17 @@ public class ProductCatalogService {
 	}
 
 	@Transactional
-	public ProductResponse update(String id, String sellerId, ProductRequest request) {
+	public ProductResponse update(String id, String sellerId, String idempotencyKey, ProductRequest request) {
+		String scopedKey = sellerId + ":" + validatedIdempotencyKey(idempotencyKey);
+		String requestHash = requestHash(request);
+		var previous = updateKeys.findByScopedKey(scopedKey);
+		if (previous.isPresent()) {
+			if (!id.equals(previous.get().getProductId()) || !requestHash.equals(previous.get().getRequestHash())) {
+				throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
+						"Idempotency-Key đã dùng cho yêu cầu khác");
+			}
+			return mapper.toResponse(getOwned(id, sellerId));
+		}
 		Product product = getOwned(id, sellerId);
 		shopAccessService.requireActiveOwner(product.getShopId(), sellerId);
 		if (!product.getShopId().equals(request.shopId().trim())) {
@@ -134,6 +146,7 @@ public class ProductCatalogService {
 		if (product.isModerationRemoved()) product.setModerationResubmittedAt(null);
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
+		updateKeys.save(new ProductUpdateKey(null, scopedKey, id, requestHash, Instant.now()));
 		publisher.publishUpdated(eventFactory.updated(saved));
 		return mapper.toResponse(saved);
 	}
@@ -255,7 +268,7 @@ public class ProductCatalogService {
 		projections.applyCategory(product);
 		product.setBrandId(blankToNull(request.brandId()));
 		product.updateDesiredStatus(request.status());
-		List<ProductVariant> variants = request.variants().stream().map(item -> {
+		List<ProductVariant> variants = new ArrayList<>(request.variants().stream().map(item -> {
 			ProductVariant old = item.id() == null ? null : existing.get(item.id());
 			long reserved = old == null ? 0 : old.getReservedStock();
 			if (item.stock() < reserved) {
@@ -265,7 +278,14 @@ public class ProductCatalogService {
 			return new ProductVariant(old == null ? UUID.randomUUID().toString() : old.getId(), item.sku().trim(),
 					new HashMap<>(item.attributes()), item.price(), request.currency(), item.stock(), reserved,
 					old == null ? 0 : old.getSoldCount());
-		}).toList();
+		}).toList());
+		Set<String> requestedIds = requestedVariantIds(request);
+		existing.values().stream()
+				.filter(variant -> variant.getSoldCount() > 0 && !requestedIds.contains(variant.getId()))
+				.forEach(variant -> {
+					variant.setDeleted(true);
+					variants.add(variant);
+				});
 		product.setVariants(variants);
 		derivedFields.refresh(product);
 	}
@@ -298,14 +318,25 @@ public class ProductCatalogService {
 	}
 
 	private void ensureReservedVariantsAreKept(ProductRequest request, Map<String, ProductVariant> existing) {
-		Set<String> requestedIds = request.variants().stream().map(ProductRequest.VariantRequest::id)
-				.filter(id -> id != null && !id.isBlank()).collect(java.util.stream.Collectors.toSet());
+		Set<String> requestedIds = requestedVariantIds(request);
 		for (ProductVariant variant : existing.values()) {
 			if (variant.getReservedStock() > 0 && !requestedIds.contains(variant.getId())) {
 				throw new ApiException(HttpStatus.CONFLICT, "VARIANT_RESERVED",
 						"Không thể xóa biến thể đang có tồn kho tạm giữ");
 			}
 		}
+	}
+
+	private Set<String> requestedVariantIds(ProductRequest request) {
+		return request.variants().stream().map(ProductRequest.VariantRequest::id)
+				.filter(id -> id != null && !id.isBlank()).collect(java.util.stream.Collectors.toSet());
+	}
+
+	private String validatedIdempotencyKey(String key) {
+		if (key == null || key.isBlank() || key.length() > 128) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key không hợp lệ");
+		}
+		return key.trim();
 	}
 
 	private String blankToNull(String value) {

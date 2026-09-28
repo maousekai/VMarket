@@ -11,12 +11,14 @@ import com.vmarket.product.model.ProductVariant;
 @Component
 public class ProductMapper {
 	public ProductResponse toResponse(Product product) {
-		List<ProductResponse.VariantResponse> variants = product.getVariants().stream().map(this::toVariantResponse).toList();
+		List<ProductVariant> visibleVariants = product.getVariants().stream()
+				.filter(variant -> !variant.isDeleted()).toList();
+		List<ProductResponse.VariantResponse> variants = visibleVariants.stream().map(this::toVariantResponse).toList();
 		Long minPrice = product.getMinPrice() != null ? product.getMinPrice()
-				: product.getVariants().stream().map(ProductVariant::getPrice).min(Long::compareTo).orElse(null);
+				: visibleVariants.stream().map(ProductVariant::getPrice).min(Long::compareTo).orElse(null);
 		Long maxPrice = product.getMaxPrice() != null ? product.getMaxPrice()
-				: product.getVariants().stream().map(ProductVariant::getPrice).max(Long::compareTo).orElse(null);
-		long calculatedAvailable = product.getVariants().stream()
+				: visibleVariants.stream().map(ProductVariant::getPrice).max(Long::compareTo).orElse(null);
+		long calculatedAvailable = visibleVariants.stream()
 				.mapToLong(v -> Math.max(0, v.getStock() - v.getReservedStock())).sum();
 		long available = product.getAvailableStock() == 0 && calculatedAvailable > 0
 				? calculatedAvailable : product.getAvailableStock();

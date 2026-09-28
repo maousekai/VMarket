@@ -77,7 +77,7 @@ public class ProductController {
 			@RequestHeader(value = "X-User-Roles", required = false) String roles,
 			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ProductRequest request) {
-		return service.update(id, identity.requireSeller(userId, roles), request);
+		return service.update(id, identity.requireSeller(userId, roles), idempotencyKey, request);
 	}
 
 	@DeleteMapping("/{id}")

@@ -28,6 +28,7 @@ import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
 import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.model.ReservationStatus;
+import com.vmarket.product.model.ReturnRestock;
 import com.vmarket.events.StockItem;
 import com.vmarket.product.repository.InventoryReservationRepository;
 import com.vmarket.product.repository.ProductRepository;
@@ -93,6 +94,17 @@ class InventoryServiceTest {
 	}
 
 	@Test
+	void reserveRejectsSoftDeletedVariant() {
+		Product product = product(10, 0);
+		product.getVariants().get(0).setDeleted(true);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
+
+		assertThatThrownBy(() -> service.reserve(request(1)))
+				.isInstanceOf(ApiException.class).hasMessageContaining("Không tìm thấy biến thể");
+	}
+
+	@Test
 	void reserveIsIdempotentForSameOrderAndItems() {
 		InventoryReservation reservation = reservation(ReservationStatus.RESERVED, 3);
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
@@ -142,6 +154,7 @@ class InventoryServiceTest {
 	@Test
 	void cancellingConfirmedOrderRestoresPhysicalStockAndSoldCount() {
 		Product product = product(7, 0);
+		product.getVariants().get(0).setDeleted(true);
 		product.setSoldCount(3);
 		product.getVariants().get(0).setSoldCount(3);
 		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
@@ -164,7 +177,6 @@ class InventoryServiceTest {
 		product.setSoldCount(3);
 		product.getVariants().get(0).setSoldCount(3);
 		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
-		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
 		when(returnRestockRepository.findAllByOrderId("order-1")).thenReturn(List.of());
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
 		when(productRepository.findAllById(any())).thenReturn(List.of(product));
@@ -181,12 +193,14 @@ class InventoryServiceTest {
 	@Test
 	void resolvedReturnCannotRestockMoreThanWasPurchased() {
 		InventoryReservation reservation = reservation(ReservationStatus.CONFIRMED, 3);
-		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
-		when(returnRestockRepository.findAllByOrderId("order-1")).thenReturn(List.of());
+		ReturnRestock previous = new ReturnRestock("restock-0", "return-0", "order-1",
+				List.of(new InventoryReservation.ReservationItem("product-1", "variant-1", 2)),
+				Instant.now(), false, null);
+		when(returnRestockRepository.findAllByOrderId("order-1")).thenReturn(List.of(previous));
 		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
 
 		assertThatThrownBy(() -> service.restockReturn("return-1", "order-1",
-				List.of(new StockItem("product-1", "variant-1", 4))))
+				List.of(new StockItem("product-1", "variant-1", 2))))
 				.isInstanceOf(ApiException.class).hasMessageContaining("vượt số lượng");
 	}
 
@@ -224,15 +238,32 @@ class InventoryServiceTest {
 	}
 
 	@Test
-	void restockReturnBeforeReservationArrivesIsSkippedAndCountedAsOutOfOrder() {
-		when(returnRestockRepository.existsByReturnId("return-1")).thenReturn(false);
-		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+	void restockReturnBeforeReservationIsAppliedAfterConfirmation() {
+		InventoryReservation reservation = reservation(ReservationStatus.RESERVED, 3);
+		ReturnRestock[] pending = new ReturnRestock[1];
+		when(reservationRepository.findByOrderId("order-1"))
+				.thenReturn(Optional.empty(), Optional.of(reservation));
+		when(returnRestockRepository.save(any())).thenAnswer(invocation -> {
+			pending[0] = invocation.getArgument(0);
+			return pending[0];
+		});
+		when(returnRestockRepository.findAllByOrderIdAndPendingTrue("order-1"))
+				.thenAnswer(invocation -> List.of(pending[0]));
+		when(returnRestockRepository.findAllByOrderId("order-1")).thenAnswer(invocation -> List.of(pending[0]));
+		Product product = product(10, 3);
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
+		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
+		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
 		service.restockReturn("return-1", "order-1", List.of(new StockItem("product-1", "variant-1", 2)));
+		assertThat(pending[0].getProcessedAt()).isNull();
+		assertThat(pending[0].isPending()).isTrue();
+		service.confirm("order-1");
 
-		verify(productRepository, never()).findAllById(any());
-		verify(returnRestockRepository, never()).save(any());
-		verify(publisher, never()).publishStockReleased(any());
+		assertThat(product.getVariants().get(0).getStock()).isEqualTo(9);
+		assertThat(pending[0].getProcessedAt()).isNotNull();
+		assertThat(pending[0].isPending()).isFalse();
+		verify(publisher).publishStockReleased(any());
 	}
 
 	@Test
