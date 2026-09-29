@@ -20,6 +20,17 @@ app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
 
+  cart-service:
+    base-url: ${CART_SERVICE_URL}
+    internal-api-key: ${INTERNAL_API_KEY}
+
+  user-service:
+    base-url: ${USER_SERVICE_URL}
+
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
+
 logging:
   level:
     root: INFO
