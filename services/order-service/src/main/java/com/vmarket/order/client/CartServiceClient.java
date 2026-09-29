@@ -133,6 +133,39 @@ public class CartServiceClient {
 	}
 
 	/**
+	 * Xoá một item cụ thể khỏi giỏ sau khi tạo đơn thành công (FR-CART-01, P2 review PR #25).
+	 *
+	 * <p>Chạy SAU khi đơn đã commit. Gọi {@code DELETE /api/cart/items/{productId}?variantId=...}.
+	 * Thất bại ở đây không được phép làm hỏng đơn.
+	 *
+	 * @return {@code true} nếu cart-service xác nhận đã xoá (2xx)
+	 */
+	public boolean removeCartItem(String userId, String productId, String variantId) {
+		try {
+			restClient.delete()
+					.uri(uriBuilder -> {
+						var builder = uriBuilder.path("/api/cart/items/{productId}");
+						if (variantId != null && !variantId.isBlank()) {
+							builder.queryParam("variantId", variantId);
+						}
+						return builder.build(productId);
+					})
+					.header(HEADER_USER_ID, userId)
+					.retrieve()
+					.toBodilessEntity();
+			return true;
+		} catch (RestClientResponseException ex) {
+			log.warn("Xoá item {} (variant={}) khỏi giỏ userId={} thất bại: HTTP {}",
+					productId, variantId, userId, ex.getStatusCode().value());
+			return false;
+		} catch (RestClientException ex) {
+			log.warn("Lỗi khi xoá item {} (variant={}) khỏi giỏ userId={}: {}",
+					productId, variantId, userId, ex.getClass().getSimpleName());
+			return false;
+		}
+	}
+
+	/**
 	 * Chỉ {@code true} khi chắc chắn chưa byte nào tới cart-service.
 	 *
 	 * <p>Mặc định trả {@code false} (coi như không rõ) cho mọi lỗi lạ: nói "chắc

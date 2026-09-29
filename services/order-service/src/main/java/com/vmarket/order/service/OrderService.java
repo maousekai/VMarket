@@ -1,11 +1,13 @@
 package com.vmarket.order.service;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.vmarket.order.client.CartServiceClient;
 import com.vmarket.order.client.CartServiceClient.CartItemView;
@@ -28,15 +30,19 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p><b>Luồng đặt hàng</b> (mỗi bước đều có mã lỗi riêng để client biết mình sai gì):
  * <ol>
- *   <li>Đọc địa chỉ từ user-service bằng token của người dùng — snapshot vào đơn,
- *       so khớp {@code userId} chặn IDOR phòng hai service lệch nhau.</li>
+ *   <li>Kiểm tra Idempotency-Key: nếu đã có đơn với cùng key → trả lại đơn cũ,
+ *       không tạo đơn mới (chống retry / gửi đồng thời).</li>
+ *   <li>Đọc địa chỉ từ user-service bằng token của người dùng — snapshot vào đơn.
+ *       Endpoint {@code /me/addresses/{id}} đã kiểm tra ownership bằng JWT, nên
+ *       nếu trả OK thì địa chỉ chắc chắn thuộc người đang gọi.</li>
  *   <li>Đọc giỏ từ cart-service bằng {@code X-User-Id} đã xác thực.</li>
  *   <li>Kiểm tra giỏ không rỗng.</li>
  *   <li>Chụp từng item thành {@link OrderItem} với giá đã có trong giỏ (snapshot
  *       của cart-service, không hỏi lại product-service — giá chốt là giá đã hiện
  *       cho người dùng khi thêm vào giỏ).</li>
- *   <li>Lưu đơn + item trong MỘT transaction, sau đó xoá giỏ — xoá hỏng chỉ log
- *       cảnh báo, không làm hỏng đơn đã tạo.</li>
+ *   <li>Lưu đơn + item trong MỘT transaction. <b>Sau khi commit</b>, xoá từng
+ *       item đã checkout khỏi giỏ (không xoá toàn bộ, tránh mất item thêm trong
+ *       lúc checkout). Xoá hỏng chỉ log cảnh báo, không làm hỏng đơn đã tạo.</li>
  * </ol>
  *
  * <p><b>Tổng tiền</b> được tính lại ở đây từ {@code unitPrice * quantity} thay vì
@@ -56,19 +62,28 @@ public class OrderService {
 	/**
 	 * Đặt hàng từ giỏ hiện có (FR-ORDER-01).
 	 *
-	 * @param bearerToken header {@code Authorization} gốc, forward nguyên vẹn cho
-	 *                    user-service khi đọc địa chỉ
+	 * @param bearerToken    header {@code Authorization} gốc, forward nguyên vẹn
+	 *                       cho user-service khi đọc địa chỉ
+	 * @param idempotencyKey khoá chống trùng (header {@code Idempotency-Key}),
+	 *                       có thể {@code null} nếu client không gửi
 	 */
 	@Transactional
-	public OrderResponse placeOrder(String userId, String bearerToken, PlaceOrderRequest request) {
-		AddressView address = userServiceClient.getAddress(bearerToken, request.addressId());
-		if (!userId.equals(address.userId())) {
-			// Phòng thủ thứ hai sau IDOR của user-service: nếu địa chỉ nạp được mà
-			// không thuộc người đang đặt thì cấu hình/lỗi đồng bộ ở đâu đó — không
-			// bao giờ ghi đơn với địa chỉ của người khác.
-			log.error("Địa chỉ {} không thuộc userId={} — từ chối đặt hàng", request.addressId(), userId);
-			throw ApiException.notFound("ADDRESS_NOT_FOUND", "Không tìm thấy địa chỉ giao hàng");
+	public OrderResponse placeOrder(String userId, String bearerToken,
+			String idempotencyKey, PlaceOrderRequest request) {
+		// --- Idempotency: cùng key → trả đơn cũ, không tạo mới ---
+		if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+			Optional<Order> existing = orderRepository
+					.findByUserIdAndIdempotencyKey(userId, idempotencyKey.trim());
+			if (existing.isPresent()) {
+				log.info("Idempotency-Key '{}' đã dùng → trả lại đơn {} cho userId={}",
+						idempotencyKey, existing.get().getId(), userId);
+				return OrderResponse.from(existing.get());
+			}
 		}
+
+		// user-service endpoint /me/addresses/{id} đã kiểm tra ownership bằng JWT:
+		// nếu trả OK thì địa chỉ chắc chắn thuộc người đang gọi, không cần so userId.
+		AddressView address = userServiceClient.getAddress(bearerToken, request.addressId());
 
 		CartView cart = cartServiceClient.getCart(userId);
 		List<CartItemView> cartItems = cart.groups().stream()
@@ -78,12 +93,12 @@ public class OrderService {
 			throw ApiException.badRequest("CART_EMPTY", "Giỏ hàng đang trống, không thể đặt hàng");
 		}
 
-		return persistOrder(userId, address, cartItems, request);
+		return persistOrder(userId, address, cartItems, idempotencyKey, request);
 	}
 
 	/** Chụp giỏ + địa chỉ thành đơn và lưu trong một transaction. */
 	private OrderResponse persistOrder(String userId, AddressView address,
-			List<CartItemView> cartItems, PlaceOrderRequest request) {
+			List<CartItemView> cartItems, String idempotencyKey, PlaceOrderRequest request) {
 		Order order = new Order();
 		order.setUserId(userId);
 		order.setStatus(OrderStatus.PENDING);
@@ -94,6 +109,11 @@ public class OrderService {
 		order.setWard(address.ward());
 		order.setStreetAddress(address.streetAddress());
 		order.setNote(request.note() == null || request.note().isBlank() ? null : request.note().trim());
+
+		// Gán idempotency key (nullable)
+		if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+			order.setIdempotencyKey(idempotencyKey.trim());
+		}
 
 		BigDecimal total = BigDecimal.ZERO;
 		for (CartItemView cartItem : cartItems) {
@@ -117,16 +137,52 @@ public class OrderService {
 		log.info("Tạo đơn {} cho userId={}, {} item, tổng {}",
 				saved.getId(), userId, order.getItems().size(), total);
 
-		// Xoá giỏ SAU khi đơn đã commit. Thất bại ở đây không được phép hủy đơn:
-		// người dùng xoá tay vài item còn lại, hoặc giỏ tự hết hạn sau 30 ngày.
-		if (cartServiceClient.clearCart(userId)) {
-			log.info("Đã xoá giỏ của userId={} sau khi tạo đơn {}", userId, saved.getId());
+		// Lấy snapshot các item đã checkout TRƯỚC khi đăng ký afterCommit
+		List<CartItemView> snapshot = List.copyOf(cartItems);
+		String orderId = saved.getId();
+
+		// Xoá giỏ SAU khi đơn đã COMMIT — không nằm trong @Transactional nữa.
+		// Chỉ xoá từng item trong snapshot, tránh mất item thêm trong lúc checkout
+		// (P2 review PR #25). Thất bại ở đây không được phép hủy đơn.
+		if (TransactionSynchronizationManager.isSynchronizationActive()) {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					removeCheckoutItemsFromCart(userId, orderId, snapshot);
+				}
+			});
 		} else {
-			log.warn("Không xoá được giỏ của userId={} sau khi tạo đơn {} — giỏ còn nguyên, "
-					+ "người dùng có thể đặt lại hoặc tự xoá item", userId, saved.getId());
+			removeCheckoutItemsFromCart(userId, orderId, snapshot);
 		}
 
 		return OrderResponse.from(saved);
+	}
+
+	/**
+	 * Xoá từng item đã checkout khỏi giỏ (chạy SAU commit).
+	 *
+	 * <p>Xoá theo snapshot (productId + variantId) thay vì xoá toàn bộ giỏ, nhờ
+	 * đó item được thêm trong lúc checkout sẽ không bị mất (P2 review PR #25).
+	 */
+	private void removeCheckoutItemsFromCart(String userId, String orderId,
+			List<CartItemView> snapshot) {
+		int success = 0;
+		int failed = 0;
+		for (CartItemView item : snapshot) {
+			if (cartServiceClient.removeCartItem(userId, item.productId(), item.variantId())) {
+				success++;
+			} else {
+				failed++;
+			}
+		}
+		if (failed == 0) {
+			log.info("Đã xoá {}/{} item khỏi giỏ của userId={} sau khi tạo đơn {}",
+					success, snapshot.size(), userId, orderId);
+		} else {
+			log.warn("Xoá giỏ userId={} sau đơn {}: {}/{} thành công, {}/{} thất bại — "
+					+ "giỏ còn item, người dùng có thể tự xoá",
+					userId, orderId, success, snapshot.size(), failed, snapshot.size());
+		}
 	}
 
 	/** Danh sách đơn của người đang đăng nhập, mới nhất trước (FR-ORDER-02). */

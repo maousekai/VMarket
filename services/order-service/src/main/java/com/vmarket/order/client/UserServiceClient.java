@@ -145,7 +145,6 @@ public class UserServiceClient {
 	 */
 	public record AddressView(
 			String id,
-			String userId,
 			String recipientName,
 			String phone,
 			String province,

@@ -66,9 +66,10 @@ public class OrderController {
 	public ResponseEntity<OrderResponse> placeOrder(
 			@AuthenticationPrincipal String userId,
 			@RequestHeader(name = "Authorization", required = false) String bearerToken,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
 			@Valid @RequestBody PlaceOrderRequest request) {
 		return ResponseEntity.status(HttpStatus.CREATED)
-				.body(orderService.placeOrder(userId, bearerToken, request));
+				.body(orderService.placeOrder(userId, bearerToken, idempotencyKey, request));
 	}
 
 	@Operation(summary = "Danh sách đơn của tôi (FR-ORDER-02)",

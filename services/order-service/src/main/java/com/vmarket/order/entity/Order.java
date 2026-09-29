@@ -70,6 +70,15 @@ public class Order extends BaseEntity {
 	private String note;
 
 	/**
+	 * Khoá chống tạo đơn trùng khi retry hoặc gửi đồng thời. Mỗi cặp
+	 * {@code (userId, idempotencyKey)} là duy nhất: client gửi lại cùng key
+	 * thì nhận lại đơn đã tạo. {@code null} nếu client không gửi header
+	 * {@code Idempotency-Key} — NULL không vi phạm UNIQUE.
+	 */
+	@Column(name = "idempotency_key", length = 64)
+	private String idempotencyKey;
+
+	/**
 	 * Tổng tiền = tổng {@code lineTotal} của các item.
 	 *
 	 * <p>Được tính một lần lúc tạo đơn và không bao giờ đổi theo giá hiện tại của

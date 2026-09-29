@@ -1,9 +1,11 @@
 package com.vmarket.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -85,7 +87,7 @@ class OrderApiTest {
 	}
 
 	private UserServiceClient.AddressView aliceAddress() {
-		return new UserServiceClient.AddressView(ADDRESS_ID, ALICE, "Nguyễn Văn An", "0912345678",
+		return new UserServiceClient.AddressView(ADDRESS_ID, "Nguyễn Văn An", "0912345678",
 				"Đà Nẵng", "Hải Châu", "Thạch Thang", "54 Nguyễn Lương Bằng");
 	}
 
@@ -140,6 +142,7 @@ class OrderApiTest {
 	void placeOrderCreatesSnapshotAndClearsCart() throws Exception {
 		when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
 		when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+		when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
 
 		mockMvc.perform(post("/api/orders")
 				.header(HttpHeaders.AUTHORIZATION, aliceToken())
@@ -164,7 +167,7 @@ class OrderApiTest {
 		assertThat(saved.getItems()).extracting(i -> i.getLineTotal())
 				.containsExactlyInAnyOrder(new BigDecimal("500000.00"), new BigDecimal("250000.00"));
 
-		verify(cartServiceClient).clearCart(eq(ALICE));
+		verify(cartServiceClient, times(2)).removeCartItem(eq(ALICE), anyString(), any());
 	}
 
 	@Test
@@ -181,27 +184,14 @@ class OrderApiTest {
 				.andExpect(jsonPath("$.error.code").value("CART_EMPTY"));
 
 		// Không đặt được thì không xoá giỏ, không ghi đơn.
+		verify(cartServiceClient, never()).removeCartItem(anyString(), anyString(), any());
 		verify(cartServiceClient, never()).clearCart(anyString());
 		assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
 	}
 
-	@Test
-	void placeOrderWithForeignAddressReturns404() throws Exception {
-		// user-service trả địa chỉ của người KHÁC — order-service phải tự chặn thay
-		// vì ghi đơn sai chủ (IDOR ở đầu vào).
-		when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(
-				new UserServiceClient.AddressView(ADDRESS_ID, BOB, "Bob", "0912345678",
-						"Đà Nẵng", "Hải Châu", "Thạch Thang", "54 Nguyễn Lương Bằng"));
-
-		mockMvc.perform(post("/api/orders")
-				.header(HttpHeaders.AUTHORIZATION, aliceToken())
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
-				.andExpect(status().isNotFound())
-				.andExpect(jsonPath("$.error.code").value("ADDRESS_NOT_FOUND"));
-
-		assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
-	}
+	// Test placeOrderWithForeignAddressReturns404 đã bỏ: user-service endpoint
+	// /me/addresses/{id} đã kiểm tra ownership bằng JWT, order-service không cần
+	// kiểm tra userId nữa (P1 review PR #25).
 
 	@Test
 	void listAndDetailOnlyShowOwnOrders() throws Exception {
@@ -263,11 +253,40 @@ class OrderApiTest {
 	private void createOrderForAlice() throws Exception {
 		when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
 		when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
-		when(cartServiceClient.clearCart(eq(ALICE))).thenReturn(true);
+		when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
 		mockMvc.perform(post("/api/orders")
 				.header(HttpHeaders.AUTHORIZATION, aliceToken())
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
 				.andExpect(status().isCreated());
+	}
+
+	@Test
+	void placeOrderWithIdempotencyKeyReturnsExistingOrder() throws Exception {
+		when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+		when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+		when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+		String key = "test-idempotency-key-123";
+
+		mockMvc.perform(post("/api/orders")
+				.header(HttpHeaders.AUTHORIZATION, aliceToken())
+				.header("Idempotency-Key", key)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.status").value("PENDING"));
+
+		// Gửi lại cùng key -> vẫn trả 201 kèm dữ liệu đơn cũ, không tạo thêm đơn mới
+		mockMvc.perform(post("/api/orders")
+				.header(HttpHeaders.AUTHORIZATION, aliceToken())
+				.header("Idempotency-Key", key)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.status").value("PENDING"));
+
+		// Chỉ có đúng 1 đơn được lưu trong database
+		assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
 	}
 }
