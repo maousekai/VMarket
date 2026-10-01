@@ -31,6 +31,9 @@
 # - Ha tang nhe mac dinh ~1.5GB RAM. Elasticsearch nang (~1GB) dat
 #   profile "search" - chi bat khi lam AI Search:
 #     docker compose --profile search up -d
+# - Logging tap trung + monitoring (Loki, Promtail, Prometheus, Grafana ~0.9GB)
+#   dat profile "monitoring" (PBL6-40) - bat khi can xem log/dashboard:
+#     docker compose --profile monitoring up -d
 # - Moi container co mem_limit de khong chiem het RAM may.
 
 name: ${COMPOSE_PROJECT_NAME:-vmarket}
@@ -405,6 +408,113 @@ services:
     depends_on:
       - api-gateway
 
+  # ----------------------------------------------------------
+  # LOGGING TAP TRUNG + MONITORING (PBL6-40) - profile "monitoring" (~0.9GB).
+  # Bat khi can xem log/dashboard:
+  #   docker compose --profile monitoring up -d
+  # Grafana: http://localhost:3001 (dashboard "VMarket - Services Overview").
+  # Cau hinh: infra/monitoring/. Huong dan: README muc "Logging & Monitoring".
+  # ----------------------------------------------------------
+
+  # Loki - kho luu log tap trung (Promtail day vao, Grafana doc ra).
+  loki:
+    image: grafana/loki:3.5.5
+    container_name: VMarket-loki
+    profiles: ["monitoring"]
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./infra/monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - vmarket-loki-data:/loki
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:3100/ready >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Promtail - doc log stdout cua moi container trong project qua Docker API
+  # (docker.sock, chi doc) roi day sang Loki. Container moi tu duoc phat hien.
+  promtail:
+    image: grafana/promtail:3.5.5
+    container_name: VMarket-promtail
+    profiles: ["monitoring"]
+    command: ["-config.file=/etc/promtail/promtail-config.yml", "-config.expand-env=true"]
+    environment:
+      # Chi gom log cua container thuoc compose project nay
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-vmarket}
+    volumes:
+      - ./infra/monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - vmarket-network
+    mem_limit: 128m
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # Prometheus - scrape /actuator/prometheus cua tung service (UI: http://localhost:9090).
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: VMarket-prometheus
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - vmarket-prometheus-data:/prometheus
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    # Scrape service chay local (mvnw) tren may host - xem prometheus.yml.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:9090/-/healthy >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # Grafana - dashboard + xem log. Datasource (Prometheus, Loki) va dashboard
+  # duoc nap san tu infra/monitoring/grafana, khong can cau hinh tay.
+  grafana:
+    image: grafana/grafana:12.1.1
+    container_name: VMarket-grafana
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Xem dashboard khong can dang nhap (chi quyen Viewer) - tien cho ca nhom
+      # khi dev. Sua dashboard/Explore nang cao thi dang nhap tai khoan admin.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/vmarket-services-overview.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      # Port host 3001: tranh trung localhost:3000 (FE dev, xem CORS_ALLOWED_ORIGINS).
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - vmarket-grafana-data:/var/lib/grafana
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+
 # Network chung cho tat ca service (PBL6-9). `name:` dinh danh de khong phu
 # thuoc ten project compose; cac service goi nhau bang ten service trong network.
 networks:
@@ -420,3 +530,6 @@ volumes:
   vmarket-redis-data:
   vmarket-rabbit-data:
   vmarket-es-data:
+  vmarket-loki-data:
+  vmarket-prometheus-data:
+  vmarket-grafana-data:

@@ -1,0 +1,13 @@
+# Nap dashboard tu file JSON (PBL6-40). Them dashboard moi: tha file .json vao
+# infra/monitoring/grafana/dashboards - Grafana tu nap lai sau ~30 giay.
+apiVersion: 1
+
+providers:
+  - name: vmarket
+    folder: VMarket
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

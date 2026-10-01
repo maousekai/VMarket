@@ -1,3 +1,4 @@
+| Monitoring | mở `http://localhost:3001` (profile `monitoring`)   | dashboard hiện service UP  |
 # VMarket (PBL6)
 
 Nền tảng thương mại điện tử đa người bán tích hợp AI — xây dựng theo **kiến trúc microservices** hướng sự kiện (xem [SRS](docs/SRS-VMarket.md)).
@@ -43,7 +44,7 @@ VMarket/
 │   ├── service-ci.yml         # Reusable workflow: test + build image (dùng chung)
 │   └── <ten-service>.yml      # File gọi, trigger theo thư mục của service đó
 ├── scripts/                   # Script quản lý dự án (vmarket.cmd, new-service.cmd)
-├── infra/                     # Cấu hình hạ tầng (init script PostgreSQL...)
+├── infra/                     # Cấu hình hạ tầng (init script PostgreSQL, logging/monitoring...)
 ├── docs/
 │   ├── SRS-VMarket.md         # Đặc tả yêu cầu
 │   └── templates/             # Template Dockerfile + CI/CD + .env cho service mới
@@ -81,6 +82,9 @@ docker compose up -d postgres redis
 # Elasticsearch (~1GB) chỉ bật khi làm AI Search
 docker compose --profile search up -d
 
+# Loki + Promtail + Prometheus + Grafana (~0.9GB) chỉ bật khi cần xem log/dashboard
+docker compose --profile monitoring up -d
+
 # Xoá sạch khi không dùng nữa
 docker compose down -v
 ```
@@ -88,6 +92,70 @@ docker compose down -v
 Mỗi container đã bị giới hạn RAM (`mem_limit`) để không chiếm hết máy. WSL2 cũng được giới hạn qua `~/.wslconfig` (8GB) — áp dụng sau khi `wsl --shutdown` rồi mở lại Docker Desktop.
 
 Sau khi `docker compose up -d` lần đầu, PostgreSQL tự tạo đủ CSDL cho từng service: `vmarket_auth`, `vmarket_user`, `vmarket_shop`, `vmarket_order`, `vmarket_payment`, `vmarket_delivery`, `vmarket_review`, `vmarket_recommendation` (MongoDB/Redis tự khởi tạo khi dùng).
+
+## Logging & Monitoring (xem log / dashboard tập trung)
+
+Thay vì `docker logs` từng container, cả nhóm xem log và metrics của mọi service ở
+**một chỗ là Grafana**. Bộ này nằm trong profile `monitoring` (~0.9GB RAM), chỉ bật khi cần:
+
+```bash
+docker compose --profile monitoring up -d      # hoặc: scripts\vmarket.cmd infra-monitoring
+```
+
+| Công cụ    | Địa chỉ                  | Dùng để                                                        |
+| ---------- | ------------------------ | -------------------------------------------------------------- |
+| Grafana    | http://localhost:3001    | Dashboard + xem log. Xem không cần đăng nhập (sửa: `admin`/`admin`) |
+| Prometheus | http://localhost:9090    | Kiểm tra service nào đang được scrape: trang **Status → Targets** |
+| Loki       | http://localhost:3100    | Kho log, chỉ có API — xem qua Grafana                          |
+
+```
+service Spring Boot ──/actuator/prometheus──> Prometheus ─┐
+container stdout (JSON) ──> Promtail ──> Loki ────────────┴─> Grafana
+```
+
+### Xem dashboard
+
+Mở http://localhost:3001 — trang chủ chính là dashboard **VMarket - Services Overview**
+(cũng nằm ở *Dashboards → VMarket*):
+
+- **Trạng thái UP / DOWN** và **Uptime** của từng service.
+- **Request rate** (req/s), **Error rate** (% response 5xx), thời gian phản hồi trung bình, JVM heap.
+- **Số dòng log WARN / ERROR** theo thời gian và khung **log tập trung** ở cuối trang.
+
+Chọn service ở ô **Service** phía trên; gõ vào ô **Tìm trong log** để lọc log theo chuỗi
+(ví dụ một email, một mã đơn hàng).
+
+### Xem / tìm log
+
+Dùng khung log trong dashboard, hoặc vào **Explore** (biểu tượng la bàn) → chọn datasource
+**Loki** rồi gõ truy vấn LogQL:
+
+```logql
+{service="auth-service"}                              # toàn bộ log của 1 service
+{service="auth-service", level="ERROR"}               # chỉ dòng ERROR
+{service=~".+-service", level=~"WARN|ERROR"}          # WARN/ERROR của mọi service
+{service="user-service"} |= "NullPointerException"    # lọc theo chuỗi
+{service="auth-service"} | json | logger_name=~".*OtpService"   # lọc theo field JSON
+```
+
+Nhãn có sẵn: `service` (tên service trong `docker-compose.yml`, kể cả `postgres`,
+`rabbitmq`...), `container`, `level` (chỉ có với service Spring Boot). Log giữ 7 ngày.
+
+### Cần biết
+
+- **Log JSON chỉ bật trong container** (biến `LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash`
+  trong Dockerfile). Chạy local bằng `mvnw` vẫn là log text dễ đọc như cũ.
+- **Log chỉ gom từ container.** Service chạy local bằng `mvnw` không có log trên Loki
+  (xem ở cửa sổ console của nó), nhưng **metrics vẫn có**: Prometheus scrape chúng qua
+  `host.docker.internal:<port>`. Service chưa chạy sẽ hiện **DOWN** trên dashboard — đúng như thiết kế.
+- **Container hoá thêm một service:** thêm block vào `docker-compose.yml` như bình thường
+  (log tự được gom), rồi đổi target của nó trong
+  [`infra/monitoring/prometheus/prometheus.yml`](infra/monitoring/prometheus/prometheus.yml)
+  từ `host.docker.internal:<port>` sang `<tên-service>:<port>`.
+- **Service mới** cần 3 thứ để lên dashboard: dependency `micrometer-registry-prometheus`,
+  `prometheus` trong `management.endpoints.web.exposure.include`, và mở
+  `/actuator/prometheus` trong `SecurityConfig` (nếu service có Spring Security).
+- Thêm dashboard: thả file `.json` vào `infra/monitoring/grafana/dashboards/`.
 
 ## Chạy một service (ví dụ Auth)
 

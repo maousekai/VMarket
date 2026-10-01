@@ -24,7 +24,7 @@ management:
     web:
       exposure:
         # 'metrics' cần cho alert dựa trên vmarket.outbox.pending / dead.total.
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
 
 app:
   cors:
