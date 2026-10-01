@@ -30,4 +30,27 @@ class OpenApiDocsSmokeTest {
 				.andExpect(jsonPath("$.openapi").exists())
 				.andExpect(jsonPath("$.paths").exists());
 	}
+
+	/** Annotation Swagger thêm cho {@code HealthController} ở PBL6-47 thật sự vào đặc tả. */
+	@Test
+	void apiDocs_documentsHealthEndpoint_underHealthTag() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.tags[?(@.name == 'Health')]").exists())
+				.andExpect(jsonPath("$.paths['/api/auth/health'].get.tags[0]").value("Health"))
+				.andExpect(jsonPath("$.paths['/api/auth/health'].get.summary").isNotEmpty())
+				.andExpect(jsonPath("$.paths['/api/auth/health'].get.responses['200'].content['*/*'].schema['$ref']")
+						.value("#/components/schemas/HealthResponse"));
+	}
+
+	/** {@code GET /api/auth/sessions} trả {@code List<SessionSummary>} → schema phải là mảng. */
+	@Test
+	void apiDocs_sessionList_isArrayOfSessionSummary() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/auth/sessions'].get.responses['200'].content['*/*'].schema.type")
+						.value("array"))
+				.andExpect(jsonPath("$.paths['/api/auth/sessions'].get.responses['200'].content['*/*'].schema.items['$ref']")
+						.value("#/components/schemas/SessionSummary"));
+	}
 }

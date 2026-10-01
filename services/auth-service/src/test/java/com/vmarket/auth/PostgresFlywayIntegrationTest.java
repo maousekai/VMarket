@@ -33,7 +33,7 @@ import com.vmarket.auth.repository.UserRepository;
 import com.vmarket.auth.service.RegistrationService;
 
 /**
- * Chạy Flyway V1→V8 và đăng ký tài khoản trên PostgreSQL THẬT (Testcontainers),
+ * Chạy Flyway V1→V9 và đăng ký tài khoản trên PostgreSQL THẬT (Testcontainers),
  * để dành từ PBL6-41 tới nay — {@link FlywayMigrationTest} chỉ chạy trên H2
  * (giả lập cú pháp Postgres qua {@code MODE=PostgreSQL}), không tự xác nhận
  * được tên constraint UNIQUE thật do Postgres tự sinh.
@@ -110,8 +110,8 @@ class PostgresFlywayIntegrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("8");
-		assertThat(flyway.info().applied()).hasSize(8);
+		assertThat(current.getVersion().getVersion()).isEqualTo("9");
+		assertThat(flyway.info().applied()).hasSize(9);
 		// Context da khoi dong voi ddl-auto=validate -> entity da khop schema
 		// migration tren Postgres THAT (khong phai gia lap MODE=PostgreSQL cua H2).
 	}

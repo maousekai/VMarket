@@ -19,6 +19,7 @@ import com.vmarket.auth.security.RefreshTokenCookieService;
 import com.vmarket.auth.service.SessionService;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -62,7 +63,7 @@ public class SessionController {
 					+ "refresh_token hiện tại), mới dùng gần đây trước.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Danh sách phiên",
-					content = @Content(schema = @Schema(implementation = SessionSummary.class))),
+					content = @Content(array = @ArraySchema(schema = @Schema(implementation = SessionSummary.class)))),
 			@ApiResponse(responseCode = "401", description = "REFRESH_TOKEN_MISSING / SESSION_NOT_FOUND",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
