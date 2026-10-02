@@ -80,6 +80,33 @@ class JwtAuthenticationFilterTest {
 	}
 
 	@Test
+	void onlyExactImagePostIsPublicAndStripsIdentity() throws Exception {
+		MockHttpServletRequest upload = request("POST", "/api/ai/search/image", null);
+		upload.addHeader("X-User-Id", "spoofed");
+		AtomicReference<String> forwarded = new AtomicReference<>("not-called");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		filter.doFilter(upload, response, (req, res) -> forwarded.set(((HttpServletRequest) req).getHeader("X-User-Id")));
+		assertThat(response.getStatus()).isEqualTo(200);
+		assertThat(forwarded.get()).isNull();
+		MockHttpServletResponse protectedResponse = new MockHttpServletResponse();
+		filter.doFilter(request("POST", "/api/ai/search/image/extra", null), protectedResponse, new MockFilterChain());
+		assertThat(protectedResponse.getStatus()).isEqualTo(401);
+	}
+
+	@Test
+	void publicRouteCannotForwardLowercaseOrUnknownIdentityHeaders() throws Exception {
+		MockHttpServletRequest upload = request("POST", "/api/ai/search/image", null);
+		upload.addHeader("x-user-id", "spoofed");
+		upload.addHeader("x-user-custom-role", "ADMIN");
+		filter.doFilter(upload, new MockHttpServletResponse(), (req, res) -> {
+			HttpServletRequest forwarded = (HttpServletRequest) req;
+			assertThat(forwarded.getHeader("x-user-id")).isNull();
+			assertThat(forwarded.getHeaders("x-user-id").hasMoreElements()).isFalse();
+			assertThat(java.util.Collections.list(forwarded.getHeaderNames())).doesNotContain("x-user-id", "x-user-custom-role");
+		});
+	}
+
+	@Test
 	void publicGetPath_getWithoutToken_passes() throws Exception {
 		MockHttpServletResponse res = new MockHttpServletResponse();
 		filter.doFilter(request("GET", "/api/products/123", null), res, new MockFilterChain());

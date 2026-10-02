@@ -67,10 +67,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	public static final String HEADER_USER_USERNAME = "X-User-Username";
 	public static final String HEADER_USER_EMAIL_VERIFIED = "X-User-Email-Verified";
 
-	/** Các header identity do gateway tự sinh — client KHÔNG được tự đặt. */
-	private static final Set<String> TRUSTED_IDENTITY_HEADERS = Set.of(
-			HEADER_USER_ID, HEADER_USER_ROLES, HEADER_USER_EMAIL, HEADER_USER_USERNAME, HEADER_USER_EMAIL_VERIFIED);
-
 	private static final String BEARER_PREFIX = "Bearer ";
 
 	private final JwtService jwtService;
@@ -167,6 +163,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private boolean isPublic(HttpServletRequest request) {
 		String path = request.getRequestURI();
+		if ("POST".equalsIgnoreCase(request.getMethod()) && "/api/ai/search/image".equals(path)) {
+			return true;
+		}
 		for (String pattern : securityProperties.getPublicPaths()) {
 			if (pathMatcher.match(pattern, path)) {
 				return true;
@@ -234,16 +233,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		@Override
 		public String getHeader(String name) {
-			if (TRUSTED_IDENTITY_HEADERS.contains(name)) {
-				return identity.get(name);
+			if (isIdentityHeader(name)) {
+				return identity.entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(name))
+						.map(Map.Entry::getValue).findFirst().orElse(null);
 			}
 			return super.getHeader(name);
 		}
 
 		@Override
 		public Enumeration<String> getHeaders(String name) {
-			if (TRUSTED_IDENTITY_HEADERS.contains(name)) {
-				String value = identity.get(name);
+			if (isIdentityHeader(name)) {
+				String value = getHeader(name);
 				return value != null ? Collections.enumeration(List.of(value)) : Collections.emptyEnumeration();
 			}
 			return super.getHeaders(name);
@@ -252,9 +252,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		@Override
 		public Enumeration<String> getHeaderNames() {
 			Set<String> names = new LinkedHashSet<>(Collections.list(super.getHeaderNames()));
-			names.removeAll(TRUSTED_IDENTITY_HEADERS);
+			names.removeIf(IdentityRequestWrapper::isIdentityHeader);
 			names.addAll(identity.keySet());
 			return Collections.enumeration(names);
+		}
+
+		private static boolean isIdentityHeader(String name) {
+			return name != null && name.toLowerCase(java.util.Locale.ROOT).startsWith("x-user-");
 		}
 	}
 }

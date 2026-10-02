@@ -13,8 +13,9 @@
 # build: PHAI them mot dong "!<duong-dan>" ben duoi, neu khong COPY trong
 # Dockerfile se bao "file not found".
 #
-# frontend/ va cac AI service (Python) build voi context rieng cua chung
+# frontend/ va cac AI service khac build voi context rieng cua chung
 # nen KHONG dung file nay (moi thu muc co .dockerignore cua rieng no).
+# ai-search-service uses the repo root context; private/cache/model/test files stay excluded.
 # ============================================================
 
 # 1. Chan tat ca
@@ -32,6 +33,10 @@ services/**/*.md
 services/**/HELP.md
 
 # 4. AI service (Python) co Dockerfile + context rieng, khong can o day
-services/ai-search-service
 services/chatbot-service
 services/recommendation-service
+services/**/.venv
+services/**/__pycache__
+services/ai-search-service/models
+services/ai-search-service/.local
+services/ai-search-service/tests

@@ -57,6 +57,7 @@ import com.vmarket.product.service.InventoryService;
 		"app.outbox.enabled=true",
 		"app.outbox.initial-delay-ms=3600000",
 		"app.catalog-migration.enabled=false",
+		"app.internal-api-key=test-search-internal",
 		"spring.data.mongodb.auto-index-creation=true",
 		"spring.rabbitmq.publisher-confirm-type=correlated",
 		"spring.rabbitmq.publisher-returns=true"
@@ -86,12 +87,41 @@ class ProductInfrastructureIntegrationTest {
 	@Autowired RabbitTemplate rabbitTemplate;
 	@Autowired TopicExchange eventExchange;
 	@Autowired EventsJson eventsJson;
+	@Autowired org.springframework.data.mongodb.core.MongoTemplate mongo;
+	@Autowired com.vmarket.product.controller.SearchSnapshotController snapshots;
 
 	@BeforeEach
 	void cleanData() {
 		reservationRepository.deleteAll();
 		outboxRepository.deleteAll();
 		productRepository.deleteAll();
+	}
+
+	@Test
+	void snapshotExportUsesNativeMongoIdOrderAndRetainsTombstones() {
+		var collection = mongo.getCollection("products");
+		collection.insertMany(List.of(
+				new org.bson.Document("_id", new org.bson.types.ObjectId("000000000000000000000001"))
+						.append("version", 2L).append("deletedAt", java.util.Date.from(Instant.now())),
+				new org.bson.Document("_id", "zz-string")
+						.append("version", 0L).append("deletedAt", java.util.Date.from(Instant.now()))));
+		var request = new org.springframework.mock.web.MockHttpServletRequest();
+		var first = snapshots.page(0, 1, "test-search-internal", request);
+		var second = snapshots.page(1, 1, "test-search-internal", request);
+		assertThat(first.get("hasMore")).isEqualTo(true);
+		assertThat(second.get("hasMore")).isEqualTo(false);
+		assertThat((List<?>) first.get("items")).singleElement().satisfies(item ->
+				assertThat(((java.util.Map<?, ?>) item).get("id")).isEqualTo("zz-string"));
+		assertThat((List<?>) second.get("items")).singleElement().satisfies(item ->
+				assertThat(((java.util.Map<?, ?>) item).get("id")).isEqualTo("000000000000000000000001"));
+		collection.insertMany(List.of(new org.bson.Document("_id", "legacy-missing"),
+				new org.bson.Document("_id", "legacy-null").append("version", null)));
+		new com.vmarket.product.service.SearchRevisionMigration(mongo).run(null);
+		assertThat(collection.find(new org.bson.Document("_id", "legacy-missing")).first().getLong("version")).isZero();
+		assertThat(collection.find(new org.bson.Document("_id", "legacy-null")).first().getLong("version")).isZero();
+		assertThat(collection.find(new org.bson.Document("_id", "zz-string")).first().getLong("version")).isZero();
+		assertThat(collection.find(new org.bson.Document("_id", new org.bson.types.ObjectId("000000000000000000000001")))
+				.first().getLong("version")).isEqualTo(2L);
 	}
 
 	@Test
