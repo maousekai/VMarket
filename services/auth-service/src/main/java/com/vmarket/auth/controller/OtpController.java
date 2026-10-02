@@ -68,6 +68,10 @@ public class OtpController {
 					description = "VALIDATION_ERROR / OTP_NOT_FOUND / OTP_EXPIRED / OTP_INVALID / "
 							+ "OTP_TOO_MANY_ATTEMPTS / OTP_ALREADY_USED",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "409",
+					description = "REGISTRATION_CONFLICT — tài khoản vừa được tạo song song; mã OTP chưa bị "
+							+ "tiêu thụ, gửi lại đúng mã sẽ thành công",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PostMapping("/verify")
 	public TokenResponse verify(@Valid @RequestBody OtpVerifyDto body, HttpServletRequest httpRequest,

@@ -1,7 +1,5 @@
 package com.vmarket.auth.service;
 
-import java.security.SecureRandom;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 
@@ -10,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 import com.vmarket.auth.config.AuthOtpProperties;
 import com.vmarket.auth.dto.OtpRequestResponse;
@@ -21,6 +20,7 @@ import com.vmarket.auth.entity.RoleName;
 import com.vmarket.auth.entity.User;
 import com.vmarket.auth.entity.UserRole;
 import com.vmarket.auth.exception.ApiException;
+import com.vmarket.auth.repository.EmailOtpLockRepository;
 import com.vmarket.auth.repository.EmailOtpRepository;
 import com.vmarket.auth.repository.RoleRepository;
 import com.vmarket.auth.repository.UserRepository;
@@ -47,13 +47,14 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class OtpService {
 
-	private static final SecureRandom RANDOM = new SecureRandom();
 	private static final RoleName DEFAULT_ROLE = RoleName.BUYER;
 	/** BCrypt hash hợp lệ dùng để so sánh giả — cân bằng thời gian phản hồi khi không có OTP. */
 	private static final String DUMMY_HASH =
 			"$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
 	private final EmailOtpRepository otpRepository;
+	private final EmailOtpLockRepository lockRepository;
+	private final OtpIssuer otpIssuer;
 	private final UserRepository userRepository;
 	private final RoleRepository roleRepository;
 	private final UserRoleRepository userRoleRepository;
@@ -63,34 +64,15 @@ public class OtpService {
 	private final AuthOtpProperties props;
 
 	/**
-	 * KHÔNG {@code @Transactional} ở mức method: {@code otpRepository.save} tự commit,
-	 * sau đó mới gọi HTTP gửi mail (không giữ connection DB). Nếu gửi lỗi, dòng
+	 * KHÔNG {@code @Transactional} ở mức method: {@link OtpIssuer#issue} khoá theo
+	 * email, kiểm giới hạn và lưu mã trong transaction ngắn riêng của nó, commit
+	 * xong mới gọi HTTP gửi mail (không giữ connection/khoá DB). Nếu gửi lỗi, dòng
 	 * {@code email_otp} vẫn còn → phần đếm rate-limit không bị mất (chống loop vô hạn
 	 * khi provider hỏng).
 	 */
 	public OtpRequestResponse requestOtp(String rawEmail) {
 		String email = normalize(rawEmail);
-		Instant now = Instant.now();
-
-		otpRepository.findFirstByEmailOrderByCreatedAtDesc(email).ifPresent(latest -> {
-			if (latest.getConsumedAt() == null
-					&& latest.getCreatedAt().isAfter(now.minus(props.getResendCooldown()))) {
-				throw new ApiException("OTP_RESEND_TOO_SOON", HttpStatus.TOO_MANY_REQUESTS,
-						"Vui lòng đợi " + props.getResendCooldown().toSeconds() + " giây trước khi yêu cầu mã mới");
-			}
-		});
-
-		if (otpRepository.countByEmailAndCreatedAtAfter(email, now.minus(Duration.ofHours(1))) >= props.getHourlyLimit()) {
-			throw new ApiException("OTP_RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS,
-					"Đã yêu cầu mã quá nhiều lần, vui lòng thử lại sau");
-		}
-
-		String code = String.format("%06d", RANDOM.nextInt(1_000_000));
-		EmailOtp otp = new EmailOtp();
-		otp.setEmail(email);
-		otp.setCodeHash(passwordEncoder.encode(code));
-		otp.setExpiresAt(now.plus(props.getTtl()));
-		otpRepository.save(otp); // commit ngay - giữ dấu vết rate-limit dù gửi mail lỗi
+		String code = otpIssuer.issue(email, Instant.now());
 
 		emailSender.send(OtpEmailContent.build(email, code, props.getTtl()));
 
@@ -118,28 +100,37 @@ public class OtpService {
 		if (!otp.getExpiresAt().isAfter(now)) {
 			throw new ApiException("OTP_EXPIRED", HttpStatus.BAD_REQUEST, "Mã OTP đã hết hạn, hãy yêu cầu mã mới");
 		}
+		// Fast-path: chỉ để tránh so sánh BCrypt thừa. KHÔNG phải biên an toàn thật —
+		// biên an toàn thật nằm ở điều kiện "attempts < maxAttempts" ngay trong các
+		// UPDATE nguyên tử dưới đây (xem EmailOtpRepository).
 		if (otp.getAttempts() >= props.getMaxAttempts()) {
-			throw new ApiException("OTP_TOO_MANY_ATTEMPTS", HttpStatus.BAD_REQUEST,
-					"Nhập sai quá nhiều lần, hãy yêu cầu mã mới");
+			throw tooManyAttempts();
 		}
 
 		if (!passwordEncoder.matches(code, otp.getCodeHash())) {
-			otpRepository.incrementAttempts(otp.getId());
+			// 0 dòng = giới hạn đã đạt ở DB TRƯỚC lần tăng này (request song song
+			// khác vừa tăng) → hết lượt, bất kể giá trị attempts đọc được ở trên.
+			if (otpRepository.incrementAttempts(otp.getId(), props.getMaxAttempts()) == 0) {
+				throw tooManyAttempts();
+			}
 			int used = otp.getAttempts() + 1;
-			// Chạm ngưỡng: guard `attempts >= maxAttempts` ở trên đã khiến mã không
-			// còn verify được lần sau -> không cần markConsumed riêng.
 			if (used >= props.getMaxAttempts()) {
-				throw new ApiException("OTP_TOO_MANY_ATTEMPTS", HttpStatus.BAD_REQUEST,
-						"Nhập sai quá nhiều lần, hãy yêu cầu mã mới");
+				throw tooManyAttempts();
 			}
 			throw new ApiException("OTP_INVALID", HttpStatus.BAD_REQUEST,
 					"Mã OTP không đúng (còn " + (props.getMaxAttempts() - used) + " lần thử)");
 		}
 
-		// Đánh dấu đã dùng NGUYÊN TỬ (where consumed_at is null). 0 dòng = request
-		// khác đã dùng mã này → chống double-verify.
-		if (otpRepository.markConsumed(otp.getId(), now) == 0) {
-			throw new ApiException("OTP_ALREADY_USED", HttpStatus.BAD_REQUEST, "Mã OTP đã được sử dụng");
+		// Đánh dấu đã dùng NGUYÊN TỬ, có kiểm tra lại "attempts < maxAttempts" ngay
+		// trong UPDATE: request mã đúng đọc attempts cũ ở trên, trước khi các request
+		// mã sai khác commit, vẫn không thể consume nếu giới hạn đã đạt tại thời điểm
+		// UPDATE thực thi. 0 dòng = đã dùng HOẶC đã hết lượt.
+		if (otpRepository.markConsumed(otp.getId(), now, props.getMaxAttempts()) == 0) {
+			EmailOtp current = otpRepository.findById(otp.getId()).orElseThrow();
+			if (current.getConsumedAt() != null) {
+				throw new ApiException("OTP_ALREADY_USED", HttpStatus.BAD_REQUEST, "Mã OTP đã được sử dụng");
+			}
+			throw tooManyAttempts();
 		}
 
 		// ForUpdate: khoá dòng user tới khi commit để Admin khoá tài khoản (FR-USER-04)
@@ -161,15 +152,23 @@ public class OtpService {
 
 	@Transactional
 	public int purgeExpired(Instant cutoff) {
-		return otpRepository.deleteByCreatedAtBefore(cutoff);
+		int removed = otpRepository.deleteByCreatedAtBefore(cutoff);
+		lockRepository.deleteUnusedBefore(cutoff);
+		return removed;
 	}
 
 	// --- helpers -----------------------------------------------------------
 
 	/**
-	 * Tạo tài khoản đã xác thực (không mật khẩu) cho email chưa có user. Nếu một
-	 * request khác vừa tạo trước (race trên {@code users.email} unique) → đọc lại
-	 * và dùng user đó.
+	 * Tạo tài khoản đã xác thực (không mật khẩu) cho email chưa có user.
+	 *
+	 * <p>Race trên {@code users.email} unique (request khác — đăng ký mật khẩu hoặc
+	 * verify OTP song song — vừa tạo user trước): KHÔNG truy vấn lại DB ở đây. Entity
+	 * hỏng vẫn nằm trong persistence context nên auto-flush của query sẽ INSERT lại
+	 * và ném tiếp, còn trên PostgreSQL transaction đã abort. Thay vào đó đánh dấu
+	 * rollback (bắt buộc, vì {@code noRollbackFor = ApiException.class} ở
+	 * {@link #verifyOtp}) rồi trả 409: rollback khôi phục cả {@code consumed_at}
+	 * của OTP, nên client gửi lại đúng mã sẽ đi nhánh "user đã tồn tại" và thành công.
 	 */
 	private User createOrGetVerifiedUser(String email) {
 		Role role = roleRepository.findByName(DEFAULT_ROLE)
@@ -184,11 +183,17 @@ public class OtpService {
 		try {
 			userRepository.saveAndFlush(user);
 		} catch (DataIntegrityViolationException ex) {
-			return userRepository.findByEmail(email).orElseThrow(() -> new ApiException(
-					"REGISTRATION_CONFLICT", HttpStatus.CONFLICT, "Không tạo được tài khoản, vui lòng thử lại"));
+			TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+			throw new ApiException("REGISTRATION_CONFLICT", HttpStatus.CONFLICT,
+					"Tài khoản vừa được tạo bởi một yêu cầu khác, vui lòng gửi lại mã OTP");
 		}
 		userRoleRepository.save(new UserRole(user.getId(), role.getId()));
 		return user;
+	}
+
+	private static ApiException tooManyAttempts() {
+		return new ApiException("OTP_TOO_MANY_ATTEMPTS", HttpStatus.BAD_REQUEST,
+				"Nhập sai quá nhiều lần, hãy yêu cầu mã mới");
 	}
 
 	private static String normalize(String rawEmail) {
