@@ -9,18 +9,21 @@ Run instructions and configuration are in [README.md](README.md).
 
 | Check | Observed result |
 | --- | --- |
-| Python offline unit checks | 13 passed; validation, malformed multipart/numeric-header limits, cancellation retains the native image slot, safe errors, LLM wire/cache/timeout fallback including non-object provider messages, pre-decode projected resize limits, revisions/tombstones, MinIO-only URLs and streamed-body cleanup |
+| Python offline unit checks | 16 passed; includes fresh configuration/file/environment precedence, configurable ranking, secret-safe diagnostic context, identical health/image calibration readiness, malformed multipart/numeric-header limits, cancellation retains the image slot, LLM fallback, projected resize limits, revisions/tombstones and MinIO streamed-body cleanup |
 | Real Elasticsearch 8.19 checks | 6 passed; Vietnamese/fuzzy/synonyms, suggestions, actual variant-price gaps, min-price sort, popularity ranking, nested kNN/prefilters, stale updates, durable image recovery and atomic maintenance rebuild/failure |
 | Product Maven `verify` | 85 passed, none skipped; includes 7 real Mongo/Rabbit Testcontainers checks, native mixed-type `_id` export ordering, maintenance migration preserves valid revisions, snapshot authentication/version/tombstone projection and existing catalog suite |
-| Gateway Maven `verify` | 37 passed, none skipped; includes a real HTTP servlet/proxy test for guest image upload, case-insensitive identity stripping, internal snapshot denial and chunked-body 413, plus rate-limit envelope |
+| Gateway Maven `verify` | 38 passed, none skipped; includes a real HTTP servlet/proxy test for guest image upload, case-insensitive identity stripping, internal snapshot denial and chunked-body 413, plus a shared escaped rate-limit envelope for Search and other routes |
 | Shared-events Maven `verify` | 10 passed, none skipped; no event-version rollout |
 | Generated system smoke | Passed with real ES/Rabbit/MinIO/CPU PyTorch; nine image vectors, read-only S3 policy denies write/list, events/current authenticated snapshot stub, text/image results, hidden/deleted exclusion, malformed-event DLQ and confirmed targeted replay |
 | Docker Search build | Passed; nonroot, pinned Python base, OS security upgrades, CPU wheels, no keys or model weights in layers |
-| Environment synchronization / YAML | `scripts/check-env.cmd -Quiet` passed; Compose, CI and OpenAPI YAML parsed |
+| Environment synchronization / YAML | `scripts/check-env.cmd -Quiet`, generated Search contract `--check`, and YAML parse passed; an empty MinIO root password is explicitly rejected by Compose |
 | Nginx runtime syntax check | `nginx -t` passed with the repository's nginx.conf and rendered upload-limit template, using the frontend's existing `nginx:1.28-alpine` base. Initial registry timeout resolved on one retry. |
 | Dependency audit | Pinned runtime requirements and CPU torch 2.14.1 / torchvision 0.29.1: no known vulnerabilities reported by pip-audit at check time |
 
-Affected Java modules were verified separately after their final edits. Test discovery
+Affected Java modules, Python unit/model/ES and generated system smoke were rerun
+after the configuration/duplication refactor. The earlier ES attempt failed because
+the server was stopped; the rerun passed after starting the local infrastructure.
+Test discovery
 does not start infrastructure/download weights/call paid APIs. The optional model and
 system commands explicitly opt into those cached weights/local dependencies.
 
@@ -48,11 +51,11 @@ runtime alias. Report: gitignored `.local/generated-load-report.json`.
 
 ## Resource boundary checks
 
-The final Search image ran model/API checks with `--memory 512m --memory-swap 512m`,
+The original Search image ran model/API checks with `--memory 512m --memory-swap 512m`,
 network disabled, read-only root/models and a 16 MiB service-owned tmpfs. Official
 weights were already cached and verified. CPU only; no CUDA libraries or GPU needed.
 
-- Cold model load: approximately 2.03 seconds in the final boundary run.
+- Cold model load: approximately 2.03 seconds in that original boundary run.
 - 576-dimensional normalized embeddings: 256px JPEG ~11 ms; 5000x5000 JPEG ~119 ms.
 - A **25 MP RGBA PNG padded to exactly 10,000,000 bytes** passed the full image handler.
   The same file plus one byte returned 413. Mock ES response isolates upload/decode
@@ -64,6 +67,17 @@ weights were already cached and verified. CPU only; no CUDA libraries or GPU nee
 - Focused running infrastructure sample: MinIO ~53.7 MiB / 256 MiB cap, Rabbit
   ~154.9 MiB / 512 MiB cap, ES ~1014 MiB / 1 GiB cap. ES and maximum Search images
   have little headroom. These observations do not authorize increasing allocations.
+
+After the refactor, the native Windows model/full-handler suite passed. Repeating
+its combined fixture-generation/model/API sequence inside the rebuilt 512 MiB
+container stalled under memory pressure and exited unsuccessfully; automatic
+container removal prevented confirming whether that run was OOM-killed. A separate
+run prepared the fixture outside the service container, then loaded the real CPU
+encoder and submitted the same 25 MP / 10 MB RGBA upload through the full handler.
+It returned 200 in the rebuilt offline, read-only 512 MiB container, exited 0 with
+`OOMKilled=false`, and again reached the entire **536,870,912-byte cgroup cap**.
+This verifies an isolated maximum request, not spare capacity or the combined
+test's success. There is no headroom claim for concurrent background image work.
 
 The **whole project <=7,000,000,000-byte ceiling is not yet demonstrated**: other
 Java/AI services and Docker/WSL overhead were not all running. Preserve their

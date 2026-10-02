@@ -12,11 +12,10 @@ from urllib.parse import urlsplit
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from schemas import MAX_FILE, SearchError
+from contract import EMBEDDING_DIMS, MAX_IMAGE_PIXELS, MAX_RESIZED_PIXELS, RESIZE_SHORT_EDGE
+from schemas import MAX_FILE, SearchError, image_too_large
 
-Image.MAX_IMAGE_PIXELS = 25_000_000
-RESIZE_SHORT_EDGE = 256
-MAX_RESIZED_PIXELS = 1_048_576
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 WEIGHTS_URL = "https://download.pytorch.org/models/mobilenet_v3_small-047dcff4.pth"
 
 
@@ -33,14 +32,14 @@ def object_key(url, origin, bucket):
 
 def decoded_image(data):
     if len(data) > MAX_FILE:
-        raise SearchError(413, "IMAGE_TOO_LARGE", "Image exceeds 10000000 bytes")
+        raise image_too_large()
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
                 if image.format not in {"JPEG", "PNG", "WEBP"} or getattr(image, "n_frames", 1) != 1:
                     raise ValueError("Unsupported image")
-                if image.width * image.height > 25_000_000 or not image.width or not image.height:
+                if image.width * image.height > MAX_IMAGE_PIXELS or not image.width or not image.height:
                     raise ValueError("Image dimensions exceeded")
                 short, long = sorted(image.size)
                 # Match short-edge Resize rounding before any decoded/resized pixels are allocated.
@@ -91,7 +90,7 @@ class ImageEncoder:
             transforms.CenterCrop(preset.crop_size), transforms.ToTensor(),
             transforms.Normalize(mean=preset.mean, std=preset.std)])
         self.torch = torch
-        spec = {"sha256": digest, "pooling": "features-avgpool-flatten", "dims": 576, "dtype": "fp32",
+        spec = {"sha256": digest, "pooling": "features-avgpool-flatten", "dims": EMBEDDING_DIMS, "dtype": "fp32",
                 "resize": [RESIZE_SHORT_EDGE], "crop": preset.crop_size, "mean": preset.mean, "std": preset.std,
                 "interpolation": str(preset.interpolation), "antialias": preset.antialias, "exif": "transpose-rgb-v1"}
         self.fingerprint = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
@@ -109,31 +108,38 @@ class ImageEncoder:
             with self.torch.inference_mode():
                 vector = self.model(tensor).squeeze(0)
                 norm = vector.norm()
-                if vector.numel() != 576 or not self.torch.isfinite(vector).all() or norm <= 0:
+                if vector.numel() != EMBEDDING_DIMS or not self.torch.isfinite(vector).all() or norm <= 0:
                     raise ValueError("Invalid embedding")
                 return (vector / norm).tolist()
 
     def embed_catalog(self, url):
-        import boto3
-        from botocore.config import Config
         s = self.settings
         key = object_key(url, s.minio_origin, s.bucket)
-        if not s.minio_key or not s.minio_secret:
-            raise ValueError("MinIO read credentials required")
-        client = boto3.client("s3", endpoint_url=s.minio_endpoint, aws_access_key_id=s.minio_key,
-            aws_secret_access_key=s.minio_secret, region_name="us-east-1",
-            config=Config(connect_timeout=1, read_timeout=1, retries={"total_max_attempts": 1}, proxies={}, s3={"addressing_style": "path"}))
+        client = s3_client(s, s.minio_key, s.minio_secret)
         started = time.monotonic()
         try:
             response = client.get_object(Bucket=s.bucket, Key=key)
             with closing(response["Body"]) as body:
                 if response["ContentLength"] > MAX_FILE:
-                    raise ValueError("Image too large")
+                    raise image_too_large()
                 data = bytearray()
                 for chunk in body.iter_chunks(65536):
                     data.extend(chunk)
-                    if len(data) > MAX_FILE or time.monotonic() - started > 5:
+                    if len(data) > MAX_FILE:
+                        raise image_too_large()
+                    if time.monotonic() - started > s.image_download_timeout:
                         raise ValueError("Image download exceeded bounds")
             return self.embed_image(bytes(data))
         finally:
             client.close()
+
+
+def s3_client(settings, access_key, secret_key):
+    import boto3
+    from botocore.config import Config
+    if not access_key or not secret_key:
+        raise ValueError("Explicit MinIO credentials required")
+    return boto3.client("s3", endpoint_url=settings.minio_endpoint, aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key, region_name="us-east-1",
+        config=Config(connect_timeout=settings.minio_timeout, read_timeout=settings.minio_timeout,
+                      retries={"total_max_attempts": 1}, proxies={}, s3={"addressing_style": "path"}))

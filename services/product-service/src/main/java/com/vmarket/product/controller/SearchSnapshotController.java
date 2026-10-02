@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.vmarket.product.exception.ApiException;
+import com.vmarket.product.config.SearchContract;
 import com.vmarket.product.model.Product;
 import com.vmarket.product.repository.ProductRepository;
 import com.vmarket.product.security.InternalApiKeyGuard;
@@ -25,7 +26,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 /** Read-only maintenance export. Writers must be paused for offset pagination. */
 @RestController
-@RequestMapping("/api/products/internal/search-snapshots")
+@RequestMapping(SearchContract.SNAPSHOTS_PATH)
 public class SearchSnapshotController {
 
 	private final ProductRepository products;
@@ -54,12 +55,12 @@ public class SearchSnapshotController {
 
 	@GetMapping
 	public Map<String, Object> page(@RequestParam(defaultValue = "0") int page,
-			@RequestParam(defaultValue = "100") int size,
+			@RequestParam(defaultValue = "" + SearchContract.MAX_PAGE_SIZE) int size,
 			@RequestHeader(value = "X-Internal-Api-Key", required = false) String key,
 			HttpServletRequest request) {
 		guard.requireValid(key);
 		validateParameters(request, Set.of("page", "size"));
-		if (page < 0 || size < 1 || size > 100) throw invalidQuery();
+		if (page < 0 || size < 1 || size > SearchContract.MAX_PAGE_SIZE) throw invalidQuery();
 		// Sort raw Mongo _id, not its outward String representation (ObjectId/string legacy rows).
 		Query query = new Query().with(Sort.by(Sort.Direction.ASC, "_id"))
 				.skip((long) page * size).limit(size + 1);
@@ -81,7 +82,7 @@ public class SearchSnapshotController {
 		result.put("deletedAt", product.getDeletedAt());
 		if (product.getDeletedAt() != null) return result;
 		var projection = mapper.toResponse(product);
-		if (projection.variants().stream().anyMatch(v -> !"VND".equals(v.currency()) || v.price() < 0)) {
+		if (projection.variants().stream().anyMatch(v -> !SearchContract.CURRENCY.equals(v.currency()) || v.price() < 0)) {
 			throw new ApiException(HttpStatus.CONFLICT, "SNAPSHOT_INVALID_DATA", "Invalid catalog currency or price");
 		}
 		result.put("shopId", projection.shopId());

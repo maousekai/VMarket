@@ -1,7 +1,7 @@
 package com.vmarket.gateway.security;
 
 import java.io.IOException;
-import java.time.Instant;
+import static com.vmarket.gateway.config.SearchContract.*;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -18,11 +18,10 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 5)
 public class SearchUploadLimitFilter extends OncePerRequestFilter {
-	private static final long MAX_BODY = 11_000_000;
 
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
-		return !"POST".equalsIgnoreCase(request.getMethod()) || !"/api/ai/search/image".equals(request.getRequestURI());
+		return !"POST".equalsIgnoreCase(request.getMethod()) || !IMAGE_PATH.equals(request.getRequestURI());
 	}
 
 	@Override
@@ -56,11 +55,7 @@ public class SearchUploadLimitFilter extends OncePerRequestFilter {
 			Throwable cause = ex;
 			while (cause != null && !(cause instanceof UploadTooLarge)) cause = cause.getCause();
 			if (cause == null) throw ex;
-			response.setStatus(413);
-			response.setContentType("application/json");
-			response.getWriter().write("{\"timestamp\":\"" + Instant.now() + "\",\"status\":413,"
-					+ "\"error\":{\"code\":\"IMAGE_TOO_LARGE\",\"message\":\"Multipart body exceeds limit\"},"
-					+ "\"path\":\"/api/ai/search/image\"}");
+			ErrorResponseWriter.write(response, 413, IMAGE_TOO_LARGE_CODE, IMAGE_TOO_LARGE_MESSAGE, IMAGE_PATH);
 		}
 	}
 

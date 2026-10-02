@@ -52,6 +52,7 @@ server {
         proxy_read_timeout 60s;
     }
 
+    # BEGIN GENERATED SEARCH CONTRACT
     location = /api/ai/search/image {
         client_max_body_size 11000000;
         client_body_timeout 10s;
@@ -67,8 +68,9 @@ server {
 
     location @search_too_large {
         default_type application/json;
-        return 413 '{"timestamp":"$time_iso8601","status":413,"error":{"code":"IMAGE_TOO_LARGE","message":"Multipart body exceeds limit"},"path":"/api/ai/search/image"}';
+        return 413 '{"timestamp":"$time_iso8601","status":413,"error":{"code":"IMAGE_TOO_LARGE","message":"Image upload exceeds limit"},"path":"/api/ai/search/image"}';
     }
+    # END GENERATED SEARCH CONTRACT
 
     # ---- File tinh ----
     # JS/CSS do Vite build co hash trong ten file => cache dai

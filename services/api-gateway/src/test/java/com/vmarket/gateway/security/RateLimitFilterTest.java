@@ -59,6 +59,15 @@ class RateLimitFilterTest {
 	}
 
 	@Test
+	void otherRoutesUseTheSameEscapedErrorEnvelope() throws Exception {
+		RateLimitFilter filter = filterWithProps(1, true);
+		doFilter(filter, request("GET", "/api/orders"));
+		MockHttpServletResponse response = doFilter(filter, request("GET", "/api/orders/quoted\"id"));
+		assertThat(response.getContentAsString()).contains("\"timestamp\":", "\"status\":429",
+				"RATE_LIMITED", "quoted\\\"id");
+	}
+
+	@Test
 	void disabled_neverLimits() throws Exception {
 		RateLimitFilter f = filterWithProps(1, false);
 

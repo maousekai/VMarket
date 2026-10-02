@@ -2,9 +2,11 @@ import asyncio
 import io
 import json
 import threading
+import tempfile
 import unittest
 from dataclasses import replace
 from unittest.mock import Mock, patch
+from pathlib import Path
 
 import httpx
 from fastapi.testclient import TestClient
@@ -18,7 +20,8 @@ from llm import Expander, validated_terms
 from main import create_app
 from manage import evaluate
 from schemas import SearchError, Snapshot, parse_query
-from search import filters, image_body, keyword_body, metadata_document, normalize
+from search import SearchStore, filters, image_body, image_threshold, index_definition, keyword_body, metadata_document, normalize
+from diagnostics import log_failure
 from settings import Settings
 
 
@@ -32,6 +35,37 @@ def snapshot(version=0, **changes):
 
 
 class SearchChecks(unittest.TestCase):
+    def test_explicit_settings_precedence_and_fresh_loads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text("EVENT_QUEUE=from-file\nLLM_BASE_URL=https://provider.test/v1\n", encoding="utf-8")
+            first = Settings.load(path, {"EVENT_QUEUE": "from-environment", "LLM_TIMEOUT_MS": "750", "LLM_MAX_TOKENS": "256"})
+            self.assertEqual(first.queue, "from-environment")
+            self.assertEqual((first.llm_timeout_ms, first.llm_max_tokens), (750, 256))
+            path.write_text("EVENT_QUEUE=changed\n", encoding="utf-8")
+            self.assertEqual(Settings.load(path, {}).queue, "changed")
+            self.assertEqual(first.queue, "from-environment")
+            self.assertEqual(Settings().llm_url, "")
+            for value in ('"not a list"', '[1]', '["ok", null]'):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    Settings.load(path, {"SEARCH_SYNONYMS": value})
+            tuned = Settings.load(path, {"SEARCH_SYNONYMS": '["a, b"]', "SEARCH_NAME_BOOST": "4", "SEARCH_SALES_WEIGHT": "0.2"})
+            self.assertEqual(index_definition(settings=tuned)["settings"]["analysis"]["filter"]["vi_synonyms"]["synonyms"], ["a, b"])
+            body = keyword_body({"keyword": "a", "sort": "RELEVANCE", "page": 0, "size": 20}, settings=tuned)
+            self.assertEqual(body["query"]["script_score"]["script"]["params"]["sales"], 0.2)
+
+    def test_failure_logs_have_context_without_secrets(self):
+        try:
+            raise ValueError("private-api-key and private-query")
+        except ValueError as error:
+            with self.assertLogs(level="WARNING") as logs:
+                log_failure("test_failure", error)
+        output = " ".join(logs.output)
+        self.assertIn("exception=ValueError", output)
+        self.assertIn("function=test_failure_logs_have_context_without_secrets", output)
+        self.assertNotIn("private-api-key", output)
+        self.assertNotIn("private-query", output)
+
     def test_validation_and_variant_gap_query(self):
         for query in ("keyword=x&size=101", "keyword=x&minPrice=2&maxPrice=1", "keyword=x&keyword=y", "keyword=x&minPrice=NaN", "keyword=x&provider=z", "keyword=x&page=500"):
             with self.subTest(query=query), self.assertRaises(SearchError):
@@ -121,6 +155,28 @@ class SearchChecks(unittest.TestCase):
 
 
 class LLMChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_health_and_image_search_share_readiness(self):
+        client = Mock()
+        store = SearchStore(Settings(), client)
+        store.meta = Mock()
+        encoder = Mock(ready=True, fingerprint="fp")
+        app = create_app(Settings(), store, encoder, run_workers=False)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
+                for threshold in (None, float("nan"), 2, True):
+                    meta = {"encoderFingerprint": "fp", "calibration": {"fingerprint": "fp", "validated": True, "threshold": threshold}}
+                    store.meta.return_value = ("index", meta)
+                    with self.subTest(threshold=threshold):
+                        self.assertEqual((await api.get("/api/ai/search/health")).json()["image"], "unavailable")
+                        with self.assertRaises(SearchError):
+                            store.image([1], {"limit": 1}, "fp")
+                client.search.assert_not_called()
+                meta["calibration"]["threshold"] = 0.5
+                self.assertEqual(image_threshold(meta, "fp"), 0.5)
+                self.assertEqual((await api.get("/api/ai/search/health")).json()["image"], "ready")
+        finally:
+            await app.state.expander.client.aclose()
+
     async def test_cancelled_image_holds_slot_until_native_completion(self):
         entered, finish = threading.Event(), threading.Event()
         def blocked(data):
@@ -149,7 +205,7 @@ class LLMChecks(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             requests.append(json.loads(request.content))
             return httpx.Response(200, json={"choices": [{"message": {"content": '{"terms":["áo phông"]}'}}]})
-        settings = replace(Settings(), llm_key="test", llm_model="test", external_text=True)
+        settings = replace(Settings(), llm_url="https://provider.test/v1", llm_key="test", llm_model="test", external_text=True)
         expander = Expander(settings, httpx.MockTransport(handler))
         try:
             self.assertEqual(await expander.expand_query("áo thun"), ["áo phông"])
@@ -165,7 +221,7 @@ class LLMChecks(unittest.IsolatedAsyncioTestCase):
         async def slow(request):
             await asyncio.sleep(1)
             return httpx.Response(200, json={})
-        settings = replace(Settings(), llm_key="test", llm_model="test", external_text=True, llm_timeout_ms=20)
+        settings = replace(Settings(), llm_url="https://provider.test/v1", llm_key="test", llm_model="test", external_text=True, llm_timeout_ms=20)
         expander = Expander(settings, httpx.MockTransport(slow))
         try:
             self.assertEqual(await expander.expand_query("áo"), [])
@@ -173,7 +229,7 @@ class LLMChecks(unittest.IsolatedAsyncioTestCase):
         finally: await expander.client.aclose()
 
     async def test_invalid_provider_message_keeps_keyword_search_available(self):
-        settings = replace(Settings(), llm_key="test", llm_model="test", external_text=True)
+        settings = replace(Settings(), llm_url="https://provider.test/v1", llm_key="test", llm_model="test", external_text=True)
         store = Mock()
         store.keyword.return_value = {"results": []}
         for message in (None, [], "invalid", 1, False):

@@ -69,9 +69,11 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+# BEGIN GENERATED SEARCH CONTRACT
 spring.servlet.multipart:
   max-file-size: 10000000B
   max-request-size: 11000000B
+# END GENERATED SEARCH CONTRACT
 
 management:
   endpoints:
@@ -110,9 +112,11 @@ app:
       - /error
     # Chi public voi GET/HEAD (xem hang khong can dang nhap)
     public-get-paths:
+      # BEGIN GENERATED SEARCH ROUTES
       - /api/ai/search
       - /api/ai/search/suggestions
       - /api/ai/search/health
+      # END GENERATED SEARCH ROUTES
       - /api/products/**
       - /api/shops/**
     # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi

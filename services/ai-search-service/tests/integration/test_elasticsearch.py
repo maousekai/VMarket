@@ -1,5 +1,4 @@
 """Real Elasticsearch 8.19 checks. Run explicitly; unit discovery never imports these."""
-import os
 import time
 import unittest
 import uuid

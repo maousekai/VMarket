@@ -50,6 +50,11 @@ is confined to its disposable index. These drawings do not qualify real-product 
    **read-only** key, and selected LLM URL/model/key. `Settings` and `manage.py` load
    the service file; existing environment variables take priority. Root `.env` is
    Compose configuration. Do not copy seed/admin credentials into the runtime file.
+   `Settings.load()` reads the file for each new application/tool invocation without
+   changing process environment; environment values override file values. `Settings()`
+   constructs defaults for tests. Restart the service after changing its configuration.
+   There is no default cloud endpoint: set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
+   and `ALLOW_EXTERNAL_QUERY_TEXT=true` to opt in; otherwise keyword search falls back.
 2. Set up MinIO below, run Product Catalog and the gateway using their existing
    scripts, and ensure an approved shop with valid categories exists. Configure
    Product's internal key explicitly; its base YAML default differs from the root
@@ -99,6 +104,9 @@ is a maintained compatible MinIO fork, pinned by digest. Remaining image finding
 documented in verification notes and must be reviewed before deployment. Do not use
 this demo stack as a clean-scan production assertion.
 
+Set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` explicitly in root `.env` before running
+Compose; missing/empty values fail configuration validation. `.env.example` leaves
+the password empty. Existing local credentials are preserved, with no implicit fallback.
 Use the local console at `http://localhost:9001` with root `.env` administrator values.
 Create bucket `vmarket-media`, a Search user and a separate fixture-upload user. Example
 Search policy (no write, list or admin rights):
@@ -112,6 +120,25 @@ administration to bind policies; never give Search root keys. To display public 
 photos, a bucket policy may grant anonymous `s3:GetObject` only for `products/*`; it must
 not allow list/write or expose other media prefixes. Keep console/admin ports private.
 Production operators choose strong root/user credentials and complete image review.
+
+## Shared contract and operator tuning
+
+`docs/search-contract.json` owns Search paths, upload/resize limits, embedding dimensions,
+index prefix, pagination bounds, retry attempts, currency and shared error text. Run
+`python scripts/generate-search-contract.py` from the repository root after changing it.
+Python/Java constants and nginx/gateway boundary configuration are generated; CI runs
+`--check` to reject drift. Update OpenAPI and acceptance evidence for contract changes.
+Currency VND and 576 dimensions describe the current catalog/model, not arbitrary
+runtime options; changing them requires the matching catalog/model and index rebuild.
+
+Service `.env` exposes `SEARCH_SYNONYMS` (JSON list), name/phrase/synonym boosts,
+sales/rating weights and popularity cap. Synonym changes require maintenance rebuild;
+ranking changes require restart. Dependency/MinIO/download deadlines and LLM
+timeout/token budgets are also configurable; positive validated values are actually
+used. Defaults preserve the 500 ms / 128-token LLM budget and current memory profile.
+Increasing budgets requires new latency/resource measurements. Logs include operation,
+exception type, upstream status and source location; URLs, credentials and payloads
+are deliberately excluded.
 
 Images use immutable `products/<content-sha256>.<jpg|jpeg|png|webp>` keys. A changed image
 gets a different key. Runtime URLs must exactly match `MINIO_PUBLIC_ORIGIN`, the bucket
@@ -161,7 +188,7 @@ goes to the provider when `ALLOW_EXTERNAL_QUERY_TEXT=true`. Validate the provide
 using `manage.py llm-probe`; endpoints supporting this wire format may still differ
 in supported token/reasoning/JSON settings. No keys/keywords/URLs in application logs.
 
-One call at a time, 500 ms total, no retries, up to three validated alternative terms,
+One call at a time, 500 ms total by default, no retries, up to three validated alternative terms,
 128-entry/5-minute memory cache. Missing key, disabled permission, busy provider,
 timeout or bad output falls back to original text/static synonyms. Autocomplete and
 indexing never call the LLM. Unready cloud configuration never starts Ollama automatically.

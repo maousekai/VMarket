@@ -5,9 +5,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.responses import JSONResponse
+from contract import (CURRENCY, IMAGE_TOO_LARGE_CODE, IMAGE_TOO_LARGE_MESSAGE, MAX_BODY, MAX_FILE,
+                      MAX_PAGE_SIZE, MAX_RESULT_WINDOW, MAX_SUGGESTIONS)
 
-MAX_FILE = 10_000_000
-MAX_BODY = 11_000_000
 PUBLIC_FIELDS = ("id", "shopId", "name", "description", "imageUrls", "categoryId", "currency",
                  "minPrice", "maxPrice", "ratingAverage", "ratingCount", "soldCount", "availableStock")
 
@@ -15,6 +15,10 @@ PUBLIC_FIELDS = ("id", "shopId", "name", "description", "imageUrls", "categoryId
 class SearchError(Exception):
     def __init__(self, status, code, message):
         self.status, self.code, self.message = status, code, message
+
+
+def image_too_large():
+    return SearchError(413, IMAGE_TOO_LARGE_CODE, IMAGE_TOO_LARGE_MESSAGE)
 
 
 def error_response(error, path):
@@ -58,12 +62,12 @@ def parse_query(params, mode):
         result.setdefault("page", 0)
         result.setdefault("size", 20)
         result.setdefault("sort", "RELEVANCE")
-        if (not 1 <= result["size"] <= 100 or (result["page"] + 1) * result["size"] > 10000
+        if (not 1 <= result["size"] <= MAX_PAGE_SIZE or (result["page"] + 1) * result["size"] > MAX_RESULT_WINDOW
                 or result["sort"] not in {"RELEVANCE", "PRICE_ASC", "PRICE_DESC", "BEST_SELLING", "NEWEST"}):
             raise invalid_query()
     else:
         result.setdefault("limit", 10 if mode == "suggestions" else 20)
-        if not 1 <= result["limit"] <= (20 if mode == "suggestions" else 100):
+        if not 1 <= result["limit"] <= (MAX_SUGGESTIONS if mode == "suggestions" else MAX_PAGE_SIZE):
             raise invalid_query()
     return result
 
@@ -82,7 +86,7 @@ class Snapshot(BaseModel):
     categoryId: str | None = None
     categoryPath: list[str] = Field(default_factory=list)
     variantPrices: list[int] = Field(default_factory=list)
-    currency: Literal["VND"] = "VND"
+    currency: Literal[CURRENCY] = CURRENCY
     minPrice: int | None = Field(default=None, ge=0)
     maxPrice: int | None = Field(default=None, ge=0)
     ratingAverage: float = Field(default=0, ge=0, le=5)

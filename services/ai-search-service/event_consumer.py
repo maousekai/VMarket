@@ -1,39 +1,37 @@
 """Heartbeat-safe Product invalidations. ACK follows durable metadata/image intent."""
 import json
 import logging
-import os
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from settings import ROOT  # Load service .env before reading queue configuration.
-
 import httpx
 import pika
 from elasticsearch import ApiError, ConnectionError, ConnectionTimeout
 
+from contract import RETRY_ATTEMPTS
+from diagnostics import log_failure
+
 EVENT_TYPES = ("ProductCreated", "ProductUpdated", "ProductDeleted")
-EXCHANGE = os.getenv("EVENT_EXCHANGE", "vmarket.events")
-QUEUE = os.getenv("EVENT_QUEUE", "ai-search.events.v2")
 
 
-def connection_parameters():
-    return pika.ConnectionParameters(host=os.getenv("RABBITMQ_HOST", "localhost"),
-        port=int(os.getenv("RABBITMQ_PORT", "5672")),
-        credentials=pika.PlainCredentials(os.getenv("RABBITMQ_USERNAME", "guest"), os.getenv("RABBITMQ_PASSWORD", "guest")),
+def connection_parameters(settings):
+    return pika.ConnectionParameters(host=settings.rabbit_host, port=settings.rabbit_port,
+        credentials=pika.PlainCredentials(settings.rabbit_user, settings.rabbit_password),
         heartbeat=30, blocked_connection_timeout=30, socket_timeout=2, stack_timeout=5)
 
 
-def declare_topology(channel):
-    channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
-    channel.exchange_declare(exchange=EXCHANGE + ".dlx", exchange_type="topic", durable=True)
-    channel.queue_declare(queue=QUEUE, durable=True, arguments={"x-dead-letter-exchange": EXCHANGE + ".dlx",
-                          "x-dead-letter-routing-key": QUEUE + ".dead"})
-    channel.queue_declare(queue=QUEUE + ".dead", durable=True)
-    channel.queue_bind(queue=QUEUE + ".dead", exchange=EXCHANGE + ".dlx", routing_key=QUEUE + ".dead")
+def declare_topology(channel, settings):
+    exchange, queue = settings.exchange, settings.queue
+    channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
+    channel.exchange_declare(exchange=exchange + ".dlx", exchange_type="topic", durable=True)
+    channel.queue_declare(queue=queue, durable=True, arguments={"x-dead-letter-exchange": exchange + ".dlx",
+                          "x-dead-letter-routing-key": queue + ".dead"})
+    channel.queue_declare(queue=queue + ".dead", durable=True)
+    channel.queue_bind(queue=queue + ".dead", exchange=exchange + ".dlx", routing_key=queue + ".dead")
     for event_type in EVENT_TYPES:
-        channel.queue_bind(queue=QUEUE, exchange=EXCHANGE, routing_key=event_type)
+        channel.queue_bind(queue=queue, exchange=exchange, routing_key=event_type)
 
 
 def validate_event(body, routing_key):
@@ -61,6 +59,7 @@ def transient(exc):
 class Workers:
     def __init__(self, store, encoder):
         self.store, self.encoder = store, encoder
+        self.settings = store.settings
         self.stop = threading.Event()
         self.synchronized = False
         self.metadata_lag_ms = self.image_lag_ms = None
@@ -71,7 +70,7 @@ class Workers:
 
     def handle(self, body, key):
         product_id, stamp = validate_event(body, key)
-        for attempt in range(3):
+        for attempt in range(RETRY_ATTEMPTS):
             try:
                 snapshot = self.store.fetch_snapshot(product_id)
                 _, meta = self.store.meta()
@@ -80,18 +79,20 @@ class Workers:
                 logging.info("metadata_sync lag_ms=%s", self.metadata_lag_ms)
                 return
             except Exception as exc:
-                if not transient(exc) or attempt == 2:
+                if not transient(exc) or attempt == RETRY_ATTEMPTS - 1:
                     raise
+                log_failure("metadata_sync_retry", exc)
                 if self.stop.wait(2**attempt):
                     raise RuntimeError("Stopping")
 
     def consume(self):
+        QUEUE = self.settings.queue
         while not self.stop.is_set():
             connection = None
             try:
-                connection = pika.BlockingConnection(connection_parameters())
+                connection = pika.BlockingConnection(connection_parameters(self.settings))
                 channel = connection.channel()
-                declare_topology(channel)
+                declare_topology(channel, self.settings)
                 self.store.meta()
                 if self.active is not None and not self.active.done():
                     raise RuntimeError("Previous delivery still finishing")
@@ -113,7 +114,7 @@ class Workers:
                             if completed.exception() is None:
                                 ch.basic_ack(method.delivery_tag)
                             else:
-                                logging.warning("product_event_failed code=SYNC_FAILED")
+                                log_failure("product_event_failed", completed.exception())
                                 ch.basic_nack(method.delivery_tag, requeue=False)
                         if owner.is_open:
                             try:
@@ -130,9 +131,9 @@ class Workers:
                     if time.monotonic() >= next_check:
                         self.dead_letters = channel.queue_declare(queue=QUEUE + ".dead", passive=True).method.message_count
                         next_check = time.monotonic() + 5
-            except Exception:
+            except Exception as error:
                 self.synchronized = False
-                logging.warning("consumer_unavailable")
+                log_failure("consumer_unavailable", error)
                 self.stop.wait(5)
             finally:
                 if connection and connection.is_open:
@@ -142,8 +143,8 @@ class Workers:
     def images(self):
         try:
             self.encoder.load()
-        except Exception:
-            logging.warning("encoder_unavailable code=MODEL_LOAD_FAILED")
+        except Exception as error:
+            log_failure("encoder_unavailable", error)
         while not self.stop.is_set():
             try:
                 self.store.process_image_job(self.encoder)
@@ -153,8 +154,8 @@ class Workers:
                 oldest = result["aggregations"]["oldest"]["value"]
                 self.image_lag_ms = max(0, int(time.time() * 1000 - oldest)) if oldest is not None else 0
                 self.stop.wait(1)
-            except Exception:
-                logging.warning("image_worker_unavailable")
+            except Exception as error:
+                log_failure("image_worker_unavailable", error)
                 self.stop.wait(2)
 
     def start(self):

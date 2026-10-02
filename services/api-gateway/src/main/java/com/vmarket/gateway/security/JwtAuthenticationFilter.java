@@ -22,6 +22,7 @@ import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.vmarket.gateway.config.GatewaySecurityProperties;
+import com.vmarket.gateway.config.SearchContract;
 import com.vmarket.gateway.config.GatewaySecurityProperties.RoleRule;
 
 import io.jsonwebtoken.Claims;
@@ -163,7 +164,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private boolean isPublic(HttpServletRequest request) {
 		String path = request.getRequestURI();
-		if ("POST".equalsIgnoreCase(request.getMethod()) && "/api/ai/search/image".equals(path)) {
+		if ("POST".equalsIgnoreCase(request.getMethod()) && SearchContract.IMAGE_PATH.equals(path)) {
 			return true;
 		}
 		for (String pattern : securityProperties.getPublicPaths()) {

@@ -5,15 +5,16 @@ import hashlib
 import json
 import re
 import time
-import uuid
 from pathlib import Path
 
 import httpx
 import pika
 from dotenv import dotenv_values
 
-from event_consumer import QUEUE, connection_parameters, declare_topology, validate_event
-from images import ImageEncoder, WEIGHTS_URL, decoded_image
+from contract import IMAGE_PATH, INDEX_PREFIX, MAX_PAGE_SIZE, SEARCH_PATH, SNAPSHOTS_PATH
+from diagnostics import log_failure
+from event_consumer import connection_parameters, declare_topology, validate_event
+from images import ImageEncoder, WEIGHTS_URL, decoded_image, s3_client
 from llm import Expander
 from schemas import MAX_FILE, Snapshot
 from search import SearchStore, index_definition
@@ -28,11 +29,11 @@ def write_json(path, data):
     temporary.replace(path)
 
 
-def topology(require_stopped=False):
-    with pika.BlockingConnection(connection_parameters()) as connection:
+def topology(settings, require_stopped=False):
+    with pika.BlockingConnection(connection_parameters(settings)) as connection:
         channel = connection.channel()
-        declare_topology(channel)
-        if require_stopped and channel.queue_declare(queue=QUEUE, passive=True).method.consumer_count:
+        declare_topology(channel, settings)
+        if require_stopped and channel.queue_declare(queue=settings.queue, passive=True).method.consumer_count:
             raise ValueError("Stop Search workers before rebuilding")
 
 
@@ -122,21 +123,21 @@ def read_image_file(path):
     with Path(path).open("rb") as stream:
         data = stream.read(MAX_FILE + 1)
     if len(data) > MAX_FILE:
-        raise ValueError("Fixture image exceeds 10000000 bytes")
+        raise ValueError(f"Fixture image exceeds {MAX_FILE} bytes")
     return data
 
 
 def snapshots(settings):
-    with httpx.Client(trust_env=False, follow_redirects=False, timeout=2,
+    with httpx.Client(trust_env=False, follow_redirects=False, timeout=settings.dependency_timeout,
                       headers={"X-Internal-Api-Key": settings.internal_key}) as client:
         page = 0
         while True:
-            response = client.get(settings.product_url.rstrip("/") + "/api/products/internal/search-snapshots", params={"page": page, "size": 100})
+            response = client.get(settings.product_url.rstrip("/") + SNAPSHOTS_PATH, params={"page": page, "size": MAX_PAGE_SIZE})
             response.raise_for_status()
             if len(response.content) > 6_000_000:
                 raise ValueError("Export page too large")
             data = response.json()
-            if data["page"] != page or len(data["items"]) > 100:
+            if data["page"] != page or len(data["items"]) > MAX_PAGE_SIZE:
                 raise ValueError("Invalid export page")
             for item in data["items"]:
                 yield Snapshot.model_validate(item)
@@ -150,9 +151,9 @@ def snapshots(settings):
 def reindex(settings, args):
     if not args.maintenance:
         raise ValueError("Requires --maintenance after pausing ALL catalog writers and stopping Search")
-    if not re.fullmatch(r"vmarket-products-v1-[a-z0-9-]{1,80}", args.target):
+    if not re.fullmatch(re.escape(INDEX_PREFIX) + r"[a-z0-9-]{1,80}", args.target):
         raise ValueError("Invalid managed index name")
-    topology(require_stopped=True)
+    topology(settings, require_stopped=True)
     encoder = ImageEncoder(settings)
     encoder.load()
     store = SearchStore(settings, target=args.target)
@@ -163,10 +164,11 @@ def reindex(settings, args):
     previous_name = previous_meta = None
     try:
         previous_name, previous_meta = old.meta()
-    except Exception:
+    except Exception as error:
+        log_failure("previous_index_unavailable", error)
         if client.indices.exists(index=settings.alias):
             raise ValueError("Alias is not a valid managed Search index") from None
-    client.indices.create(index=args.target, body=index_definition(encoder.fingerprint))
+    client.indices.create(index=args.target, body=index_definition(encoder.fingerprint, settings))
     revisions = {}
     for snapshot in snapshots(settings):
         if snapshot.id in revisions:
@@ -200,23 +202,19 @@ def reindex(settings, args):
 
 
 def seed(settings, args):
-    import boto3
-    from botocore.config import Config
     private = dotenv_values(args.credentials)
     if not private.get("SEED_SELLER_TOKEN") or not private.get("MINIO_WRITE_ACCESS_KEY") or not private.get("MINIO_WRITE_SECRET_KEY"):
         raise ValueError("Seed requires separate seller token and MinIO write credentials")
     manifest_raw = Path(args.input).read_text(encoding="utf-8")
     manifest = json.loads(manifest_raw)
-    topology()
+    topology(settings)
     output = ROOT / ".local/search-fixtures.json"
     input_hash = hashlib.sha256(manifest_raw.encode()).hexdigest()
     saved = json.loads(output.read_text(encoding="utf-8")) if output.exists() else {"products": [], "inputHash": input_hash}
     if saved.get("inputHash") != input_hash:
         raise ValueError("Fixture manifest changed; preserve the recorded catalog and use a new dedicated fixture set")
     known = {p["ref"]: p for p in saved["products"]}
-    s3 = boto3.client("s3", endpoint_url=settings.minio_endpoint, aws_access_key_id=private["MINIO_WRITE_ACCESS_KEY"],
-        aws_secret_access_key=private["MINIO_WRITE_SECRET_KEY"], region_name="us-east-1",
-        config=Config(proxies={}, retries={"total_max_attempts": 1}, connect_timeout=2, read_timeout=5, s3={"addressing_style": "path"}))
+    s3 = s3_client(settings, private["MINIO_WRITE_ACCESS_KEY"], private["MINIO_WRITE_SECRET_KEY"])
     api_url = endpoint(private.get("SEED_API_URL", "http://localhost:8080"))
     with httpx.Client(trust_env=False, follow_redirects=False, timeout=5,
                       headers={"Authorization": "Bearer " + private["SEED_SELLER_TOKEN"]}) as client:
@@ -267,12 +265,13 @@ def retry_images(settings, product_id):
         raise ValueError("Product changed; retry using its current state")
 
 
-def replay_dead(limit):
-    if not 1 <= limit <= 100:
-        raise ValueError("Replay limit must be 1..100")
-    with pika.BlockingConnection(connection_parameters()) as connection:
+def replay_dead(settings, limit):
+    if not 1 <= limit <= MAX_PAGE_SIZE:
+        raise ValueError(f"Replay limit must be 1..{MAX_PAGE_SIZE}")
+    QUEUE = settings.queue
+    with pika.BlockingConnection(connection_parameters(settings)) as connection:
         channel = connection.channel()
-        declare_topology(channel)
+        declare_topology(channel, settings)
         channel.confirm_delivery()
         count = 0
         for _ in range(limit):
@@ -306,16 +305,16 @@ def smoke(settings, args):
     manifest = json.loads((ROOT / ".local/search-fixtures.json").read_text(encoding="utf-8"))
     with httpx.Client(base_url=endpoint(args.base_url), trust_env=False, follow_redirects=False, timeout=5) as client:
         for item in manifest["products"]:
-            response = client.get("/api/ai/search", params={"keyword": item["keyword"], "size": 100})
+            response = client.get(SEARCH_PATH, params={"keyword": item["keyword"], "size": MAX_PAGE_SIZE})
             response.raise_for_status()
             if item["product"]["status"] == "ACTIVE" and item["id"] not in {h["id"] for h in response.json()["results"]}:
                 raise ValueError("Fixture keyword missing")
         for invalid in ({"keyword": "x", "minPrice": 2, "maxPrice": 1}, {"keyword": "x", "size": 101}, {"keyword": "x", "provider": "x"}):
-            assert client.get("/api/ai/search", params=invalid).status_code == 400
-        assert client.post("/api/ai/search/image", files={"file": ("bad.jpg", b"invalid", "image/jpeg")}).status_code == 400
+            assert client.get(SEARCH_PATH, params=invalid).status_code == 400
+        assert client.post(IMAGE_PATH, files={"file": ("bad.jpg", b"invalid", "image/jpeg")}).status_code == 400
         for query in manifest["exactImages"]:
             with Path(query["image"]).open("rb") as stream:
-                response = client.post("/api/ai/search/image", files={"file": ("query.jpg", stream, "image/jpeg")})
+                response = client.post(IMAGE_PATH, files={"file": ("query.jpg", stream, "image/jpeg")})
             response.raise_for_status()
             hits = response.json()["results"]
             assert hits and hits[0]["id"] in query["acceptableProductIds"]
@@ -342,21 +341,30 @@ def main():
     test = commands.add_parser("smoke")
     test.add_argument("--base-url", default="http://localhost:8080")
     args = parser.parse_args()
-    settings = Settings()
-    if args.command == "weights": weights(settings)
-    elif args.command == "llm-probe": asyncio.run(llm_probe(settings))
-    elif args.command == "topology": topology()
-    elif args.command == "seed": seed(settings, args)
-    elif args.command == "reindex": reindex(settings, args)
-    elif args.command == "retry-images": retry_images(settings, args.product_id)
-    elif args.command == "replay-dead": replay_dead(args.limit)
-    elif args.command == "smoke": smoke(settings, args)
+    settings = Settings.load()
+    if args.command == "weights":
+        weights(settings)
+    elif args.command == "llm-probe":
+        asyncio.run(llm_probe(settings))
+    elif args.command == "topology":
+        topology(settings)
+    elif args.command == "seed":
+        seed(settings, args)
+    elif args.command == "reindex":
+        reindex(settings, args)
+    elif args.command == "retry-images":
+        retry_images(settings, args.product_id)
+    elif args.command == "replay-dead":
+        replay_dead(settings, args.limit)
+    elif args.command == "smoke":
+        smoke(settings, args)
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as error:
+        log_failure("maintenance_command_failed", error)
         # Safe operator-facing code. HTTP exceptions may contain credential-bearing URLs.
         print(f"Command failed: {error if isinstance(error, ValueError) else type(error).__name__}")
         raise SystemExit(1) from None

@@ -1,6 +1,8 @@
 package com.vmarket.gateway.security;
 
 import java.io.IOException;
+import static com.vmarket.gateway.config.SearchContract.RATE_LIMITED_CODE;
+import static com.vmarket.gateway.config.SearchContract.RATE_LIMITED_MESSAGE;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,16 +82,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 	}
 
 	private void writeError(HttpServletRequest request, HttpServletResponse response) throws IOException {
-		response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-		response.setContentType("application/json");
-		response.setCharacterEncoding("UTF-8");
-		String path = request.getRequestURI();
-		if (java.util.Set.of("/api/ai/search", "/api/ai/search/suggestions", "/api/ai/search/image", "/api/ai/search/health").contains(path)) {
-			response.getWriter().write("{\"timestamp\":\"" + java.time.Instant.now() + "\",\"status\":429,"
-					+ "\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests\"},\"path\":\"" + path + "\"}");
-			return;
-		}
-		response.getWriter().write(
-				"{\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Quá nhiều yêu cầu, vui lòng thử lại sau\"}}");
+		ErrorResponseWriter.write(response, HttpStatus.TOO_MANY_REQUESTS.value(),
+				RATE_LIMITED_CODE, RATE_LIMITED_MESSAGE, request.getRequestURI());
 	}
 }

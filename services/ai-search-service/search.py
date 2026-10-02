@@ -7,7 +7,10 @@ import unicodedata
 import httpx
 from elasticsearch import ConflictError, Elasticsearch, NotFoundError
 
+from contract import EMBEDDING_DIMS, INDEX_PREFIX, RETRY_ATTEMPTS, SNAPSHOTS_PATH
+from diagnostics import log_failure
 from schemas import PUBLIC_FIELDS, SearchError, Snapshot, public_hit
+from settings import Settings
 
 
 def normalize(text):
@@ -15,7 +18,8 @@ def normalize(text):
     return "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
 
 
-def index_definition(fingerprint=None):
+def index_definition(fingerprint=None, settings=None):
+    settings = settings or Settings()
     properties = {k: {"type": "keyword"} for k in ("id", "shopId", "categoryId", "categoryPath", "currency", "imageState", "imageError", "modelFingerprint")}
     properties.update({k: {"type": "long"} for k in ("productVersion", "minPrice", "maxPrice", "variantPrices", "ratingCount", "soldCount", "availableStock", "imageAttempts")})
     properties.update({k: {"type": "date"} for k in ("createdAt", "updatedAt", "deletedAt", "imageNextAttempt", "indexedAt", "imageIndexedAt", "eventAt")})
@@ -27,11 +31,11 @@ def index_definition(fingerprint=None):
     properties["imageUrls"] = {"type": "keyword", "index": False}
     properties["images"] = {"type": "nested", "properties": {
         "url": {"type": "keyword", "index": False}, "fingerprint": {"type": "keyword"},
-        "vector": {"type": "dense_vector", "dims": 576, "element_type": "float", "index": True,
+        "vector": {"type": "dense_vector", "dims": EMBEDDING_DIMS, "element_type": "float", "index": True,
                    "similarity": "dot_product", "index_options": {"type": "hnsw"}}}}
     return {"settings": {"number_of_shards": 1, "number_of_replicas": 0, "analysis": {
         "char_filter": {"vi_d": {"type": "mapping", "mappings": ["đ => d", "Đ => D"]}},
-        "filter": {"vi_synonyms": {"type": "synonym_graph", "synonyms": ["ao thun, ao phong", "giay the thao, sneaker"]}},
+        "filter": {"vi_synonyms": {"type": "synonym_graph", "synonyms": list(settings.synonyms)}},
         "analyzer": {"vi": {"type": "custom", "char_filter": ["vi_d"], "tokenizer": "standard", "filter": ["lowercase", "asciifolding"]},
                      "vi_search": {"type": "custom", "char_filter": ["vi_d"], "tokenizer": "standard", "filter": ["lowercase", "asciifolding", "vi_synonyms"]}}}},
         "mappings": {"dynamic": "strict", "_meta": {"searchSchema": 1, "encoderFingerprint": fingerprint}, "properties": properties}}
@@ -47,15 +51,18 @@ def filters(params):
     return result
 
 
-def keyword_body(params, terms=()):
+def keyword_body(params, terms=(), settings=None):
+    settings = settings or Settings()
     keyword = params["keyword"]
-    matches = [{"multi_match": {"query": keyword, "fields": ["name^3", "description"], "fuzziness": "AUTO", "prefix_length": 1, "max_expansions": 25}},
-               {"match_phrase": {"name": {"query": keyword, "boost": 5}}}]
-    matches.extend({"multi_match": {"query": term, "fields": ["name^3", "description"], "boost": 0.3}} for term in terms)
+    fields = [f"name^{settings.name_boost}", "description"]
+    matches = [{"multi_match": {"query": keyword, "fields": fields, "fuzziness": "AUTO", "prefix_length": 1, "max_expansions": 25}},
+               {"match_phrase": {"name": {"query": keyword, "boost": settings.phrase_boost}}}]
+    matches.extend({"multi_match": {"query": term, "fields": fields, "boost": settings.synonym_boost}} for term in terms)
     query = {"bool": {"filter": filters(params), "must": [{"bool": {"should": matches, "minimum_should_match": 1}}]}}
     if params["sort"] == "RELEVANCE":
         query = {"script_score": {"query": query, "script": {"source":
-            "_score * (1 + Math.min(2, 0.1 * Math.log(1 + doc['soldCount'].value) + 0.04 * doc['ratingAverage'].value))"}}}
+            "_score * (1 + Math.min(params.cap, params.sales * Math.log(1 + doc['soldCount'].value) + params.rating * doc['ratingAverage'].value))",
+            "params": {"cap": settings.popularity_cap, "sales": settings.sales_weight, "rating": settings.rating_weight}}}}
     sorting = {"RELEVANCE": [{"_score": "desc"}], "PRICE_ASC": [{"minPrice": {"order": "asc", "missing": "_last"}}],
                "PRICE_DESC": [{"minPrice": {"order": "desc", "missing": "_last"}}],
                "BEST_SELLING": [{"soldCount": "desc"}], "NEWEST": [{"createdAt": "desc"}]}[params["sort"]]
@@ -94,7 +101,7 @@ def metadata_document(snapshot, existing, fingerprint, event_at):
 class SearchStore:
     def __init__(self, settings, client=None, target=None):
         self.settings = settings
-        self.client = client or Elasticsearch(settings.es_url, request_timeout=2, max_retries=0)
+        self.client = client or Elasticsearch(settings.es_url, request_timeout=settings.dependency_timeout, max_retries=0)
         self.target = target or settings.alias
         self.managed_alias = target is None
 
@@ -105,8 +112,8 @@ class SearchStore:
         name, mapped = next(iter(mappings.items()))
         meta = mapped["mappings"].get("_meta", {})
         vector = mapped["mappings"].get("properties", {}).get("images", {}).get("properties", {}).get("vector", {})
-        if (meta.get("searchSchema") != 1 or vector.get("dims") != 576 or vector.get("similarity") != "dot_product"
-                or not name.startswith("vmarket-products-v1-")):
+        if (meta.get("searchSchema") != 1 or vector.get("dims") != EMBEDDING_DIMS or vector.get("similarity") != "dot_product"
+                or not name.startswith(INDEX_PREFIX)):
             raise ValueError("Not a managed Search index")
         if self.managed_alias:
             aliases = self.client.indices.get_alias(name=self.target)
@@ -116,7 +123,7 @@ class SearchStore:
 
     def keyword(self, params, terms=()):
         self.meta()
-        result = self.client.search(index=self.target, body=keyword_body(params, terms))
+        result = self.client.search(index=self.target, body=keyword_body(params, terms, self.settings))
         total = result["hits"]["total"]["value"]
         return {"keyword": params["keyword"], "results": [public_hit(h) for h in result["hits"]["hits"]],
                 "page": params["page"], "size": params["size"], "totalElements": total, "totalPages": math.ceil(total / params["size"])}
@@ -133,13 +140,7 @@ class SearchStore:
 
     def image(self, vector, params, fingerprint, threshold=None):
         name, meta = self.meta()
-        calibration = meta.get("calibration", {})
-        if meta.get("encoderFingerprint") != fingerprint:
-            raise SearchError(503, "IMAGE_SEARCH_UNAVAILABLE", "Encoder does not match index")
-        if threshold is None:
-            if calibration.get("fingerprint") != fingerprint or not calibration.get("validated"):
-                raise SearchError(503, "IMAGE_SEARCH_UNAVAILABLE", "Image calibration required")
-            threshold = calibration["threshold"]
+        threshold = image_threshold(meta, fingerprint, threshold)
         result = self.client.search(index=name, body=image_body(vector, params, threshold))
         hits = []
         for hit in result["hits"]["hits"]:
@@ -153,14 +154,14 @@ class SearchStore:
     def fetch_snapshot(self, product_id):
         from urllib.parse import quote
         started = time.monotonic()
-        with httpx.Client(trust_env=False, follow_redirects=False, timeout=0.5) as client:
-            with client.stream("GET", self.settings.product_url.rstrip("/") + "/api/products/internal/search-snapshots/" + quote(product_id, safe=""),
+        with httpx.Client(trust_env=False, follow_redirects=False, timeout=self.settings.dependency_timeout) as client:
+            with client.stream("GET", self.settings.product_url.rstrip("/") + SNAPSHOTS_PATH + "/" + quote(product_id, safe=""),
                                headers={"X-Internal-Api-Key": self.settings.internal_key}) as response:
                 response.raise_for_status()
                 raw = bytearray()
                 for chunk in response.iter_bytes():
                     raw.extend(chunk)
-                    if len(raw) > 512000 or time.monotonic() - started > 2:
+                    if len(raw) > 512000 or time.monotonic() - started > self.settings.dependency_timeout:
                         raise ValueError("Snapshot limit exceeded")
         snapshot = Snapshot.model_validate_json(raw)
         if snapshot.id != product_id:
@@ -169,7 +170,7 @@ class SearchStore:
 
     def apply_snapshot(self, snapshot, event_at, fingerprint):
         name, _ = self.meta()
-        for _ in range(3):
+        for _ in range(RETRY_ATTEMPTS):
             try:
                 old = self.client.get(index=name, id=snapshot.id)
             except NotFoundError:
@@ -211,7 +212,7 @@ class SearchStore:
             return False
         hit = pending[0]
         source = copy.deepcopy(hit["_source"])
-        if source["imageAttempts"] >= 3:
+        if source["imageAttempts"] >= RETRY_ATTEMPTS:
             source.update(imageState="failed", imageError="IMAGE_RETRIES_EXHAUSTED")
             self.save_job(hit, source)
             return True
@@ -224,8 +225,9 @@ class SearchStore:
                 if url not in images:
                     images[url] = {"url": url, "vector": encoder.embed_catalog(url), "fingerprint": encoder.fingerprint}
             source.update(images=list(images.values()), imageState="ready", imageError=None, imageIndexedAt=int(time.time() * 1000))
-        except Exception:
-            source.update(imageState="failed" if source["imageAttempts"] >= 3 else "pending",
+        except Exception as error:
+            log_failure("catalog_image_failed", error)
+            source.update(imageState="failed" if source["imageAttempts"] >= RETRY_ATTEMPTS else "pending",
                           imageError="IMAGE_PROCESSING_FAILED", imageNextAttempt=int((time.time() + 2**(source["imageAttempts"] - 1)) * 1000))
         # Reload sequence after the attempt write; verify all identity guards before committing native work.
         current = self.client.get(index=hit["_index"], id=hit["_id"])
@@ -234,3 +236,17 @@ class SearchStore:
                 and actual.get("imageUrls") == source.get("imageUrls") and actual.get("imageState") == "pending"):
             self.save_job({**current, "_id": hit["_id"]}, source)
         return True
+
+
+def image_threshold(meta, fingerprint, threshold=None):
+    if not fingerprint or meta.get("encoderFingerprint") != fingerprint:
+        raise SearchError(503, "IMAGE_SEARCH_UNAVAILABLE", "Encoder does not match index")
+    if threshold is None:
+        calibration = meta.get("calibration")
+        if (not isinstance(calibration, dict) or calibration.get("fingerprint") != fingerprint
+                or calibration.get("validated") is not True):
+            raise SearchError(503, "IMAGE_SEARCH_UNAVAILABLE", "Image calibration required")
+        threshold = calibration.get("threshold")
+    if type(threshold) not in (int, float) or not math.isfinite(threshold) or not -1 <= threshold <= 1:
+        raise SearchError(503, "IMAGE_SEARCH_UNAVAILABLE", "Invalid image calibration threshold")
+    return threshold
