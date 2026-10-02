@@ -14,11 +14,11 @@ from PIL import Image
 from botocore.response import StreamingBody
 from starlette.datastructures import QueryParams
 
-from event_consumer import Workers, validate_event
-from images import decoded_image, object_key
+from event_consumer import Workers, connection_parameters, validate_event
+from images import decoded_image, object_key, s3_client
 from llm import Expander, validated_terms
 from main import create_app
-from manage import evaluate
+from manage import evaluate, reindex
 from schemas import SearchError, Snapshot, parse_query
 from search import SearchStore, filters, image_body, image_threshold, index_definition, keyword_body, metadata_document, normalize
 from diagnostics import log_failure
@@ -53,6 +53,35 @@ class SearchChecks(unittest.TestCase):
             self.assertEqual(index_definition(settings=tuned)["settings"]["analysis"]["filter"]["vi_synonyms"]["synonyms"], ["a, b"])
             body = keyword_body({"keyword": "a", "sort": "RELEVANCE", "page": 0, "size": 20}, settings=tuned)
             self.assertEqual(body["query"]["script_score"]["script"]["params"]["sales"], 0.2)
+            tuned = Settings.load(path, {"RABBITMQ_HEARTBEAT_SECONDS": "60", "RABBITMQ_BLOCKED_TIMEOUT_SECONDS": "45",
+                "RABBITMQ_SOCKET_TIMEOUT_SECONDS": "3", "RABBITMQ_CONNECT_TIMEOUT_SECONDS": "7",
+                "SEARCH_MAINTENANCE_TIMEOUT_SECONDS": "9", "WEIGHTS_DOWNLOAD_TIMEOUT_SECONDS": "40"})
+            rabbit = connection_parameters(tuned)
+            self.assertEqual((rabbit.heartbeat, rabbit.blocked_connection_timeout, rabbit.socket_timeout, rabbit.stack_timeout),
+                             (60, 45, 3, 7))
+            self.assertEqual((tuned.maintenance_timeout, tuned.weights_timeout), (9, 40))
+            with self.assertRaises(ValueError):
+                Settings.load(path, {"RABBITMQ_SOCKET_TIMEOUT_SECONDS": "6"})
+
+    def test_minio_requires_explicit_credentials_before_client_creation(self):
+        with patch("boto3.client") as client:
+            for key, secret in (("", ""), ("reader", ""), ("", "password")):
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    s3_client(Settings(), key, secret)
+            client.assert_not_called()
+
+    def test_rebuild_rejects_invalid_reused_calibration_without_switching_alias(self):
+        candidate, previous = Mock(), Mock()
+        candidate.client.indices.exists.return_value = False
+        candidate.client.count.return_value = {"count": 0}
+        previous.meta.return_value = ("previous", {"encoderFingerprint": "fp", "calibration": {
+            "validated": True, "fingerprint": "fp", "threshold": float("nan")}})
+        encoder = Mock(fingerprint="fp")
+        args = Mock(target="vmarket-products-v1-test-readiness", maintenance=True, calibration=None)
+        with patch("manage.SearchStore", side_effect=[candidate, previous]), patch("manage.ImageEncoder", return_value=encoder), \
+                patch("manage.topology"), patch("manage.snapshots", return_value=[]), self.assertRaises(SearchError):
+            reindex(Settings(), args)
+        candidate.client.indices.update_aliases.assert_not_called()
 
     def test_failure_logs_have_context_without_secrets(self):
         try:

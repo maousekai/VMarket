@@ -19,7 +19,8 @@ EVENT_TYPES = ("ProductCreated", "ProductUpdated", "ProductDeleted")
 def connection_parameters(settings):
     return pika.ConnectionParameters(host=settings.rabbit_host, port=settings.rabbit_port,
         credentials=pika.PlainCredentials(settings.rabbit_user, settings.rabbit_password),
-        heartbeat=30, blocked_connection_timeout=30, socket_timeout=2, stack_timeout=5)
+        heartbeat=settings.rabbit_heartbeat, blocked_connection_timeout=settings.rabbit_blocked_timeout,
+        socket_timeout=settings.rabbit_socket_timeout, stack_timeout=settings.rabbit_connect_timeout)
 
 
 def declare_topology(channel, settings):

@@ -17,7 +17,7 @@ from event_consumer import connection_parameters, declare_topology, validate_eve
 from images import ImageEncoder, WEIGHTS_URL, decoded_image, s3_client
 from llm import Expander
 from schemas import MAX_FILE, Snapshot
-from search import SearchStore, index_definition
+from search import SearchStore, image_threshold, index_definition
 from settings import ROOT, Settings, endpoint
 
 
@@ -44,7 +44,7 @@ def weights(settings):
     try:
         digest = hashlib.sha256()
         count = 0
-        with httpx.stream("GET", WEIGHTS_URL, trust_env=False, follow_redirects=False, timeout=30) as response:
+        with httpx.stream("GET", WEIGHTS_URL, trust_env=False, follow_redirects=False, timeout=settings.weights_timeout) as response:
             response.raise_for_status()
             with temporary.open("wb") as stream:
                 for chunk in response.iter_bytes():
@@ -191,8 +191,7 @@ def reindex(settings, args):
         calibration = calibrate(store, encoder, json.loads(Path(args.calibration).read_text(encoding="utf-8")))
     else:
         calibration = (previous_meta or {}).get("calibration", {})
-        if not calibration.get("validated") or calibration.get("fingerprint") != encoder.fingerprint:
-            raise ValueError("First rebuild or encoder change requires --calibration")
+        image_threshold(previous_meta or {}, encoder.fingerprint)
     meta = {"searchSchema": 1, "encoderFingerprint": encoder.fingerprint, "calibration": calibration}
     client.indices.put_mapping(index=args.target, _meta=meta)
     actions = [{"remove": {"index": previous_name, "alias": settings.alias}}] if previous_name else []
@@ -216,7 +215,7 @@ def seed(settings, args):
     known = {p["ref"]: p for p in saved["products"]}
     s3 = s3_client(settings, private["MINIO_WRITE_ACCESS_KEY"], private["MINIO_WRITE_SECRET_KEY"])
     api_url = endpoint(private.get("SEED_API_URL", "http://localhost:8080"))
-    with httpx.Client(trust_env=False, follow_redirects=False, timeout=5,
+    with httpx.Client(trust_env=False, follow_redirects=False, timeout=settings.maintenance_timeout,
                       headers={"Authorization": "Bearer " + private["SEED_SELLER_TOKEN"]}) as client:
         for item in manifest["products"]:
             if item["ref"] in known:
@@ -276,7 +275,8 @@ def replay_dead(settings, limit):
         count = 0
         for _ in range(limit):
             method, _, body = channel.basic_get(queue=QUEUE + ".dead", auto_ack=False)
-            if method is None: break
+            if method is None:
+                break
             envelope = json.loads(body)
             validate_event(body, envelope["eventType"])
             # Default exchange targets Search's own queue; shared events are never rebroadcast.
@@ -303,13 +303,15 @@ async def llm_probe(settings):
 
 def smoke(settings, args):
     manifest = json.loads((ROOT / ".local/search-fixtures.json").read_text(encoding="utf-8"))
-    with httpx.Client(base_url=endpoint(args.base_url), trust_env=False, follow_redirects=False, timeout=5) as client:
+    with httpx.Client(base_url=endpoint(args.base_url), trust_env=False, follow_redirects=False,
+                      timeout=settings.maintenance_timeout) as client:
         for item in manifest["products"]:
             response = client.get(SEARCH_PATH, params={"keyword": item["keyword"], "size": MAX_PAGE_SIZE})
             response.raise_for_status()
             if item["product"]["status"] == "ACTIVE" and item["id"] not in {h["id"] for h in response.json()["results"]}:
                 raise ValueError("Fixture keyword missing")
-        for invalid in ({"keyword": "x", "minPrice": 2, "maxPrice": 1}, {"keyword": "x", "size": 101}, {"keyword": "x", "provider": "x"}):
+        for invalid in ({"keyword": "x", "minPrice": 2, "maxPrice": 1},
+                        {"keyword": "x", "size": MAX_PAGE_SIZE + 1}, {"keyword": "x", "provider": "x"}):
             assert client.get(SEARCH_PATH, params=invalid).status_code == 400
         assert client.post(IMAGE_PATH, files={"file": ("bad.jpg", b"invalid", "image/jpeg")}).status_code == 400
         for query in manifest["exactImages"]:

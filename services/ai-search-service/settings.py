@@ -53,6 +53,10 @@ class Settings:
     rabbit_port: int = env_field("RABBITMQ_PORT", 5672, int)
     rabbit_user: str = env_field("RABBITMQ_USERNAME", "guest")
     rabbit_password: str = env_field("RABBITMQ_PASSWORD", "guest")
+    rabbit_heartbeat: int = env_field("RABBITMQ_HEARTBEAT_SECONDS", 30, int)
+    rabbit_blocked_timeout: float = env_field("RABBITMQ_BLOCKED_TIMEOUT_SECONDS", 30.0, float)
+    rabbit_socket_timeout: float = env_field("RABBITMQ_SOCKET_TIMEOUT_SECONDS", 2.0, float)
+    rabbit_connect_timeout: float = env_field("RABBITMQ_CONNECT_TIMEOUT_SECONDS", 5.0, float)
     exchange: str = env_field("EVENT_EXCHANGE", "vmarket.events")
     queue: str = env_field("EVENT_QUEUE", "ai-search.events.v2")
     embedding_model: str = env_field("EMBEDDING_MODEL", "mobilenet_v3_small")
@@ -71,6 +75,8 @@ class Settings:
     dependency_timeout: float = env_field("SEARCH_DEPENDENCY_TIMEOUT_SECONDS", 2.0, float)
     minio_timeout: float = env_field("MINIO_SOCKET_TIMEOUT_SECONDS", 1.0, float)
     image_download_timeout: float = env_field("IMAGE_DOWNLOAD_TIMEOUT_SECONDS", 5.0, float)
+    maintenance_timeout: float = env_field("SEARCH_MAINTENANCE_TIMEOUT_SECONDS", 5.0, float)
+    weights_timeout: float = env_field("WEIGHTS_DOWNLOAD_TIMEOUT_SECONDS", 30.0, float)
     synonyms: tuple = env_field("SEARCH_SYNONYMS", ("ao thun, ao phong", "giay the thao, sneaker"), synonyms_value)
     name_boost: float = env_field("SEARCH_NAME_BOOST", 3.0, float)
     phrase_boost: float = env_field("SEARCH_PHRASE_BOOST", 5.0, float)
@@ -106,10 +112,14 @@ class Settings:
             raise ValueError("Invalid LLM limits")
         if self.embedding_model != "mobilenet_v3_small":
             raise ValueError("Unsupported embedding model")
-        for value in (self.dependency_timeout, self.minio_timeout, self.image_download_timeout, self.name_boost,
+        for value in (self.dependency_timeout, self.minio_timeout, self.image_download_timeout,
+                      self.rabbit_heartbeat, self.rabbit_blocked_timeout, self.rabbit_socket_timeout, self.rabbit_connect_timeout,
+                      self.maintenance_timeout, self.weights_timeout, self.name_boost,
                       self.phrase_boost, self.synonym_boost, self.sales_weight, self.rating_weight, self.popularity_cap):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError("Timeouts and ranking weights must be finite and positive")
+        if self.rabbit_connect_timeout <= self.rabbit_socket_timeout:
+            raise ValueError("Rabbit connection deadline must exceed RABBITMQ_SOCKET_TIMEOUT_SECONDS")
         if len(self.synonyms) > 100 or any(not isinstance(v, str) or not 1 <= len(v) <= 500 for v in self.synonyms):
             raise ValueError("Invalid SEARCH_SYNONYMS")
         if self.app_env == "prod":

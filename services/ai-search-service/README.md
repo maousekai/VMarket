@@ -133,9 +133,13 @@ runtime options; changing them requires the matching catalog/model and index reb
 
 Service `.env` exposes `SEARCH_SYNONYMS` (JSON list), name/phrase/synonym boosts,
 sales/rating weights and popularity cap. Synonym changes require maintenance rebuild;
-ranking changes require restart. Dependency/MinIO/download deadlines and LLM
+ranking changes require restart. Dependency/MinIO/download deadlines, Rabbit heartbeat
+and socket/blocked/connection deadlines, maintenance HTTP deadlines and LLM
 timeout/token budgets are also configurable; positive validated values are actually
 used. Defaults preserve the 500 ms / 128-token LLM budget and current memory profile.
+Rabbit's connection deadline must exceed its socket timeout; inconsistent values fail
+validation rather than being silently capped. Rebuild calibration reuse uses the same
+fingerprint/validated/finite-threshold checks as health and image search.
 Increasing budgets requires new latency/resource measurements. Logs include operation,
 exception type, upstream status and source location; URLs, credentials and payloads
 are deliberately excluded.

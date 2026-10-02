@@ -9,7 +9,7 @@ Run instructions and configuration are in [README.md](README.md).
 
 | Check | Observed result |
 | --- | --- |
-| Python offline unit checks | 16 passed; includes fresh configuration/file/environment precedence, configurable ranking, secret-safe diagnostic context, identical health/image calibration readiness, malformed multipart/numeric-header limits, cancellation retains the image slot, LLM fallback, projected resize limits, revisions/tombstones and MinIO streamed-body cleanup |
+| Python offline unit checks | 18 passed; includes fresh configuration/file/environment precedence, configurable ranking/Rabbit timeouts, required MinIO credentials before client construction, secret-safe diagnostic context, identical health/image/rebuild calibration readiness, malformed multipart/numeric-header limits, cancellation retains the image slot, LLM fallback, projected resize limits, revisions/tombstones and MinIO streamed-body cleanup |
 | Real Elasticsearch 8.19 checks | 6 passed; Vietnamese/fuzzy/synonyms, suggestions, actual variant-price gaps, min-price sort, popularity ranking, nested kNN/prefilters, stale updates, durable image recovery and atomic maintenance rebuild/failure |
 | Product Maven `verify` | 85 passed, none skipped; includes 7 real Mongo/Rabbit Testcontainers checks, native mixed-type `_id` export ordering, maintenance migration preserves valid revisions, snapshot authentication/version/tombstone projection and existing catalog suite |
 | Gateway Maven `verify` | 38 passed, none skipped; includes a real HTTP servlet/proxy test for guest image upload, case-insensitive identity stripping, internal snapshot denial and chunked-body 413, plus a shared escaped rate-limit envelope for Search and other routes |
