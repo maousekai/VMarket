@@ -1,4 +1,3 @@
-| Monitoring | mở `http://localhost:3001` (profile `monitoring`)   | dashboard hiện service UP  |
 # VMarket (PBL6)
 
 Nền tảng thương mại điện tử đa người bán tích hợp AI — xây dựng theo **kiến trúc microservices** hướng sự kiện (xem [SRS](docs/SRS-VMarket.md)).
@@ -107,6 +106,11 @@ docker compose --profile monitoring up -d      # hoặc: scripts\vmarket.cmd inf
 | Grafana    | http://localhost:3001    | Dashboard + xem log. Xem không cần đăng nhập (sửa: `admin`/`admin`) |
 | Prometheus | http://localhost:9090    | Kiểm tra service nào đang được scrape: trang **Status → Targets** |
 | Loki       | http://localhost:3100    | Kho log, chỉ có API — xem qua Grafana                          |
+
+> Ba cổng trên chỉ bind vào `127.0.0.1` (chỉ mở được từ chính máy chạy Docker). Loki không có
+> xác thực, Grafana cho xem ẩn danh, mà log dev chứa mã OTP / mã đặt lại mật khẩu
+> (`AUTH_EMAIL_PROVIDER=log`) — **không** đổi `MONITORING_BIND_ADDRESS` thành `0.0.0.0` trên máy
+> mà người khác truy cập được qua mạng.
 
 ```
 service Spring Boot ──/actuator/prometheus──> Prometheus ─┐
@@ -288,6 +292,7 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
 | Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |
 | RabbitMQ  | mở `http://localhost:15672`                           | đăng nhập guest/guest       |
+| Monitoring | mở `http://localhost:3001` (profile `monitoring`)   | dashboard hiện service UP  |
 
 ## Tài liệu
 
