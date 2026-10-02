@@ -35,7 +35,7 @@ VMarket/
 │   ├── delivery-service/      # Giao hàng, định vị shipper (8088, PostgreSQL)
 │   ├── review-service/        # Đánh giá sản phẩm (8089, PostgreSQL)
 │   ├── notification-service/  # Thông báo, email, FCM (8090, MongoDB)
-│   ├── ai-search-service/     # Tìm kiếm AI + tìm bằng ảnh CNN (8100, FastAPI + Elasticsearch)
+│   ├── ai-search-service/     # FR-SRCH-01–05 (8100, FastAPI + Elasticsearch + CPU PyTorch)
 │   ├── recommendation-service/# Gợi ý sản phẩm (8101, FastAPI + PostgreSQL + Redis)
 │   └── chatbot-service/       # Chatbot RAG (8102, FastAPI + MongoDB)
 ├── frontend/                  # Web end-user (React + Vite, cổng 5173)
@@ -46,7 +46,10 @@ VMarket/
 ├── infra/                     # Cấu hình hạ tầng (init script PostgreSQL...)
 ├── docs/
 │   ├── SRS-VMarket.md         # Đặc tả yêu cầu
+│   ├── search-contract.json  # Contract Search dùng chung Python/Java/nginx
+│   ├── openapi/               # API contract Search và Product snapshot nội bộ
 │   └── templates/             # Template Dockerfile + CI/CD + .env cho service mới
+├── worklogs/                 # Công việc, kiểm chứng và giới hạn theo ticket/PR
 ├── docker-compose.yml         # Hạ tầng dùng chung cho dev
 └── CONTRIBUTING.md            # Quy ước branch/commit/PR
 ```
@@ -71,21 +74,30 @@ tách rời với các service khác.
 
 ## Chạy hạ tầng (tối ưu tài nguyên)
 
+Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có và đặt rõ
+`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` trước khi chạy Compose. Password trong
+example để trống; Compose từ chối giá trị thiếu/rỗng, kể cả khi chưa chọn profile
+Search. Giữ nguyên `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
+
 ```bash
 # Bộ nhẹ mặc định (~1.5GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ
-docker compose up -d
+docker compose up -d postgres mongo mongo-init-replica redis rabbitmq
 
 # Chỉ định lẻ khi cần
 docker compose up -d postgres redis
 
-# Elasticsearch (~1GB) chỉ bật khi làm AI Search
-docker compose --profile search up -d
+# AI Search: Elasticsearch + MinIO-compatible storage + RabbitMQ
+docker compose --profile search up -d elasticsearch minio rabbitmq
 
 # Xoá sạch khi không dùng nữa
 docker compose down -v
 ```
 
-Mỗi container đã bị giới hạn RAM (`mem_limit`) để không chiếm hết máy. WSL2 cũng được giới hạn qua `~/.wslconfig` (8GB) — áp dụng sau khi `wsl --shutdown` rồi mở lại Docker Desktop.
+Mỗi container có giới hạn RAM (`mem_limit`). Với cấu hình AI Search, trần toàn
+dự án là **7,000,000,000 byte**, gồm các service khác và overhead Docker/WSL;
+cap riêng từng container chưa chứng minh toàn bộ stack nằm trong trần này.
+Cấu hình WSL2 qua `~/.wslconfig` và áp dụng sau khi `wsl --shutdown` rồi mở lại
+Docker Desktop. Xem [giới hạn kiểm chứng Search](services/ai-search-service/VERIFICATION.md).
 
 Sau khi `docker compose up -d` lần đầu, PostgreSQL tự tạo đủ CSDL cho từng service: `vmarket_auth`, `vmarket_user`, `vmarket_shop`, `vmarket_order`, `vmarket_payment`, `vmarket_delivery`, `vmarket_review`, `vmarket_recommendation` (MongoDB/Redis tự khởi tạo khi dùng).
 
@@ -100,6 +112,25 @@ cd services/auth-service
 Mỗi service đọc cấu hình từ biến môi trường (đã có giá trị dev mặc định khớp compose): `DB_HOST`, `DB_PORT`, `DB_NAME`, `RABBITMQ_HOST`...
 
 > **Tối ưu khi dev local:** chỉ chạy **API Gateway + các service bạn đang làm**. Không cần bật hết 14 service.
+
+## AI Search — PBL6-21
+
+[README AI Search](services/ai-search-service/README.md) hướng dẫn setup, API,
+calibration, rebuild/recovery và kiểm thử nhanh khi chưa có ảnh sản phẩm thật.
+Service chạy ở cổng 8100, public API qua gateway `/api/ai/search`; phụ thuộc
+Product Catalog, RabbitMQ, Elasticsearch và MinIO-compatible storage.
+
+Embedding mặc định dùng CPU PyTorch MobileNetV3 Small. LLM mở rộng từ khóa dùng
+provider tương thích OpenAI do operator chọn trong `.env`; thiếu URL/model/key
+hoặc chưa cho phép gửi từ khóa ra ngoài thì tìm kiếm từ khóa vẫn chạy bằng
+Elasticsearch. Ollama native/container là tùy chọn cho LLM. Phạm vi chỉ
+**FR-SRCH-01–05**, không cần Recommendation Service hoặc FR-SRCH-06.
+
+Image search cần weights đã xác minh và calibration hợp lệ trước khi chạy.
+Giới hạn/error/path dùng [contract chung](docs/search-contract.json); các thay đổi
+phải sinh lại constants/config bằng `python scripts/generate-search-contract.py`.
+[Worklog PBL6-21](worklogs/PBL6-21.md) ghi nội dung PR và kết quả đã kiểm chứng;
+[VERIFICATION.md](services/ai-search-service/VERIFICATION.md) ghi các acceptance gate còn lại.
 
 ## Chạy API Gateway
 
@@ -124,7 +155,7 @@ Version Spring Boot / Spring Cloud / Lombok quản lý tập trung ở `services
 
 ```bash
 scripts\vmarket.cmd infra                  # bật hạ tầng nhẹ
-scripts\vmarket.cmd infra-search           # bật thêm Elasticsearch
+scripts\vmarket.cmd infra-search           # bật profile Search (Elasticsearch + MinIO)
 scripts\vmarket.cmd core                   # chạy gateway + auth + user
 scripts\vmarket.cmd service order-service  # chạy 1 service bất kỳ
 scripts\vmarket.cmd fe                     # chạy frontend
@@ -141,11 +172,14 @@ Build context là **thư mục gốc repo** (Dockerfile cần parent POM):
 docker build -f services/auth-service/Dockerfile -t vmarket-auth-service .
 ```
 
-Dockerfile của mọi service sinh ra từ cùng một template
+Dockerfile của các service Spring Boot sinh ra từ cùng một template
 ([`docs/templates/Dockerfile.springboot`](docs/templates/Dockerfile.springboot)):
 3 stage — tải dependency (cache riêng theo `pom.xml`) → build jar bằng Maven →
 chạy bằng JRE slim với user thường. Sửa code Java rồi build lại chỉ mất ~14 giây
 vì layer dependency được dùng lại.
+
+AI Search dùng Dockerfile Python riêng, cũng build từ gốc repo; weights/private
+env không nằm trong image. Xem [hướng dẫn container Search](services/ai-search-service/README.md#events-failure-recovery-and-memory).
 
 Chạy container riêng lẻ bằng file `.env` của service:
 
@@ -158,12 +192,16 @@ docker run --env-file services/auth-service/.env -p 8081:8081 vmarket-auth-servi
 
 Mỗi service có một workflow riêng trong `.github/workflows/`, **trigger theo đường
 dẫn**: sửa `services/auth-service/**` thì chỉ CI của auth-service chạy. Toàn bộ
-logic nằm ở một *reusable workflow* dùng chung (`service-ci.yml`):
+logic của các service Java nằm ở một *reusable workflow* dùng chung (`service-ci.yml`):
 
 | Job     | Làm gì                                                                    |
 | ------- | ------------------------------------------------------------------------- |
 | `test`  | `mvnw -pl <service> -am test` — chỉ test module của service đó             |
 | `image` | Build Docker image của service đó + smoke test (không cần DB/RabbitMQ)     |
+
+AI Search có [workflow riêng](.github/workflows/ai-search-service.yml): unit/audit,
+Elasticsearch integration và Docker build chạy ở các job tách biệt. Workflow
+env-consistency kiểm tra cả các file được sinh từ Search contract để chặn drift.
 
 Mặc định pipeline **chỉ build image, chưa push lên registry** nên chưa cần khai báo
 secret nào. Khi nhóm chốt registry thì bật bằng cách bỏ comment vài dòng — xem
@@ -228,3 +266,7 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 - [Template Dockerfile + CI/CD cho service mới](docs/templates/README.md)
 - [README Auth Service](services/auth-service/README.md)
 - [README Shop Service](services/shop-service/README.md)
+- [README AI Search Service — FR-SRCH-01–05](services/ai-search-service/README.md)
+- [OpenAPI AI Search](docs/openapi/ai-search-service.yaml)
+- [Worklog PBL6-21 — nội dung PR và kiểm chứng](worklogs/PBL6-21.md)
+- [Kết quả và giới hạn kiểm chứng AI Search](services/ai-search-service/VERIFICATION.md)

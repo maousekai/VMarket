@@ -5,6 +5,9 @@ dist/
 build/
 __pycache__/
 *.pyc
+services/ai-search-service/models/
+services/ai-search-service/.local/
+services/ai-search-service/tmp/
 .venv/
 
 # IDE
@@ -35,3 +38,7 @@ logs_*.txt
 
 # Docker
 docker-compose.override.yml
+
+# Local ticket copies and implementation plans
+/tickets/
+/plans/

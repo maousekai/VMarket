@@ -49,6 +49,25 @@ class RateLimitFilterTest {
 	}
 
 	@Test
+	void searchUsesContractErrorEnvelope() throws Exception {
+		RateLimitFilter filter = filterWithProps(1, true);
+		doFilter(filter, request("GET", "/api/ai/search"));
+		MockHttpServletResponse response = doFilter(filter, request("POST", "/api/ai/search/image"));
+		assertThat(response.getStatus()).isEqualTo(429);
+		assertThat(response.getContentAsString()).contains("\"timestamp\":", "\"status\":429", "RATE_LIMITED",
+				"\"path\":\"/api/ai/search/image\"");
+	}
+
+	@Test
+	void otherRoutesUseTheSameEscapedErrorEnvelope() throws Exception {
+		RateLimitFilter filter = filterWithProps(1, true);
+		doFilter(filter, request("GET", "/api/orders"));
+		MockHttpServletResponse response = doFilter(filter, request("GET", "/api/orders/quoted\"id"));
+		assertThat(response.getContentAsString()).contains("\"timestamp\":", "\"status\":429",
+				"RATE_LIMITED", "quoted\\\"id");
+	}
+
+	@Test
 	void disabled_neverLimits() throws Exception {
 		RateLimitFilter f = filterWithProps(1, false);
 

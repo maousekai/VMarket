@@ -1,0 +1,88 @@
+openapi: 3.1.0
+info: {title: Product Search Snapshots, version: 1.0.0}
+servers: [{url: 'http://localhost:8084'}]
+security: [{InternalKey: []}]
+paths:
+  /api/products/internal/search-snapshots/{id}:
+    get:
+      operationId: getSearchSnapshot
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
+      responses:
+        '200': {description: Current state including hidden/deleted rows, content: {application/json: {schema: {$ref: '#/components/schemas/Snapshot'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/products/internal/search-snapshots:
+    get:
+      operationId: exportSearchSnapshots
+      description: Maintenance only; pause all writers first. Native Mongo _id ascending, includes tombstones. Unknown/repeated parameters rejected.
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 0, maximum: 2147483647, default: 0}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: Bounded page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, hasMore]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Snapshot'}}
+                  page: {type: integer}
+                  hasMore: {type: boolean}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    InternalKey: {type: apiKey, in: header, name: X-Internal-Api-Key}
+  schemas:
+    Snapshot:
+      type: object
+      required: [id, productVersion, catalogVisible, deleted, deletedAt]
+      description: >-
+        Tombstones contain only required fields. Non-deleted rows contain all public product
+        fields from ai-search-service.yaml except score, plus categoryPath, variantPrices,
+        createdAt and updatedAt. All timestamps UTC ISO 8601. Revisions never synthesized.
+      properties:
+        id: {type: string}
+        productVersion: {type: integer, minimum: 0}
+        catalogVisible: {type: boolean}
+        deleted: {type: boolean}
+        deletedAt: {type: [string, 'null'], format: date-time}
+        shopId: {type: string}
+        name: {type: string}
+        description: {type: string}
+        imageUrls: {type: array, items: {type: string}, maxItems: 9}
+        categoryId: {type: string}
+        categoryPath: {type: array, items: {type: string}}
+        variantPrices: {type: array, items: {type: integer, minimum: 0}}
+        currency: {type: string, const: VND}
+        minPrice: {type: [integer, 'null'], minimum: 0}
+        maxPrice: {type: [integer, 'null'], minimum: 0}
+        availableStock: {type: integer, minimum: 0}
+        ratingAverage: {type: number, minimum: 0, maximum: 5}
+        ratingCount: {type: integer, minimum: 0}
+        soldCount: {type: integer, minimum: 0}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+      examples:
+        - {id: product-1, productVersion: 2, catalogVisible: false, deleted: true, deletedAt: '2026-10-02T00:00:00Z'}
+    Error:
+      type: object
+      required: [timestamp, status, error, path]
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer}
+        path: {type: string}
+        error:
+          type: object
+          required: [code, message]
+          properties: {code: {type: string}, message: {type: string}}
+  responses:
+    Error:
+      description: INVALID_INTERNAL_API_KEY (401), PRODUCT_NOT_FOUND (404), SNAPSHOT_VERSION_MISSING (409), INVALID_QUERY (400)
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}

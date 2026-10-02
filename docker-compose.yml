@@ -212,7 +212,7 @@ services:
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     ports:
-      - "${ELASTICSEARCH_PORT:-9200}:9200"
+      - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
     volumes:
       - vmarket-es-data:/usr/share/elasticsearch/data
     networks:
@@ -223,6 +223,27 @@ services:
       interval: 20s
       timeout: 10s
       retries: 12
+
+  minio:
+    # Maintained MinIO fork; original 2025 community image failed the security scan.
+    image: ${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac}
+    profiles: ["search"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in root .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in root .env}
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - vmarket-minio-data:/data
+    networks: [vmarket-network]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "silo", "healthcheck", "ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   # Auth Service - xac thuc / JWT (container hoa: khong can chay mvnw nua).
   # Ket noi postgres + rabbitmq bang ten service trong network (port noi bo).
@@ -415,6 +436,7 @@ networks:
     driver: bridge
 
 volumes:
+  vmarket-minio-data:
   vmarket-pg-data:
   vmarket-mongo-data:
   vmarket-redis-data:
