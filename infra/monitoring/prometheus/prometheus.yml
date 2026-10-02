@@ -1,0 +1,49 @@
+# ============================================================
+# VMarket - Prometheus (PBL6-40)
+# ============================================================
+# Scrape metrics tu Spring Boot Actuator (/actuator/prometheus) cua tung
+# service. Nhan `service` trung voi ten service trong docker-compose.yml de
+# dashboard Grafana ghep duoc metrics (Prometheus) voi log (Loki).
+#
+# HAI NHOM TARGET:
+#  - Service DA container hoa: goi bang ten service trong VMarket-network.
+#  - Service CHUA container hoa (chay local bang mvnw): goi qua
+#    host.docker.internal:<port>. Chua chay thi target hien DOWN - dung y do.
+#
+# Khi container hoa them mot service: chuyen dong cua no tu nhom duoi len
+# nhom tren (doi host.docker.internal -> ten service), roi
+#   docker compose --profile monitoring restart prometheus
+# ============================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: vmarket-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # ---- Da container hoa (trong VMarket-network) ----
+      - targets: ["api-gateway:8080"]
+        labels: { service: api-gateway }
+      - targets: ["auth-service:8081"]
+        labels: { service: auth-service }
+      - targets: ["user-service:8082"]
+        labels: { service: user-service }
+      - targets: ["shop-service:8083"]
+        labels: { service: shop-service }
+      # ---- Chay local bang mvnw (tren may host) ----
+      - targets: ["host.docker.internal:8084"]
+        labels: { service: product-service }
+      - targets: ["host.docker.internal:8085"]
+        labels: { service: cart-service }
+      - targets: ["host.docker.internal:8086"]
+        labels: { service: order-service }
+      - targets: ["host.docker.internal:8087"]
+        labels: { service: payment-service }
+      - targets: ["host.docker.internal:8088"]
+        labels: { service: delivery-service }
+      - targets: ["host.docker.internal:8089"]
+        labels: { service: review-service }
+      - targets: ["host.docker.internal:8090"]
+        labels: { service: notification-service }
