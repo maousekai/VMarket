@@ -1,26 +1,66 @@
 # AI Search — PBL6-21
 
 FR-SRCH-01–05: Vietnamese keyword/synonym/fuzzy search, product-name suggestions,
-versioned event synchronization, and CNN image search. Default: CPU PyTorch
-MobileNetV3 Small + an optional configured cloud LLM. Elasticsearch 8.19 and
-MinIO-compatible storage are infrastructure. No recommendation service is required.
+versioned event synchronization, and CNN image search. Default embedding is CPU
+PyTorch MobileNetV3 Small; the optional query-expansion LLM uses an operator-selected
+cloud provider. Elasticsearch 8.19, RabbitMQ, Product Catalog and MinIO-compatible
+media storage are dependencies. No recommendation service is required. FR-SRCH-06,
+text-vector search and a Search frontend are outside this implementation.
+
+Only `mobilenet_v3_small` is implemented for embeddings (576 dimensions, L2 normalized).
+LLM providers use OpenAI-compatible Chat Completions; native/container Ollama is optional
+for the LLM only. No cloud endpoint/model/key is supplied by default. Keyword search
+works without an LLM; image search requires cached verified weights and calibration.
 
 Contracts: [public search](../../docs/openapi/ai-search-service.yaml),
 [Product snapshots](../../docs/openapi/product-search-internal.yaml).
 Implementation/verification limits: [VERIFICATION.md](VERIFICATION.md).
+PR implementation history: [PBL6-21 worklog](../../worklogs/PBL6-21.md).
+
+## API behavior
+
+Public requests go through the gateway at `http://localhost:8080`; the service listens
+on port 8100. Guest access is allowed for the exact Search routes. Product internal
+snapshots require `X-Internal-Api-Key` and are blocked at the public gateway.
+
+| Method / path | Parameters and behavior |
+| --- | --- |
+| `GET /api/ai/search` | Required `keyword`; optional `categoryId`, `minPrice`, `maxPrice`, `sort`, `page`, `size`. Defaults: page 0, size 20, relevance sort; size 1–100 and `(page+1)*size <= 10000`. |
+| `GET /api/ai/search/suggestions` | Required `keyword`; optional `categoryId`, `limit` (default 10, 1–20). Under two trimmed characters returns an empty list. Never calls the LLM. |
+| `POST /api/ai/search/image` | Multipart field `file`, exactly one static JPEG/PNG/WebP; optional `categoryId`, `minPrice`, `maxPrice`, `limit` (default 20, 1–100). File <=10,000,000 bytes; body <=11,000,000 bytes; <=25,000,000 pixels. |
+| `GET /api/ai/search/health` | Reports `status`, `text`, `image`, `synchronization`, `llm`. HTTP 200/`UP` means the process responds; individual features may still be unavailable/degraded. |
+
+Unknown/repeated parameters are rejected. Prices are integer VND, with
+`minPrice <= maxPrice`; filtering matches an actual active variant, including gaps
+between variant prices. Category filters include descendants. Sorts are `RELEVANCE`,
+`PRICE_ASC`, `PRICE_DESC`, `BEST_SELLING`, `NEWEST`; both price directions use the
+minimum active variant price, and ties use product ID ascending. Hidden/deleted
+products are excluded. Image results contain one hit per product, with `similarity`
+in [-1,1] and `matchedImageUrl`; results below the calibrated threshold are omitted.
+
+Errors use `{timestamp, status, error: {code, message}, path}`, with UTC ISO 8601
+timestamps. Common codes: `INVALID_QUERY`/`INVALID_IMAGE` (400), `IMAGE_TOO_LARGE`
+(413), `RATE_LIMITED` at the gateway or `SEARCH_BUSY` for the single image slot (429),
+`SEARCH_UNAVAILABLE`/`IMAGE_SEARCH_UNAVAILABLE` (503). Nginx, gateway and Python share
+the generated upload limit/error contract. Health, image search and calibration reuse
+share fingerprint/validated/finite-threshold checks; `llm=configured` is not a provider probe.
 
 ## Quick checks without catalog files
 
 Use Python 3.12 (a real installation, not the Windows Store placeholder). Commands
 below run in this directory; Maven lives in `../`, Compose in the repository root.
+Before infrastructure commands, copy root `.env.example` to root `.env` if needed
+and set `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` explicitly. Compose interpolates these
+required variables even when the Search profile is not selected. Keep existing credentials.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests/unit -v
-# From repo root; named services avoid starting unrelated business containers:
+# Switch to repo root; named services start only the required infrastructure:
+Push-Location ../..
 docker compose --profile search up -d elasticsearch minio rabbitmq
-# Back here:
+Pop-Location
 .\.venv\Scripts\python.exe -m unittest discover -s tests/integration -v
 .\.venv\Scripts\python.exe -m pip install -r requirements-local.txt
 .\.venv\Scripts\python.exe manage.py weights
@@ -30,8 +70,10 @@ docker compose --profile search up -d elasticsearch minio rabbitmq
 $env:SEARCH_LOAD_SECONDS='60'
 .\.venv\Scripts\python.exe -m unittest discover -s tests/system -v
 Remove-Item Env:SEARCH_LOAD_SECONDS
-# From services/:
+# Maven wrapper lives in services/:
+Push-Location ..
 .\mvnw.cmd -pl product-service,api-gateway -am verify
+Pop-Location
 ```
 
 Unit checks use fake providers/vectors, with no downloads or network access during
@@ -39,10 +81,16 @@ discovery. The separate ES checks use unique disposable indexes and real analysi
 ranking, nested kNN, revisions, image-job recovery and alias rebuilds. System checks
 generate drawings, create restricted test MinIO users/buckets, use a local authenticated
 HTTP snapshot stub and real Rabbit/ES/PyTorch. They mutate only their unique test
-resources. They require Docker CLI access and the existing MinIO root credentials
-from root `.env` (development defaults when absent); `MINIO_TEST_CONTAINER` overrides
+resources. They require Docker CLI access and explicit nonempty MinIO root credentials
+from root `.env`; there is no credential fallback. `MINIO_TEST_CONTAINER` overrides
 the default `vmarket-minio-1` container name. The system test's synthetic calibration
 is confined to its disposable index. These drawings do not qualify real-product accuracy.
+Local dependency ports default to ES 9200, MinIO 9000/console 9001 and Rabbit 5672.
+The system test expects these local infrastructure ports. When changing
+Compose host ports, adjust the test harness before running it. Model checks are opt-in,
+load real CPU weights and do not need a catalog file. The full combined model test
+failed under the 512 MiB container cap; an isolated maximum upload passed but filled
+the cap. See verification notes before interpreting these as capacity tests.
 
 ## Run with your catalog
 
@@ -55,7 +103,8 @@ is confined to its disposable index. These drawings do not qualify real-product 
    constructs defaults for tests. Restart the service after changing its configuration.
    There is no default cloud endpoint: set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
    and `ALLOW_EXTERNAL_QUERY_TEXT=true` to opt in; otherwise keyword search falls back.
-2. Set up MinIO below, run Product Catalog and the gateway using their existing
+2. Install `requirements-local.txt`, cache weights with `manage.py weights`, set up
+   MinIO below, run Product Catalog and the gateway using their existing
    scripts, and ensure an approved shop with valid categories exists. Configure
    Product's internal key explicitly; its base YAML default differs from the root
    development key. Seed uses a real seller token through the gateway.
@@ -73,20 +122,22 @@ is confined to its disposable index. These drawings do not qualify real-product 
 .\.venv\Scripts\python.exe manage.py seed
 $indexSuffix = Get-Date -Format yyyyMMddHHmmss
 .\.venv\Scripts\python.exe manage.py reindex --maintenance --target "vmarket-products-v1-$indexSuffix" --calibration .local/search-fixtures.json
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8100 --workers 1 --env-file .env --no-access-log
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8100 --workers 1 --no-access-log
 ```
 
 7. Resume catalog writers. `manage.py smoke --base-url http://localhost:8080` checks
    recorded products/image uploads. `manage.py llm-probe` separately requires a valid,
-   useful expansion from your actual selected provider within the 500 ms budget.
+   useful expansion from your actual selected provider within the configured budget
+   (500 ms by default).
 
 First rebuild/model changes require calibration: 10 related + 10 unrelated queries
 in each of two disjoint sets, distinct image contents, plus exact-image top-one checks.
 Choose the calibration cutoff by F1, then require held-out recall@5 >=80% and unrelated
 false acceptance <=10%. Failed quality/count/version/image checks leave the old alias
 unchanged and retain the candidate for diagnosis. Retry with a fresh target. Later
-rebuilds can omit `--calibration` only when the existing validated encoder fingerprint
-matches. Never roll an alias back after new events have been acknowledged; rebuild.
+rebuilds can omit `--calibration` only when the existing encoder fingerprint matches,
+calibration is explicitly validated, and its threshold is finite and in [-1,1].
+Never roll an alias back after new events have been acknowledged; rebuild.
 Without valid matching calibration, image search returns 503. There is no arbitrary
 0.70 default or automatic catalog bootstrap during requests.
 
@@ -100,7 +151,7 @@ Disable the flag afterward and rebuild. Search never invents product revisions.
 Compose keeps the service named `minio`, ports bound to loopback, a persistent volume
 and 256 MiB trial cap. The original planned 2025 image failed scanning; the selected
 prebuilt [Silo release](https://github.com/pgsty/silo/releases/tag/RELEASE.2026-08-06T00-00-00Z)
-is a maintained compatible MinIO fork, pinned by digest. Remaining image findings are
+is a compatible MinIO fork, pinned by digest in Compose. Remaining image findings are
 documented in verification notes and must be reviewed before deployment. Do not use
 this demo stack as a clean-scan production assertion.
 
@@ -123,13 +174,29 @@ Production operators choose strong root/user credentials and complete image revi
 
 ## Shared contract and operator tuning
 
-`docs/search-contract.json` owns Search paths, upload/resize limits, embedding dimensions,
+[The shared contract](../../docs/search-contract.json) owns Search paths, upload/resize limits, embedding dimensions,
 index prefix, pagination bounds, retry attempts, currency and shared error text. Run
 `python scripts/generate-search-contract.py` from the repository root after changing it.
 Python/Java constants and nginx/gateway boundary configuration are generated; CI runs
 `--check` to reject drift. Update OpenAPI and acceptance evidence for contract changes.
 Currency VND and 576 dimensions describe the current catalog/model, not arbitrary
 runtime options; changing them requires the matching catalog/model and index rebuild.
+
+Runtime configuration is listed in [.env.example](.env.example); use
+[.env.prod.example](.env.prod.example) for production values. `Settings.load()` validates
+each new application/tool configuration. Changes take effect after restart, with
+environment variables overriding the service file; there is no hot reload.
+
+| Group | Variables / defaults |
+| --- | --- |
+| Dependencies | `ELASTICSEARCH_URL`, `SEARCH_INDEX_ALIAS`, `PRODUCT_SERVICE_URL`, `INTERNAL_API_KEY`, `RABBITMQ_HOST/PORT/USERNAME/PASSWORD`, `EVENT_QUEUE`; optional `EVENT_EXCHANGE` defaults to `vmarket.events` |
+| Media / embedding | `MINIO_ENDPOINT`, `MINIO_PUBLIC_ORIGIN`, `MINIO_BUCKET`, explicit `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`; `EMBEDDING_MODEL=mobilenet_v3_small`, weights path and optional SHA-256 override |
+| LLM | `LLM_ENABLED`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `ALLOW_EXTERNAL_QUERY_TEXT`; default deadline 500 ms, token budget 128; format/reasoning settings below |
+| Ranking | `SEARCH_SYNONYMS` JSON list; `SEARCH_NAME_BOOST=3`, `SEARCH_PHRASE_BOOST=5`, `SEARCH_SYNONYM_BOOST=0.3`, `SEARCH_SALES_WEIGHT=0.1`, `SEARCH_RATING_WEIGHT=0.04`, `SEARCH_POPULARITY_CAP=2` |
+| Dependency deadlines | `SEARCH_DEPENDENCY_TIMEOUT_SECONDS=2`, `MINIO_SOCKET_TIMEOUT_SECONDS=1`, `IMAGE_DOWNLOAD_TIMEOUT_SECONDS=5` |
+| Rabbit deadlines | `RABBITMQ_HEARTBEAT_SECONDS=30`, `RABBITMQ_BLOCKED_TIMEOUT_SECONDS=30`, `RABBITMQ_SOCKET_TIMEOUT_SECONDS=2`, `RABBITMQ_CONNECT_TIMEOUT_SECONDS=5` |
+| Maintenance | `SEARCH_MAINTENANCE_TIMEOUT_SECONDS=5`, `WEIGHTS_DOWNLOAD_TIMEOUT_SECONDS=30` |
+| Application | `APP_ENV=dev`, `CORS_ALLOWED_ORIGINS`; production rejects missing/placeholder infrastructure credentials |
 
 Service `.env` exposes `SEARCH_SYNONYMS` (JSON list), name/phrase/synonym boosts,
 sales/rating weights and popularity cap. Synonym changes require maintenance rebuild;
@@ -237,7 +304,22 @@ explicitly from the official URL with checksum verification; requests never down
 
 Keep the **entire local project** below 7,000,000,000 bytes, including other Java/AI
 services and Docker/WSL overhead. Search's 512 MiB and MinIO's 256 MiB caps are tested
-trial allocations; the existing ES allowance is 1 GiB/512 MiB heap. Record whole-project
+trial allocations with no maximum-upload headroom demonstrated; the existing ES
+allowance is 1 GiB/512 MiB heap. Record whole-project
 memory and preserve reservations for services not in focused tests. These checks do
 not qualify the SRS 200-user target. Add replicas/new encoders/provider adapters only
 after measurement; model changes require recalibration and a maintenance rebuild.
+
+## CI and acceptance status
+
+[Search CI](../../.github/workflows/ai-search-service.yml) separates offline unit/audit,
+real Elasticsearch integration, and Docker build jobs. The repo env-consistency job
+also runs `scripts/generate-search-contract.py --check`. Real model/system/load tests
+are local opt-in checks; cloud credentials and fixture photos are not required by CI.
+
+The latest local checks passed 18 unit checks, six ES checks and the generated pipeline;
+affected Java verification passed 85 Product, 38 Gateway and 10 shared-events checks.
+Detailed evidence and remaining release gates are in [VERIFICATION.md](VERIFICATION.md).
+Real-photo calibration, actual Product-mutation end-to-end smoke, the selected LLM
+probe, full-stack <=7 GB / 200-user qualification and image vulnerability review remain
+outstanding. Generated drawings and successful builds do not complete those gates.
