@@ -104,10 +104,14 @@ USER vmarket
 #   JAVA_OPTS             : tuy chinh JVM (MaxRAMPercentage de JVM ton trong
 #                           gioi han RAM cua container thay vi RAM cua host)
 #   HEALTHCHECK_PATH      : xem phan HEALTHCHECK ben duoi
+#   LOGGING_STRUCTURED_FORMAT_CONSOLE: log JSON (logstash) ra stdout de Promtail/Loki
+#                           gom tap trung (PBL6-40). Chay local bang mvnw khong co
+#                           bien nay nen van la log text de doc.
 ENV SERVER_PORT=${SERVICE_PORT} \
     SPRING_PROFILES_ACTIVE=${SPRING_PROFILE} \
     JAVA_OPTS="-XX:MaxRAMPercentage=75.0" \
-    HEALTHCHECK_PATH="/actuator/health/liveness"
+    HEALTHCHECK_PATH="/actuator/health/liveness" \
+    LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash
 
 EXPOSE ${SERVICE_PORT}
 

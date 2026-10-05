@@ -74,7 +74,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
 
 # JWT - doc tu bien moi truong, KHONG hardcode secret that vao repo.
 # Secret nay PHAI TRUNG voi AUTH_JWT_SECRET cua auth-service (cung khoa HS256)

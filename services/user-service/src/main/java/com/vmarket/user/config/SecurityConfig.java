@@ -45,6 +45,8 @@ public class SecurityConfig {
 			"/actuator/health",
 			"/actuator/health/**",
 			"/actuator/info",
+			// Prometheus scrape trong mạng nội bộ (PBL6-40); gateway không route /actuator của service.
+			"/actuator/prometheus",
 			"/v3/api-docs/**",
 			"/v3/api-docs.yaml",
 			"/swagger-ui/**",
