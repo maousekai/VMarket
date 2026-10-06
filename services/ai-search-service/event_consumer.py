@@ -1,112 +1,208 @@
-"""PBL6-39 — AI Search Service: consumer Event Bus (RabbitMQ).
-
-Theo quy ước event bus dùng chung (docs/event-bus.md):
-  - topic exchange:  vmarket.events
-  - routing key   :  tên sự kiện (PascalCase, khớp danh mục SRS §8.1)
-  - message schema:  {"eventId", "eventType", "timestamp", "payload"}
-
-AI Search lắng nghe ProductCreated/Updated/Deleted để đồng bộ chỉ mục
-Elasticsearch (FR-SRCH-04). Ở giai đoạn PBL6-39 chỉ log payload; việc ghi index
-sẽ điền sau khi cài Elasticsearch client.
-"""
-
+"""Heartbeat-safe Product invalidations. ACK follows durable metadata/image intent."""
 import json
-import os
+import logging
 import threading
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pika
+from elasticsearch import ApiError, ConnectionError, ConnectionTimeout
 
-EXCHANGE = os.getenv("EVENT_EXCHANGE", "vmarket.events")
-QUEUE = os.getenv("EVENT_QUEUE", "ai-search.events.v2")
-# Quy ước dead-letter (docs/event-bus.md §2): {exchange}.dlx và {queue}.dead.
-DEAD_EXCHANGE = EXCHANGE + ".dlx"
-DEAD_QUEUE = QUEUE + ".dead"
-DEAD_ROUTING_KEY = QUEUE + ".dead"
+from contract import RETRY_ATTEMPTS
+from diagnostics import log_failure
 
-# Các sự kiện AI Search quan tâm (FR-SRCH-04).
-EVENT_TYPES = ["ProductCreated", "ProductUpdated", "ProductDeleted"]
+EVENT_TYPES = ("ProductCreated", "ProductUpdated", "ProductDeleted")
+SYNC_CHECK_SECONDS = 5
 
 
-def _handle_product_event(event_type: str, payload: dict) -> None:
-    # TODO(FR-SRCH-04): cập nhật chỉ mục Elasticsearch + trích xuất embedding
-    # ảnh sản phẩm bằng mô hình CNN trong vòng tối đa 1 phút.
-    print(f"[event] nhan {event_type}: {payload}", flush=True)
+def connection_parameters(settings):
+    return pika.ConnectionParameters(host=settings.rabbit_host, port=settings.rabbit_port,
+        credentials=pika.PlainCredentials(settings.rabbit_user, settings.rabbit_password),
+        heartbeat=settings.rabbit_heartbeat, blocked_connection_timeout=settings.rabbit_blocked_timeout,
+        socket_timeout=settings.rabbit_socket_timeout, stack_timeout=settings.rabbit_connect_timeout)
 
 
-_HANDLERS = {
-    "ProductCreated": _handle_product_event,
-    "ProductUpdated": _handle_product_event,
-    "ProductDeleted": _handle_product_event,
-}
-
-
-def _on_message(ch, method, _properties, body: bytes) -> None:
-    try:
-        envelope = json.loads(body.decode("utf-8"))
-        event_type = envelope.get("eventType")
-        handler = _HANDLERS.get(event_type)
-        if handler is not None:
-            handler(event_type, envelope.get("payload") or {})
-        else:
-            print(f"[event] bo qua su kien {event_type}", flush=True)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[event] loi xu ly thong diep: {exc}", flush=True)
-        # Nack khong requeue de tranh loop vo tan; san sang cho DLQ (docs/event-bus.md §7)
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-
-
-def _connection_parameters() -> pika.ConnectionParameters:
-    return pika.ConnectionParameters(
-        host=os.getenv("RABBITMQ_HOST", "localhost"),
-        port=int(os.getenv("RABBITMQ_PORT", "5672")),
-        credentials=pika.PlainCredentials(
-            os.getenv("RABBITMQ_USERNAME", "guest"),
-            os.getenv("RABBITMQ_PASSWORD", "guest"),
-        ),
-        heartbeat=30,
-        blocked_connection_timeout=30,
-    )
-
-
-def start_consumer() -> None:
-    """Kết nối RabbitMQ, khai báo exchange/queue/binding rồi lắng nghe."""
-    connection = pika.BlockingConnection(_connection_parameters())
-    channel = connection.channel()
-
-    channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
-    # DLX theo đúng convention Java (EventBusAutoConfiguration) để message lỗi
-    # consumer rơi vào ai-search.events.v2.dead thay vì bị mất.
-    channel.exchange_declare(exchange=DEAD_EXCHANGE, exchange_type="topic", durable=True)
-    channel.queue_declare(queue=QUEUE, durable=True, arguments={
-        "x-dead-letter-exchange": DEAD_EXCHANGE,
-        "x-dead-letter-routing-key": DEAD_ROUTING_KEY,
-    })
-    channel.queue_declare(queue=DEAD_QUEUE, durable=True)
-    channel.queue_bind(queue=DEAD_QUEUE, exchange=DEAD_EXCHANGE, routing_key=DEAD_ROUTING_KEY)
+def declare_topology(channel, settings):
+    exchange, queue = settings.exchange, settings.queue
+    channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
+    channel.exchange_declare(exchange=exchange + ".dlx", exchange_type="topic", durable=True)
+    channel.queue_declare(queue=queue, durable=True, arguments={"x-dead-letter-exchange": exchange + ".dlx",
+                          "x-dead-letter-routing-key": queue + ".dead"})
+    channel.queue_declare(queue=queue + ".dead", durable=True)
+    channel.queue_declare(queue=queue + ".quarantine", durable=True)
+    channel.queue_bind(queue=queue + ".dead", exchange=exchange + ".dlx", routing_key=queue + ".dead")
     for event_type in EVENT_TYPES:
-        channel.queue_bind(queue=QUEUE, exchange=EXCHANGE, routing_key=event_type)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue=QUEUE, on_message_callback=_on_message)
-
-    print(f"[event] dang lang nghe exchange={EXCHANGE} queue={QUEUE}", flush=True)
-    try:
-        channel.start_consuming()
-    finally:
-        connection.close()
+        channel.queue_bind(queue=queue, exchange=exchange, routing_key=event_type)
 
 
-def start_event_consumer_thread() -> None:
-    """Chạy consumer trong luồng nền (daemon), tự reconnect khi RabbitMQ chưa sẵn sàng."""
+def validate_event(body, routing_key):
+    if len(body) > 256 * 1024:
+        raise ValueError("Event too large")
+    envelope = json.loads(body)
+    if not isinstance(envelope, dict) or envelope.get("eventType") != routing_key or routing_key not in EVENT_TYPES:
+        raise ValueError("Event type mismatch")
+    uuid.UUID(envelope["eventId"])
+    stamp = envelope["timestamp"]
+    if type(stamp) is not int or not 0 <= stamp <= 2**63 - 1:
+        raise ValueError("Invalid event timestamp")
+    product_id = envelope["payload"]["productId"]
+    if not isinstance(product_id, str) or product_id in {".", ".."} or not 1 <= len(product_id) <= 128 or any(ord(c) < 32 for c in product_id):
+        raise ValueError("Invalid product ID")
+    return product_id, stamp
 
-    def _run() -> None:
-        while True:
+
+def transient(exc):
+    return isinstance(exc, (httpx.TransportError, ConnectionError, ConnectionTimeout)) or (
+        isinstance(exc, (ApiError, httpx.HTTPStatusError)) and
+        (exc.status_code if isinstance(exc, ApiError) else exc.response.status_code) in {429, 500, 502, 503, 504})
+
+
+class Workers:
+    def __init__(self, store, encoder):
+        self.store, self.encoder = store, encoder
+        self.settings = store.settings
+        self.stop = threading.Event()
+        self.synchronized = False
+        self.metadata_lag_ms = self.image_lag_ms = None
+        self.dead_letters = 0
+        self.quarantined = 0
+        self.metadata_backlog = None
+        self.metadata_in_flight = 0
+        self.metadata_checked_at = None
+        self.active = None
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="metadata")
+        self.threads = []
+
+    def handle(self, body, key):
+        product_id, stamp = validate_event(body, key)
+        self.metadata_lag_ms = max(0, int(time.time() * 1000) - stamp)
+        for attempt in range(RETRY_ATTEMPTS):
             try:
-                start_consumer()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[event] chua ket noi duoc RabbitMQ ({exc}); thu lai sau 5s...", flush=True)
-                time.sleep(5)
+                snapshot = self.store.fetch_snapshot(product_id)
+                _, meta = self.store.meta()
+                self.store.apply_snapshot(snapshot, stamp, meta.get("encoderFingerprint"))
+                self.metadata_lag_ms = max(0, int(time.time() * 1000) - stamp)
+                logging.info("metadata_sync lag_ms=%s", self.metadata_lag_ms)
+                return
+            except Exception as exc:
+                if not transient(exc) or attempt == RETRY_ATTEMPTS - 1:
+                    raise
+                log_failure("metadata_sync_retry", exc)
+                if self.stop.wait(2**attempt):
+                    raise RuntimeError("Stopping")
 
-    threading.Thread(target=_run, daemon=True, name="event-consumer").start()
+    @property
+    def synchronization_ready(self):
+        return (self.synchronized and self.metadata_checked_at is not None
+                and time.monotonic() - self.metadata_checked_at <= SYNC_CHECK_SECONDS
+                and self.metadata_backlog == 0 and self.metadata_in_flight == 0
+                and self.metadata_lag_ms == 0 and self.image_lag_ms == 0
+                and self.dead_letters == 0 and self.quarantined == 0)
+
+    def check_synchronization(self, channel):
+        # Unknown/stale broker state fails closed; an empty queue excludes unacknowledged work.
+        self.synchronized = False
+        queue = self.settings.queue
+        self.metadata_backlog = channel.queue_declare(queue=queue, passive=True).method.message_count
+        self.dead_letters = channel.queue_declare(queue=queue + ".dead", passive=True).method.message_count
+        self.quarantined = channel.queue_declare(queue=queue + ".quarantine", passive=True).method.message_count
+        if self.metadata_backlog == 0 and self.metadata_in_flight == 0:
+            self.metadata_lag_ms = 0
+        elif self.metadata_in_flight == 0:
+            self.metadata_lag_ms = None  # The broker count does not expose the oldest queued timestamp.
+        self.metadata_checked_at = time.monotonic()
+        self.synchronized = True
+
+    def consume(self):
+        QUEUE = self.settings.queue
+        while not self.stop.is_set():
+            connection = None
+            try:
+                connection = pika.BlockingConnection(connection_parameters(self.settings))
+                channel = connection.channel()
+                declare_topology(channel, self.settings)
+                self.store.meta()
+                if self.active is not None and not self.active.done():
+                    raise RuntimeError("Previous delivery still finishing")
+                channel.basic_qos(prefetch_count=1)
+
+                def on_message(ch, method, properties, body):
+                    self.synchronized = False
+                    self.metadata_in_flight += 1
+                    self.metadata_lag_ms = None
+                    key = method.routing_key
+                    if method.exchange == "" and key == QUEUE:
+                        key = (properties.headers or {}).get("x-search-event-type")
+                    future = self.executor.submit(self.handle, body, key)
+                    self.active = future
+                    # Capture this connection: reconnect must never ACK the previous channel's tag.
+                    owner = connection
+
+                    def finish(completed):
+                        def acknowledge():
+                            if not ch.is_open:
+                                return
+                            self.synchronized = False
+                            if completed.exception() is None:
+                                ch.basic_ack(method.delivery_tag)
+                            else:
+                                log_failure("product_event_failed", completed.exception())
+                                ch.basic_nack(method.delivery_tag, requeue=False)
+                            self.metadata_in_flight -= 1
+                        if owner.is_open:
+                            try:
+                                owner.add_callback_threadsafe(acknowledge)
+                            except pika.exceptions.ConnectionWrongStateError:
+                                pass
+                    future.add_done_callback(finish)
+
+                self.metadata_in_flight = 0
+                self.check_synchronization(channel)
+                channel.basic_consume(queue=QUEUE, on_message_callback=on_message)
+                next_check = time.monotonic() + SYNC_CHECK_SECONDS
+                while not self.stop.is_set() and connection.is_open:
+                    connection.process_data_events(time_limit=0.5)
+                    if time.monotonic() >= next_check:
+                        self.check_synchronization(channel)
+                        next_check = time.monotonic() + SYNC_CHECK_SECONDS
+            except Exception as error:
+                self.synchronized = False
+                log_failure("consumer_unavailable", error)
+                self.stop.wait(5)
+            finally:
+                if connection and connection.is_open:
+                    connection.close()
+                self.synchronized = False
+
+    def images(self):
+        try:
+            self.encoder.load()
+        except Exception as error:
+            log_failure("encoder_unavailable", error)
+        while not self.stop.is_set():
+            try:
+                self.store.process_image_job(self.encoder)
+                result = self.store.client.search(index=self.store.target, body={"size": 0,
+                    "query": {"terms": {"imageState": ["pending", "failed"]}},
+                    "aggs": {"oldest": {"min": {"field": "eventAt"}}}})
+                oldest = result["aggregations"]["oldest"]["value"]
+                self.image_lag_ms = max(0, int(time.time() * 1000 - oldest)) if oldest is not None else 0
+                self.stop.wait(1)
+            except Exception as error:
+                self.image_lag_ms = None
+                log_failure("image_worker_unavailable", error)
+                self.stop.wait(2)
+
+    def start(self):
+        for function in (self.consume, self.images):
+            thread = threading.Thread(target=function, daemon=True, name=function.__name__)
+            thread.start()
+            self.threads.append(thread)
+
+    def close(self):
+        self.stop.set()
+        for thread in self.threads:
+            thread.join(timeout=5)
+        self.executor.shutdown(wait=True, cancel_futures=True)

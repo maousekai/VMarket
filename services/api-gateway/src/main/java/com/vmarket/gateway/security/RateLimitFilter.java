@@ -1,6 +1,8 @@
 package com.vmarket.gateway.security;
 
 import java.io.IOException;
+import static com.vmarket.gateway.config.SearchContract.RATE_LIMITED_CODE;
+import static com.vmarket.gateway.config.SearchContract.RATE_LIMITED_MESSAGE;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +61,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 		String clientIp = resolveClientIp(request);
 		if (!limiter.tryAcquire(clientIp)) {
 			log.warn("Rate limit vượt ngưỡng cho client {}", clientIp);
-			writeError(response);
+			writeError(request, response);
 			return;
 		}
 		filterChain.doFilter(request, response);
@@ -79,11 +81,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
 		return request.getRemoteAddr();
 	}
 
-	private void writeError(HttpServletResponse response) throws IOException {
-		response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-		response.setContentType("application/json");
-		response.setCharacterEncoding("UTF-8");
-		response.getWriter().write(
-				"{\"error\":{\"code\":\"RATE_LIMITED\",\"message\":\"Quá nhiều yêu cầu, vui lòng thử lại sau\"}}");
+	private void writeError(HttpServletRequest request, HttpServletResponse response) throws IOException {
+		ErrorResponseWriter.write(response, HttpStatus.TOO_MANY_REQUESTS.value(),
+				RATE_LIMITED_CODE, RATE_LIMITED_MESSAGE, request.getRequestURI());
 	}
 }

@@ -130,7 +130,7 @@ $prodFiles = Get-ChildItem -Path (Join-Path $root "services") -Filter ".env.prod
              Sort-Object FullName
 foreach ($f in $prodFiles) {
   $prodEnv = Read-EnvFile $f.FullName
-  if ($prodEnv["SPRING_PROFILES_ACTIVE"] -ne "prod") {
+  if ((Test-Path (Join-Path $f.DirectoryName "pom.xml")) -and $prodEnv["SPRING_PROFILES_ACTIVE"] -ne "prod") {
     $problems += "$(Rel $f.FullName): SPRING_PROFILES_ACTIVE phai la 'prod' (dang la '$($prodEnv['SPRING_PROFILES_ACTIVE'])')"
   }
   foreach ($key in $MustBeEmpty) {

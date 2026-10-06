@@ -1,0 +1,182 @@
+openapi: 3.1.0
+info:
+  title: VMarket AI Search (FR-SRCH-01–05)
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/ai/search:
+    get:
+      operationId: keywordSearch
+      parameters:
+        - $ref: '#/components/parameters/Keyword'
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/MinPrice'
+        - $ref: '#/components/parameters/MaxPrice'
+        - {name: sort, in: query, schema: {type: string, enum: [RELEVANCE, PRICE_ASC, PRICE_DESC, BEST_SELLING, NEWEST], default: RELEVANCE}}
+        - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      description: >-
+        Unknown/repeated parameters are rejected. (page+1)*size <= 10000.
+        Prices are integer VND; minPrice <= maxPrice. Filters match an actual active variant.
+        Category includes descendants. Price sorting uses minimum active variant price in both directions.
+        Sort ties use product ID ascending. Optional bounded LLM expansion falls back to lexical search.
+      responses:
+        '200':
+          description: Visible products; empty results on no match
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keyword, results, page, size, totalElements, totalPages]
+                properties:
+                  keyword: {type: string}
+                  results: {type: array, items: {$ref: '#/components/schemas/Product'}}
+                  page: {type: integer}
+                  size: {type: integer}
+                  totalElements: {type: integer}
+                  totalPages: {type: integer}
+              example: {keyword: ao thun, results: [], page: 0, size: 20, totalElements: 0, totalPages: 0}
+        '400': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/search/suggestions:
+    get:
+      operationId: autocomplete
+      parameters:
+        - $ref: '#/components/parameters/Keyword'
+        - $ref: '#/components/parameters/Category'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 20, default: 10}}
+      description: Under two trimmed characters returns an empty list. Never calls the LLM.
+      responses:
+        '200':
+          description: Visible product names
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keyword, results]
+                properties:
+                  keyword: {type: string}
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties: {id: {type: string}, name: {type: string}}
+              example: {keyword: ao, results: [{id: product-1, name: Áo thun}]}
+        '400': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/search/image:
+    post:
+      operationId: imageSearch
+      parameters:
+        - $ref: '#/components/parameters/Category'
+        - $ref: '#/components/parameters/MinPrice'
+        - $ref: '#/components/parameters/MaxPrice'
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties: {file: {type: string, format: binary}}
+      description: >-
+        Exactly one static JPEG/PNG/WebP file, <=10000000 bytes and <=25000000 pixels.
+        Resizing the short edge to 256 must produce <=1048576 pixels; otherwise INVALID_IMAGE.
+        Total multipart body <=11000000 bytes; compressed bodies are rejected.
+        Query images are discarded. Calibrated dot-product similarity in [-1,1];
+        results below the threshold are omitted, one result per visible product.
+      responses:
+        '200':
+          description: Visually similar products
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results, limit, totalReturned]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      allOf:
+                        - {$ref: '#/components/schemas/Product'}
+                        - type: object
+                          required: [matchedImageUrl, similarity]
+                          properties: {matchedImageUrl: {type: string}, similarity: {type: number, minimum: -1, maximum: 1}}
+                  limit: {type: integer}
+                  totalReturned: {type: integer}
+              example: {results: [], limit: 20, totalReturned: 0}
+        '400': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/search/health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Coarse states only; no URLs, secrets or model paths
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, text, image, synchronization, llm]
+                properties:
+                  status: {type: string, enum: [UP]}
+                  text: {type: string, enum: [ready, unavailable]}
+                  image: {type: string, enum: [ready, unavailable]}
+                  synchronization:
+                    type: string
+                    enum: [ready, degraded]
+                    description: Ready requires a broker check within 5 seconds, no queued or unacknowledged metadata deliveries, zero outstanding metadata/image lag, and empty dead-letter/quarantine queues. Startup, disconnects and unknown lag are degraded.
+                  llm: {type: string, enum: [configured, degraded]}
+components:
+  parameters:
+    Keyword: {name: keyword, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+    Category: {name: categoryId, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
+    MinPrice: {name: minPrice, in: query, schema: {type: integer, minimum: 0, maximum: 9223372036854775807}}
+    MaxPrice: {name: maxPrice, in: query, schema: {type: integer, minimum: 0, maximum: 9223372036854775807}}
+  schemas:
+    Product:
+      type: object
+      required: [id, shopId, name, description, imageUrls, categoryId, currency, minPrice, maxPrice, ratingAverage, ratingCount, soldCount, availableStock, score]
+      properties:
+        id: {type: string}
+        shopId: {type: string}
+        name: {type: string}
+        description: {type: string}
+        imageUrls: {type: array, items: {type: string}, maxItems: 9}
+        categoryId: {type: string}
+        currency: {type: string, const: VND}
+        minPrice: {type: [integer, 'null'], minimum: 0}
+        maxPrice: {type: [integer, 'null'], minimum: 0}
+        ratingAverage: {type: number, minimum: 0, maximum: 5}
+        ratingCount: {type: integer, minimum: 0}
+        soldCount: {type: integer, minimum: 0}
+        availableStock: {type: integer, minimum: 0}
+        score: {type: [number, 'null']}
+    Error:
+      type: object
+      required: [timestamp, status, error, path]
+      properties:
+        timestamp: {type: string, format: date-time, description: UTC ISO 8601}
+        status: {type: integer}
+        path: {type: string}
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string, enum: [INVALID_QUERY, INVALID_IMAGE, IMAGE_TOO_LARGE, RATE_LIMITED, SEARCH_BUSY, SEARCH_UNAVAILABLE, IMAGE_SEARCH_UNAVAILABLE]}
+            message: {type: string}
+  responses:
+    Error:
+      description: Stable error code; validation 400, size 413, busy/rate 429, dependency 503
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+          example: {timestamp: '2026-10-02T00:00:00Z', status: 400, error: {code: INVALID_QUERY, message: Invalid query parameters}, path: /api/ai/search}
