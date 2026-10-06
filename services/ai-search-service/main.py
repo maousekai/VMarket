@@ -123,7 +123,7 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
         except Exception as error:
             log_failure("search_health_degraded", error)
         return {"status": "UP", "text": text, "image": image,
-                "synchronization": "ready" if workers and workers.synchronized and not workers.dead_letters and workers.image_lag_ms == 0 else "degraded",
+                "synchronization": "ready" if workers and workers.synchronization_ready else "degraded",
                 "llm": "configured" if settings.llm_configured else "degraded"}
 
     return app

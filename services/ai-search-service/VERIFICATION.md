@@ -5,6 +5,19 @@ Recorded 2026-10-02 on Windows 11 / Docker Desktop, branch
 verification results; remote CI and PR review are separate acceptance checks.
 Run instructions and configuration are in [README.md](README.md).
 
+## PR review fixes — 2026-10-06
+
+- 22 offline unit checks passed, including malformed-head DLQ replay, bounded
+  quarantine/replay with original bytes/properties, confirmation failure without ACK,
+  and health degradation for backlog, deliveries awaiting ACK, outstanding lag,
+  stale broker checks, disconnects and dead/quarantine queues.
+- Generated system smoke passed against real ES/Rabbit/MinIO/CPU PyTorch:
+  malformed head quarantined, following valid event indexed, original message ID
+  and bytes retained, TTL saved in a header and cleared to retain quarantine evidence.
+- OpenAPI YAML parsing, generated-contract consistency and diff whitespace checks passed.
+- Earlier verification below remains historical; no new real-photo quality,
+  whole-stack memory or cloud-provider acceptance claim.
+
 ## Executed checks
 
 | Check | Observed result |

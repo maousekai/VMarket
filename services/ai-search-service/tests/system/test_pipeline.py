@@ -150,15 +150,25 @@ class PipelineChecks(unittest.TestCase):
                     response = api.post("/api/ai/search/image", files={"file": ("query.png", data.getvalue(), "image/png")})
                     self.assertEqual(response.status_code, 200)
                     self.assertEqual(response.json()["results"][0]["id"], "p1")
-                    # Valid exhausted deliveries replay to Search only, retaining type validation.
+                    # A malformed head is quarantined; the valid delivery behind it still replays.
+                    poison = b"invalid-replay-event"
+                    channel.basic_publish(exchange="", routing_key=queue + ".dead", body=poison,
+                        properties=pika.BasicProperties(delivery_mode=2, message_id="poison-head", expiration="60000"), mandatory=True)
                     channel.basic_publish(exchange="", routing_key=queue + ".dead",
                         body=json.dumps({"eventId": str(uuid.uuid4()), "eventType": "ProductUpdated",
                             "timestamp": int(time.time() * 1000), "payload": {"productId": "p1"}}),
                         properties=pika.BasicProperties(delivery_mode=2), mandatory=True)
                     snapshots["p1"].update(productVersion=1, name="Giày sneaker")
-                    manage.replay_dead(settings, 1)
+                    manage.replay_dead(settings, 2)
                     wait_for(lambda: client.get(index=index, id="p1")["_source"]["productVersion"] == 1)
                     self.assertEqual(channel.queue_declare(queue=queue + ".dead", passive=True).method.message_count, 0)
+                    method, properties, body = channel.basic_get(queue=queue + ".quarantine", auto_ack=False)
+                    self.assertEqual(body, poison)
+                    self.assertEqual(properties.message_id, "poison-head")
+                    self.assertEqual(properties.headers["x-search-quarantine-reason"], "invalid_event")
+                    self.assertIsNone(properties.expiration)
+                    self.assertEqual(properties.headers["x-search-original-expiration"], "60000")
+                    channel.basic_ack(method.delivery_tag)
                     publish("ProductUpdated")
                     wait_for(lambda: client.get(index=index, id="p1")["_source"]["productVersion"] == 1)
                     if os.getenv("SEARCH_LOAD_SECONDS"):
@@ -217,6 +227,7 @@ class PipelineChecks(unittest.TestCase):
                     consumer.join(timeout=5)
                     channel.queue_delete(queue=queue)
                     channel.queue_delete(queue=queue + ".dead")
+                    channel.queue_delete(queue=queue + ".quarantine")
                     channel.exchange_delete(exchange=exchange)
                     channel.exchange_delete(exchange=exchange + ".dlx")
         finally:
@@ -235,6 +246,7 @@ class PipelineChecks(unittest.TestCase):
                 cleanup_channel = cleanup_connection.channel()
                 cleanup_channel.queue_delete(queue=queue)
                 cleanup_channel.queue_delete(queue=queue + ".dead")
+                cleanup_channel.queue_delete(queue=queue + ".quarantine")
                 cleanup_channel.exchange_delete(exchange=exchange)
                 cleanup_channel.exchange_delete(exchange=exchange + ".dlx")
 

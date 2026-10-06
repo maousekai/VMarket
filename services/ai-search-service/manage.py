@@ -1,6 +1,7 @@
 """Explicit local maintenance tools. Never called from public handlers."""
 import argparse
 import asyncio
+import copy
 import hashlib
 import json
 import re
@@ -272,20 +273,37 @@ def replay_dead(settings, limit):
         channel = connection.channel()
         declare_topology(channel, settings)
         channel.confirm_delivery()
-        count = 0
+        count = quarantined = 0
         for _ in range(limit):
-            method, _, body = channel.basic_get(queue=QUEUE + ".dead", auto_ack=False)
+            method, properties, body = channel.basic_get(queue=QUEUE + ".dead", auto_ack=False)
             if method is None:
                 break
-            envelope = json.loads(body)
-            validate_event(body, envelope["eventType"])
+            outgoing = copy.copy(properties)
+            outgoing.delivery_mode = 2
+            outgoing.headers = dict(properties.headers or {})
+            target = QUEUE
+            try:
+                envelope = json.loads(body)
+                event_type = envelope.get("eventType") if isinstance(envelope, dict) else None
+                validate_event(body, event_type)
+            except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as error:
+                log_failure("dead_event_quarantined", error)
+                target = QUEUE + ".quarantine"
+                outgoing.headers["x-search-quarantine-reason"] = "invalid_event"
+                if outgoing.expiration is not None:
+                    outgoing.headers["x-search-original-expiration"] = outgoing.expiration
+                    outgoing.expiration = None  # Preserve evidence instead of expiring it in quarantine.
+            else:
+                outgoing.headers["x-search-event-type"] = event_type
             # Default exchange targets Search's own queue; shared events are never rebroadcast.
-            channel.basic_publish(exchange="", routing_key=QUEUE, body=body, mandatory=True,
-                                  properties=pika.BasicProperties(delivery_mode=2, content_type="application/json",
-                                      headers={"x-search-event-type": envelope["eventType"]}))
+            # Publish failures escape without ACK: closing the connection requeues the original.
+            channel.basic_publish(exchange="", routing_key=target, body=body, mandatory=True, properties=outgoing)
             channel.basic_ack(method.delivery_tag)
-            count += 1
-        print(f"Confirmed replay of {count} Search deliveries")
+            if target == QUEUE:
+                count += 1
+            else:
+                quarantined += 1
+        print(f"Confirmed replay of {count} Search deliveries; quarantined {quarantined} invalid deliveries")
 
 
 async def llm_probe(settings):

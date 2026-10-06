@@ -291,9 +291,22 @@ image work. After three image attempts, manually reset a current visible failed 
 
 Inspect/fix failure causes before replay. Replay validates the original envelope, publishes
 only to Search's own queue via the default exchange, waits for broker confirmation, then
-ACKs the dead delivery. Invalid messages remain on the DLQ; no shared rebroadcast or purge.
-Health exposes coarse text/image/synchronization/LLM states; metadata logs expose lag
-without payloads. Image lag includes pending/failed work, and DLQ presence degrades sync.
+ACKs the dead delivery. Invalid JSON/envelopes move to the durable
+`EVENT_QUEUE.quarantine` queue before ACK, retaining original bytes/message properties
+and adding `x-search-quarantine-reason=invalid_event`. Replay continues past them;
+an original message TTL is saved as `x-search-original-expiration` and cleared from
+quarantine so evidence does not expire.
+`--limit` counts both replayed and quarantined deliveries. A failed/unconfirmed publish
+leaves the original unacknowledged for redelivery. Inspect quarantine through restricted
+broker tooling, fix the cause, and explicitly recover valid events; replay never consumes
+quarantine automatically. No shared rebroadcast or purge.
+Health exposes coarse text/image/synchronization/LLM states. Sync is ready only after a
+broker check within five seconds observes no metadata backlog or delivery awaiting ACK,
+zero outstanding metadata/image lag, and empty DLQ/quarantine queues. Startup, disconnects,
+stale checks and unknown lag are degraded. Metadata completion logs retain delivery latency
+without payloads; the outstanding lag resets to zero only after a confirmed drain. The broker
+does not expose queued timestamps, so queued lag is unknown until delivery, never inferred
+as zero. Image lag includes pending/failed work.
 
 Build from repository root: `docker build -f services/ai-search-service/Dockerfile -t vmarket-ai-search .`.
 For a container use `--memory 512m --memory-swap 512m --read-only`, a writable
@@ -317,8 +330,10 @@ real Elasticsearch integration, and Docker build jobs. The repo env-consistency 
 also runs `scripts/generate-search-contract.py --check`. Real model/system/load tests
 are local opt-in checks; cloud credentials and fixture photos are not required by CI.
 
-The latest local checks passed 18 unit checks, six ES checks and the generated pipeline;
-affected Java verification passed 85 Product, 38 Gateway and 10 shared-events checks.
+The latest local checks passed 22 unit checks and the generated pipeline (2026-10-06);
+the six ES checks passed on the preceding revision.
+Affected Java verification passed 85 Product, 38 Gateway and 10 shared-events checks
+on the preceding revision.
 Detailed evidence and remaining release gates are in [VERIFICATION.md](VERIFICATION.md).
 Real-photo calibration, actual Product-mutation end-to-end smoke, the selected LLM
 probe, full-stack <=7 GB / 200-user qualification and image vulnerability review remain

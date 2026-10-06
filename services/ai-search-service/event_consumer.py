@@ -14,6 +14,7 @@ from contract import RETRY_ATTEMPTS
 from diagnostics import log_failure
 
 EVENT_TYPES = ("ProductCreated", "ProductUpdated", "ProductDeleted")
+SYNC_CHECK_SECONDS = 5
 
 
 def connection_parameters(settings):
@@ -30,6 +31,7 @@ def declare_topology(channel, settings):
     channel.queue_declare(queue=queue, durable=True, arguments={"x-dead-letter-exchange": exchange + ".dlx",
                           "x-dead-letter-routing-key": queue + ".dead"})
     channel.queue_declare(queue=queue + ".dead", durable=True)
+    channel.queue_declare(queue=queue + ".quarantine", durable=True)
     channel.queue_bind(queue=queue + ".dead", exchange=exchange + ".dlx", routing_key=queue + ".dead")
     for event_type in EVENT_TYPES:
         channel.queue_bind(queue=queue, exchange=exchange, routing_key=event_type)
@@ -65,12 +67,17 @@ class Workers:
         self.synchronized = False
         self.metadata_lag_ms = self.image_lag_ms = None
         self.dead_letters = 0
+        self.quarantined = 0
+        self.metadata_backlog = None
+        self.metadata_in_flight = 0
+        self.metadata_checked_at = None
         self.active = None
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="metadata")
         self.threads = []
 
     def handle(self, body, key):
         product_id, stamp = validate_event(body, key)
+        self.metadata_lag_ms = max(0, int(time.time() * 1000) - stamp)
         for attempt in range(RETRY_ATTEMPTS):
             try:
                 snapshot = self.store.fetch_snapshot(product_id)
@@ -86,6 +93,28 @@ class Workers:
                 if self.stop.wait(2**attempt):
                     raise RuntimeError("Stopping")
 
+    @property
+    def synchronization_ready(self):
+        return (self.synchronized and self.metadata_checked_at is not None
+                and time.monotonic() - self.metadata_checked_at <= SYNC_CHECK_SECONDS
+                and self.metadata_backlog == 0 and self.metadata_in_flight == 0
+                and self.metadata_lag_ms == 0 and self.image_lag_ms == 0
+                and self.dead_letters == 0 and self.quarantined == 0)
+
+    def check_synchronization(self, channel):
+        # Unknown/stale broker state fails closed; an empty queue excludes unacknowledged work.
+        self.synchronized = False
+        queue = self.settings.queue
+        self.metadata_backlog = channel.queue_declare(queue=queue, passive=True).method.message_count
+        self.dead_letters = channel.queue_declare(queue=queue + ".dead", passive=True).method.message_count
+        self.quarantined = channel.queue_declare(queue=queue + ".quarantine", passive=True).method.message_count
+        if self.metadata_backlog == 0 and self.metadata_in_flight == 0:
+            self.metadata_lag_ms = 0
+        elif self.metadata_in_flight == 0:
+            self.metadata_lag_ms = None  # The broker count does not expose the oldest queued timestamp.
+        self.metadata_checked_at = time.monotonic()
+        self.synchronized = True
+
     def consume(self):
         QUEUE = self.settings.queue
         while not self.stop.is_set():
@@ -100,6 +129,9 @@ class Workers:
                 channel.basic_qos(prefetch_count=1)
 
                 def on_message(ch, method, properties, body):
+                    self.synchronized = False
+                    self.metadata_in_flight += 1
+                    self.metadata_lag_ms = None
                     key = method.routing_key
                     if method.exchange == "" and key == QUEUE:
                         key = (properties.headers or {}).get("x-search-event-type")
@@ -112,11 +144,13 @@ class Workers:
                         def acknowledge():
                             if not ch.is_open:
                                 return
+                            self.synchronized = False
                             if completed.exception() is None:
                                 ch.basic_ack(method.delivery_tag)
                             else:
                                 log_failure("product_event_failed", completed.exception())
                                 ch.basic_nack(method.delivery_tag, requeue=False)
+                            self.metadata_in_flight -= 1
                         if owner.is_open:
                             try:
                                 owner.add_callback_threadsafe(acknowledge)
@@ -124,14 +158,15 @@ class Workers:
                                 pass
                     future.add_done_callback(finish)
 
+                self.metadata_in_flight = 0
+                self.check_synchronization(channel)
                 channel.basic_consume(queue=QUEUE, on_message_callback=on_message)
-                self.synchronized = True
-                next_check = 0
+                next_check = time.monotonic() + SYNC_CHECK_SECONDS
                 while not self.stop.is_set() and connection.is_open:
                     connection.process_data_events(time_limit=0.5)
                     if time.monotonic() >= next_check:
-                        self.dead_letters = channel.queue_declare(queue=QUEUE + ".dead", passive=True).method.message_count
-                        next_check = time.monotonic() + 5
+                        self.check_synchronization(channel)
+                        next_check = time.monotonic() + SYNC_CHECK_SECONDS
             except Exception as error:
                 self.synchronized = False
                 log_failure("consumer_unavailable", error)
@@ -156,6 +191,7 @@ class Workers:
                 self.image_lag_ms = max(0, int(time.time() * 1000 - oldest)) if oldest is not None else 0
                 self.stop.wait(1)
             except Exception as error:
+                self.image_lag_ms = None
                 log_failure("image_worker_unavailable", error)
                 self.stop.wait(2)
 

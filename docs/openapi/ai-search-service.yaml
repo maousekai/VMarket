@@ -130,7 +130,10 @@ paths:
                   status: {type: string, enum: [UP]}
                   text: {type: string, enum: [ready, unavailable]}
                   image: {type: string, enum: [ready, unavailable]}
-                  synchronization: {type: string, enum: [ready, degraded]}
+                  synchronization:
+                    type: string
+                    enum: [ready, degraded]
+                    description: Ready requires a broker check within 5 seconds, no queued or unacknowledged metadata deliveries, zero outstanding metadata/image lag, and empty dead-letter/quarantine queues. Startup, disconnects and unknown lag are degraded.
                   llm: {type: string, enum: [configured, degraded]}
 components:
   parameters:
