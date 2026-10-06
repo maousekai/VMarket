@@ -24,6 +24,8 @@ spring:
     baseline-on-migrate: true
     baseline-version: 0
   rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
@@ -44,6 +46,11 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  events:
+    confirmed-publication: true
+    listen: ${EVENTS_LISTEN:true}
+    queue: order-service.events
+    bindings: [PaymentSucceeded, PaymentFailed, StockReserved, StockReservationFailed]
   # API noi bo cart-service: doc gio hang khi dat hang (FR-ORDER-01) va xoa gio sau
   # khi tao don thanh cong. Tu PBL6-16, cart-service TU verify JWT va chi tin header
   # X-User-Id khi request kem khoa noi bo -> order-service gui X-Internal-Api-Key

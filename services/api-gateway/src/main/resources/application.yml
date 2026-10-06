@@ -104,6 +104,8 @@ app:
       - /api/auth/sessions
       - /api/auth/sessions/**
       - /api/auth/health
+      # PayOS authenticates this exact endpoint with its signed webhook body.
+      - /api/payments/webhooks/payos
       - /actuator/**
       - /v3/api-docs/**
       - /v3/api-docs.yaml

@@ -24,6 +24,15 @@ public class EventBusProperties {
 	 */
 	private boolean listen = false;
 
+	/** Outbox callers require broker ACK and successful routing before deleting SQL rows. */
+	private boolean confirmedPublication = false;
+	private long confirmTimeoutMillis = 5000;
+
+	public boolean isConfirmedPublication() { return confirmedPublication; }
+	public void setConfirmedPublication(boolean value) { confirmedPublication = value; }
+	public long getConfirmTimeoutMillis() { return confirmTimeoutMillis; }
+	public void setConfirmTimeoutMillis(long value) { confirmTimeoutMillis = value; }
+
 	/**
 	 * Tên queue của service khi bật listen (bắt buộc cấu hình khi {@code listen=true},
 	 * quy ước: {@code <service>.events}).
