@@ -77,6 +77,8 @@ with a different envelope id; these consumers deduplicate by business order/paym
 Live bank/PayOS acceptance, PostgreSQL concurrency and full deployed multi-service verification
 are separate checks; local mocked tests do not establish them.
 
-The existing Order/Payment Dockerfiles only copy the selected service and do not build
-shared-events. Container image CI/deployment needs that update from the infrastructure
-ticket owner. This payment ticket does not edit Dockerfiles or Compose.
+Order/Payment Dockerfiles install the parent POM and internal shared-events library before
+resolving service dependencies. This matches the existing Shop/Product image build pattern.
+The change is limited to these two build recipes; Compose is unchanged. Maven dependency
+resolution and package commands were validated locally; actual image build and smoke checks
+are verified separately by GitHub CI.
