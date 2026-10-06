@@ -46,6 +46,10 @@ public class Order extends BaseEntity {
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 20)
 	private OrderStatus status;
+    @Column(name = "payment_method", nullable = false, length = 10) private String paymentMethod = "COD";
+    @Column(name = "payment_expires_at") private Instant paymentExpiresAt;
+    @Column(name = "stock_reserved", nullable = false) private boolean stockReserved;
+
 
 	@Column(name = "recipient_name", nullable = false, length = 100)
 	private String recipientName;

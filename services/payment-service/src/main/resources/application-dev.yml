@@ -1,0 +1,3 @@
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET:dev-only-secret-0123456789-0123456789-0123456789}

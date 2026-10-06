@@ -58,6 +58,7 @@ public class OrderService {
 	private final OrderRepository orderRepository;
 	private final UserServiceClient userServiceClient;
 	private final CartServiceClient cartServiceClient;
+	private final com.vmarket.order.event.Outbox outbox;
 
 	/**
 	 * Đặt hàng từ giỏ hiện có (FR-ORDER-01).
@@ -101,7 +102,9 @@ public class OrderService {
 			List<CartItemView> cartItems, String idempotencyKey, PlaceOrderRequest request) {
 		Order order = new Order();
 		order.setUserId(userId);
-		order.setStatus(OrderStatus.PENDING);
+		order.setPaymentMethod(request.paymentMethod() == null ? "COD" : request.paymentMethod());
+        order.setStatus("PAYOS".equals(order.getPaymentMethod()) ? OrderStatus.WAITING_PAYMENT : OrderStatus.PENDING);
+        if ("PAYOS".equals(order.getPaymentMethod())) order.setPaymentExpiresAt(java.time.Instant.now().plusSeconds(900));
 		order.setRecipientName(address.recipientName());
 		order.setPhone(address.phone());
 		order.setProvince(address.province());
@@ -134,6 +137,8 @@ public class OrderService {
 		// createdAt trước khi build response — nếu chỉ save() thì id được gán nhưng
 		// createdAt vẫn null cho tới lúc commit (response trả về trước đó sẽ thiếu).
 		Order saved = orderRepository.saveAndFlush(order);
+        outbox.add(com.vmarket.events.EventType.ORDER_PLACED, new com.vmarket.events.OrderPlaced(saved.getId(),
+            saved.getItems().stream().map(i -> new com.vmarket.events.StockItem(i.getProductId(), i.getVariantId(), i.getQuantity())).toList()));
 		log.info("Tạo đơn {} cho userId={}, {} item, tổng {}",
 				saved.getId(), userId, order.getItems().size(), total);
 
@@ -208,12 +213,15 @@ public class OrderService {
 	 */
 	@Transactional
 	public OrderResponse cancelMyOrder(String userId, String orderId) {
-		Order order = mustFindOwn(userId, orderId);
-		if (order.getStatus() != OrderStatus.PENDING) {
+		Order order = orderRepository.lock(orderId).filter(o -> userId.equals(o.getUserId()))
+            .orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
+        if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.WAITING_PAYMENT) {
 			throw ApiException.conflict("ORDER_NOT_CANCELLABLE",
 					"Đơn hàng đang được xử lý, không thể huỷ. Vui lòng liên hệ người bán.");
 		}
-		order.setStatus(OrderStatus.CANCELLED);
+		var previous = order.getStatus();
+        order.setStatus(OrderStatus.CANCELLED);
+        outbox.add(com.vmarket.events.EventType.ORDER_STATUS_CHANGED, new com.vmarket.events.OrderStatusChanged(orderId, previous.name(), "CANCELLED", order.getPaymentMethod()));
 		log.info("Huỷ đơn {} bởi userId={}", orderId, userId);
 		return OrderResponse.from(orderRepository.save(order));
 	}

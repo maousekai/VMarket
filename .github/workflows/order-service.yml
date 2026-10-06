@@ -17,6 +17,7 @@ on:
     paths:
       - "services/order-service/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
+      - "services/shared-events/**"
       - "services/pom.xml"
       - "services/mvnw"
       # Sua chinh CI thi cung phai chay lai de kiem chung
@@ -26,6 +27,7 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/order-service/**"
+      - "services/shared-events/**"
       - "services/pom.xml"
       - "services/mvnw"
       - ".github/workflows/order-service.yml"

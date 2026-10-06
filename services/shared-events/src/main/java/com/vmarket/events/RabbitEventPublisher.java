@@ -1,6 +1,11 @@
 package com.vmarket.events;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
 
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
@@ -27,6 +32,7 @@ public class RabbitEventPublisher implements EventPublisher {
 		this.rabbitTemplate = rabbitTemplate;
 		this.properties = properties;
 		this.json = json;
+		if (properties.isConfirmedPublication()) rabbitTemplate.setMandatory(true);
 	}
 
 	@Override
@@ -39,6 +45,23 @@ public class RabbitEventPublisher implements EventPublisher {
 		messageProperties.setMessageId(eventId);
 		messageProperties.setType(eventType);
 
-		rabbitTemplate.send(properties.getExchange(), eventType, new Message(json.write(envelope), messageProperties));
+		Message message = new Message(json.write(envelope), messageProperties);
+		if (!properties.isConfirmedPublication()) {
+			rabbitTemplate.send(properties.getExchange(), eventType, message);
+			return;
+		}
+		CorrelationData correlation = new CorrelationData(eventId);
+		rabbitTemplate.send(properties.getExchange(), eventType, message, correlation);
+		try {
+			var confirm = correlation.getFuture().get(properties.getConfirmTimeoutMillis(), TimeUnit.MILLISECONDS);
+			// Spring populates returned messages before completing the correlated ACK future.
+			if (!confirm.isAck() || correlation.getReturned() != null)
+				throw new AmqpException("Event publication was rejected or unroutable");
+		} catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			throw new AmqpException("Interrupted while waiting for event confirmation", ex);
+		} catch (ExecutionException | TimeoutException ex) {
+			throw new AmqpException("Event confirmation unavailable", ex);
+		}
 	}
 }

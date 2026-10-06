@@ -8,6 +8,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import com.vmarket.order.entity.Order;
 
 public interface OrderRepository extends JpaRepository<Order, String> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select o from Order o where o.id = :id")
+    Optional<Order> lock(@org.springframework.data.repository.query.Param("id") String id);
+    List<Order> findByStatusAndPaymentExpiresAtLessThanEqual(com.vmarket.order.entity.OrderStatus status, java.time.Instant time, org.springframework.data.domain.Pageable page);
+
 
 	/** "Đơn hàng của tôi" — mới nhất trước (FR-ORDER-02). */
 	List<Order> findByUserIdOrderByCreatedAtDesc(String userId);
