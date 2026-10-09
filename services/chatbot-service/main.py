@@ -23,6 +23,18 @@ from store import ChatStore
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+
+class UpgradeNoise(logging.Filter):
+    """The gateway's HTTP client offers an h2c upgrade on every request. uvicorn serves the request
+    over HTTP/1.1 anyway but logs two warnings each time; drop only those."""
+
+    def filter(self, record):
+        message = record.getMessage()
+        return "Unsupported upgrade request" not in message and "No supported WebSocket library" not in message
+
+
+logging.getLogger("uvicorn.error").addFilter(UpgradeNoise())
+
 BASE = "/api/ai/chat"
 CONVERSATION = re.compile(CONVERSATION_ID)
 

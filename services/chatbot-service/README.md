@@ -7,6 +7,17 @@ tra cứu đơn hàng của chính người hỏi, chuyển tiếp hỗ trợ v�
 - MongoDB `vmarket_chatbot`: `conversations`, `messages`, `knowledge_chunks` (kèm vector), `support_tickets`
 - Hợp đồng API: [docs/openapi/chatbot-service.yaml](../../docs/openapi/chatbot-service.yaml)
 
+## Chạy bằng Docker Compose
+
+```bash
+docker compose up -d --build chatbot-service    # từ gốc repo; kéo theo mongo + mongo-init-replica
+curl http://localhost:8102/api/ai/chat/health   # hoặc qua gateway: http://localhost:8080/api/ai/chat/health
+```
+
+Container đọc cấu hình LLM/embedding từ `services/chatbot-service/.env` nếu file tồn tại; các biến kết nối
+(MongoDB, JWT secret, URL service) do `docker-compose.yml` đặt và luôn ghi đè file đó. order-service và
+product-service chưa container hóa nên chatbot gọi chúng qua `host.docker.internal`.
+
 ## Chạy local
 
 ```bash
@@ -98,5 +109,4 @@ Bất kỳ endpoint OpenAI-compatible `/chat/completions`. Đặt `LLM_BASE_URL`
 - Nhận diện ý định bằng luật từ khóa tiếng Việt; câu hỏi đơn hàng diễn đạt lạ có thể rơi vào RAG.
 - Trạng thái đơn hiển thị theo enum hiện có của order-service (`PENDING`…`CANCELLED`).
 - Phiếu hỗ trợ mới chỉ được tạo và liệt kê (`OPEN`); chưa có luồng xử lý/đóng phiếu và chưa gửi thông báo.
-- Chưa có giao diện chat ở frontend, chưa có block trong `docker-compose.yml`; giới hạn tần suất dùng rate limit
-  theo IP của gateway.
+- Chưa có giao diện chat ở frontend; giới hạn tần suất dùng rate limit theo IP của gateway.

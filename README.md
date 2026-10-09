@@ -329,6 +329,7 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | User      | `curl http://localhost:8082/api/users/health`         | `{"status":"UP",...}`       |
 | User (cần token) | `curl http://localhost:8082/api/users/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Shop      | `curl http://localhost:8083/api/shops/health`         | `{"status":"UP",...}`       |
+| Chatbot   | `curl http://localhost:8102/api/ai/chat/health`       | `{"status":"UP","database":"ready","knowledge":"ready",...}` |
 | Shop (cần token) | `curl http://localhost:8083/api/shops/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
 | Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |

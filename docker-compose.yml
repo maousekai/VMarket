@@ -389,6 +389,48 @@ services:
       retries: 10
       start_period: 40s
 
+  # Chatbot Service (PBL6-18) - FastAPI, chi can MongoDB. Cau hinh LLM/embedding
+  # (tuy chon) doc tu services/chatbot-service/.env neu co; cac bien ket noi ben
+  # duoi luon ghi de file do. Chua co LLM thi chatbot tra loi o che do trich dan.
+  chatbot-service:
+    build:
+      context: ./services/chatbot-service
+    container_name: VMarket-chatbot-service
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    env_file:
+      - path: ./services/chatbot-service/.env
+        required: false
+    environment:
+      MONGO_HOST: ${MONGO_HOST:-mongo}
+      MONGO_PORT: ${MONGO_PORT:-27017}
+      MONGO_DIRECT_CONNECTION: "true"
+      DB_NAME: vmarket_chatbot
+      # Chatbot tu verify token do auth-service ky - PHAI trung AUTH_JWT_SECRET.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      # order-service / product-service chua container hoa -> goi qua may host.
+      ORDER_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8086
+      PRODUCT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8084
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+    ports:
+      - "${CHATBOT_SERVICE_PORT:-8102}:8102"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      # Mongo chay --replSet: chua rs.initiate thi moi lenh ghi deu bi tu choi.
+      mongo-init-replica:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8102/api/ai/chat/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   # API Gateway - diem vao duy nhat cua he thong (browser goi vao localhost:8080).
   # Gateway goi cac business service chay tren may host qua host.docker.internal;
   # auth-service da container hoa nen goi truc tiep qua ten service trong network.
@@ -408,6 +450,7 @@ services:
       AUTH_SERVICE_URL: http://auth-service:8081
       USER_SERVICE_URL: http://user-service:8082
       SHOP_SERVICE_URL: http://shop-service:8083
+      CHATBOT_SERVICE_URL: http://chatbot-service:8102
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
