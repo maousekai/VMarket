@@ -1,0 +1,197 @@
+openapi: 3.1.0
+info:
+  title: VMarket AI Chatbot (FR-BOT-01–04)
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/ai/chat/messages:
+    post:
+      operationId: sendMessage
+      description: >-
+        Public at the gateway: guests may ask general questions. A caller is identified only by a
+        verified `Authorization: Bearer` access token; an invalid or expired token answers 401 and is
+        never treated as a guest. Order questions need a signed-in user and read only that user's
+        orders. Signed-in turns are stored as conversation history; guest turns are not stored.
+      security: [{}, {bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [message]
+              properties:
+                message: {type: string, minLength: 1, maxLength: 1000}
+                conversationId: {type: [string, 'null'], pattern: '^[0-9a-f]{32}$', description: Continue an own conversation}
+            example: {message: 'Chính sách đổi trả như thế nào?'}
+      responses:
+        '200':
+          description: Assistant reply
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Reply'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/chat/conversations:
+    get:
+      operationId: listConversations
+      description: The caller's conversations, most recently updated first (at most 50).
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Own conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversations]
+                properties:
+                  conversations: {type: array, items: {$ref: '#/components/schemas/Conversation'}}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/chat/conversations/{conversationId}/messages:
+    get:
+      operationId: listMessages
+      description: Messages of an own conversation, oldest first (at most 200). Another user's id answers 404.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: conversationId, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
+      responses:
+        '200':
+          description: Conversation history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversationId, messages]
+                properties:
+                  conversationId: {type: string}
+                  messages: {type: array, items: {$ref: '#/components/schemas/Message'}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/chat/tickets:
+    get:
+      operationId: listTickets
+      description: Support tickets created by hand-off. A user sees their own; role ADMIN sees all, with userId.
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Tickets, newest first (at most 100)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tickets]
+                properties:
+                  tickets: {type: array, items: {$ref: '#/components/schemas/Ticket'}}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/chat/health:
+    get:
+      operationId: health
+      description: HTTP 200/UP only proves the process answers; read the per-dependency fields.
+      security: []
+      responses:
+        '200':
+          description: Service state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, database, knowledge, chunks, embedding, llm]
+                properties:
+                  status: {type: string, const: UP}
+                  service: {type: string, const: chatbot-service}
+                  database: {type: string, enum: [ready, unavailable]}
+                  knowledge: {type: string, enum: [ready, empty]}
+                  chunks: {type: integer, minimum: 0}
+                  embedding: {type: string, example: hashing-v1-1024}
+                  llm: {type: string, enum: [configured, extractive]}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    Reply:
+      type: object
+      required: [conversationId, messageId, reply, intent, sources, handoff, loginRequired]
+      properties:
+        conversationId: {type: [string, 'null'], description: Null for guests}
+        messageId: {type: [string, 'null']}
+        reply: {type: string}
+        intent: {type: string, enum: [answer, out_of_scope, order_lookup, handoff, small_talk]}
+        sources: {type: array, items: {$ref: '#/components/schemas/Source'}}
+        handoff:
+          type: object
+          required: [suggested, ticketId]
+          properties:
+            suggested: {type: boolean}
+            ticketId: {type: [string, 'null']}
+        loginRequired: {type: boolean}
+      example:
+        conversationId: null
+        messageId: null
+        reply: Bạn được yêu cầu trả hàng trong vòng 7 ngày kể từ khi đơn ở trạng thái "Đã giao".
+        intent: answer
+        sources: [{id: 'faq:faq#0', title: 'Chính sách đổi trả hàng, trả hàng trong bao lâu', source: faq, docId: faq}]
+        handoff: {suggested: false, ticketId: null}
+        loginRequired: false
+    Source:
+      type: object
+      required: [id, title, source, docId]
+      description: Knowledge chunk the answer is based on. For source catalog, docId is the product id.
+      properties:
+        id: {type: string}
+        title: {type: string}
+        source: {type: string, enum: [faq, catalog]}
+        docId: {type: string}
+    Conversation:
+      type: object
+      required: [id, title, messageCount, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        title: {type: string}
+        messageCount: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    Message:
+      type: object
+      required: [id, role, content, intent, sources, createdAt]
+      properties:
+        id: {type: string}
+        role: {type: string, enum: [user, assistant]}
+        content: {type: string}
+        intent: {type: [string, 'null']}
+        sources: {type: array, items: {$ref: '#/components/schemas/Source'}}
+        createdAt: {type: string, format: date-time}
+    Ticket:
+      type: object
+      required: [id, status, question, conversationId, createdAt]
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [OPEN]}
+        question: {type: string}
+        conversationId: {type: [string, 'null']}
+        createdAt: {type: string, format: date-time}
+        userId: {type: string, description: Only for role ADMIN}
+    Error:
+      type: object
+      required: [timestamp, status, error, path]
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer}
+        path: {type: string}
+        error:
+          type: object
+          required: [code, message]
+          properties: {code: {type: string}, message: {type: string}}
+  responses:
+    Error:
+      description: >-
+        INVALID_REQUEST (400), UNAUTHORIZED (401), CONVERSATION_NOT_FOUND (404),
+        CHAT_UNAVAILABLE (503: LLM, MongoDB or knowledge base unavailable; retry later)
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
