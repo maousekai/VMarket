@@ -50,8 +50,8 @@ share fingerprint/validated/finite-threshold checks; `llm=configured` is not a p
 Use Python 3.12 (a real installation, not the Windows Store placeholder). Commands
 below run in this directory; Maven lives in `../`, Compose in the repository root.
 Before infrastructure commands, copy root `.env.example` to root `.env` if needed
-and set `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` explicitly. Compose interpolates these
-required variables even when the Search profile is not selected. Keep existing credentials.
+and set `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` explicitly. The `minio` container refuses
+to start when either is missing; other Compose commands do not need them. Keep existing credentials.
 
 ```powershell
 python -m venv .venv
@@ -155,8 +155,8 @@ is a compatible MinIO fork, pinned by digest in Compose. Remaining image finding
 documented in verification notes and must be reviewed before deployment. Do not use
 this demo stack as a clean-scan production assertion.
 
-Set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` explicitly in root `.env` before running
-Compose; missing/empty values fail configuration validation. `.env.example` leaves
+Set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` explicitly in root `.env` before starting
+the Search profile; with a missing/empty value the `minio` container exits. `.env.example` leaves
 the password empty. Existing local credentials are preserved, with no implicit fallback.
 Use the local console at `http://localhost:9001` with root `.env` administrator values.
 Create bucket `vmarket-media`, a Search user and a separate fixture-upload user. Example

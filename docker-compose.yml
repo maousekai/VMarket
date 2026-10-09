@@ -231,10 +231,26 @@ services:
     # Maintained MinIO fork; original 2025 community image failed the security scan.
     image: ${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac}
     profiles: ["search"]
+    # Credential bat buoc duoc kiem tra TRONG container, khong dung ${VAR:?} cua
+    # Compose: Compose noi suy ca file ke ca khi profile "search" khong bat, nen
+    # ${VAR:?} lam hong MOI lenh `docker compose` (ke ca `up -d` ha tang nhe) khi
+    # .env chua dat password. Image tu no chi tu choi khi thieu MOT trong hai bien;
+    # thieu CA HAI thi no chay voi credential mac dinh -> phai chan o day.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        if [ -z "$$MINIO_ROOT_USER" ] || [ -z "$$MINIO_ROOT_PASSWORD" ]; then
+          echo "Set MINIO_ROOT_USER and MINIO_ROOT_PASSWORD in root .env" >&2
+          exit 1
+        fi
+        exec /usr/bin/docker-entrypoint.sh "$$@"
+      - minio
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in root .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in root .env}
+      # Khong co gia tri mac dinh: lay nguyen tu .env / shell.
+      MINIO_ROOT_USER:
+      MINIO_ROOT_PASSWORD:
     ports:
       - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"

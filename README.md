@@ -74,10 +74,11 @@ tách rời với các service khác.
 
 ## Chạy hạ tầng (tối ưu tài nguyên)
 
-Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có và đặt rõ
-`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` trước khi chạy Compose. Password trong
-example để trống; Compose từ chối giá trị thiếu/rỗng, kể cả khi chưa chọn profile
-Search. Giữ nguyên `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
+Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. Chỉ khi bật profile Search
+mới cần đặt rõ `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` (password trong example để
+trống): container `minio` từ chối khởi động khi thiếu một trong hai, không có
+credential mặc định. Các lệnh Compose khác không phụ thuộc hai biến này. Giữ nguyên
+`.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
 ```bash
 # Bộ nhẹ mặc định (~1.5GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ
