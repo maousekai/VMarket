@@ -274,6 +274,8 @@ logic của các service Java nằm ở một *reusable workflow* dùng chung (`
 AI Search có [workflow riêng](.github/workflows/ai-search-service.yml): unit/audit,
 Elasticsearch integration và Docker build chạy ở các job tách biệt. Workflow
 env-consistency kiểm tra cả các file được sinh từ Search contract để chặn drift.
+AI Chatbot cũng có [workflow riêng](.github/workflows/chatbot-service.yml): unit/audit,
+MongoDB integration và Docker build.
 
 Mặc định pipeline **chỉ build image, chưa push lên registry** nên chưa cần khai báo
 secret nào. Khi nhóm chốt registry thì bật bằng cách bỏ comment vài dòng — xem
@@ -343,3 +345,6 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 - [OpenAPI AI Search](docs/openapi/ai-search-service.yaml)
 - [Worklog PBL6-21 — nội dung PR và kiểm chứng](worklogs/PBL6-21.md)
 - [Kết quả và giới hạn kiểm chứng AI Search](services/ai-search-service/VERIFICATION.md)
+- [README AI Chatbot Service — FR-BOT-01–04](services/chatbot-service/README.md)
+- [OpenAPI AI Chatbot](docs/openapi/chatbot-service.yaml)
+- [Worklog PBL6-18 — nội dung PR và kiểm chứng](worklogs/PBL6-18.md)
