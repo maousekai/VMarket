@@ -104,6 +104,12 @@ app:
       - /api/auth/sessions
       - /api/auth/sessions/**
       - /api/auth/health
+      # Chatbot (PBL6-18): khach chua dang nhap duoc hoi dap chung (FR-BOT-01) nen
+      # gui tin nhan la public. Gateway KHONG verify token o route nay -> chatbot-service
+      # tu verify Authorization Bearer (cung AUTH_JWT_SECRET) truoc khi tra cuu don
+      # hang / luu lich su. Lich su hoi thoai va phieu ho tro VAN can token o gateway.
+      - /api/ai/chat/messages
+      - /api/ai/chat/health
       - /actuator/**
       - /v3/api-docs/**
       - /v3/api-docs.yaml

@@ -74,10 +74,11 @@ tách rời với các service khác.
 
 ## Chạy hạ tầng (tối ưu tài nguyên)
 
-Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có và đặt rõ
-`MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` trước khi chạy Compose. Password trong
-example để trống; Compose từ chối giá trị thiếu/rỗng, kể cả khi chưa chọn profile
-Search. Giữ nguyên `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
+Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. Chỉ khi bật profile Search
+mới cần đặt rõ `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` (password trong example để
+trống): container `minio` từ chối khởi động khi thiếu một trong hai, không có
+credential mặc định. Các lệnh Compose khác không phụ thuộc hai biến này. Giữ nguyên
+`.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
 ```bash
 # Bộ nhẹ mặc định (~1.5GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ
@@ -274,6 +275,8 @@ logic của các service Java nằm ở một *reusable workflow* dùng chung (`
 AI Search có [workflow riêng](.github/workflows/ai-search-service.yml): unit/audit,
 Elasticsearch integration và Docker build chạy ở các job tách biệt. Workflow
 env-consistency kiểm tra cả các file được sinh từ Search contract để chặn drift.
+AI Chatbot cũng có [workflow riêng](.github/workflows/chatbot-service.yml): unit/audit,
+MongoDB integration và Docker build.
 
 Mặc định pipeline **chỉ build image, chưa push lên registry** nên chưa cần khai báo
 secret nào. Khi nhóm chốt registry thì bật bằng cách bỏ comment vài dòng — xem
@@ -326,6 +329,7 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | User      | `curl http://localhost:8082/api/users/health`         | `{"status":"UP",...}`       |
 | User (cần token) | `curl http://localhost:8082/api/users/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Shop      | `curl http://localhost:8083/api/shops/health`         | `{"status":"UP",...}`       |
+| Chatbot   | `curl http://localhost:8102/api/ai/chat/health`       | `{"status":"UP","database":"ready","knowledge":"ready",...}` |
 | Shop (cần token) | `curl http://localhost:8083/api/shops/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |
 | Frontend  | mở `http://localhost:5173`                            | "Kết nối API thành công"    |
@@ -343,3 +347,6 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 - [OpenAPI AI Search](docs/openapi/ai-search-service.yaml)
 - [Worklog PBL6-21 — nội dung PR và kiểm chứng](worklogs/PBL6-21.md)
 - [Kết quả và giới hạn kiểm chứng AI Search](services/ai-search-service/VERIFICATION.md)
+- [README AI Chatbot Service — FR-BOT-01–04](services/chatbot-service/README.md)
+- [OpenAPI AI Chatbot](docs/openapi/chatbot-service.yaml)
+- [Worklog PBL6-18 — nội dung PR và kiểm chứng](worklogs/PBL6-18.md)
