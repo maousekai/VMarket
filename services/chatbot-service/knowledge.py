@@ -162,12 +162,18 @@ class KnowledgeIndex:
     far beyond that needs an approximate index (Atlas Vector Search or a dedicated vector store).
     """
 
-    def __init__(self, store, embedder, settings):
+    def __init__(self, store, embedder, settings, prepare=None):
         self.store, self.embedder, self.settings = store, embedder, settings
         self.lock = threading.Lock()
         self.state = None  # (chunks, matrix, loaded_at) replaced as a whole, never mutated.
+        # One-time setup (indexes, first FAQ ingest). It stays pending until it succeeds, so a
+        # MongoDB that was down at startup is set up by the first load after it recovers.
+        self.prepare = prepare
 
     def load(self):
+        if self.prepare:
+            self.prepare()
+            self.prepare = None
         chunks = self.store.chunks(self.embedder.fingerprint)
         matrix = (numpy.array([c.pop("embedding") for c in chunks], dtype=numpy.float32)
                   if chunks else numpy.zeros((0, 1), dtype=numpy.float32))

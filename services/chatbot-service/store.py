@@ -4,13 +4,16 @@ Every read of a conversation, message or ticket is filtered by its owner's userI
 cannot reach another user's history by guessing an id.
 """
 import uuid
-from datetime import timedelta
 
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReplaceOne
 
 from schemas import now
 
 MAX_HISTORY = 200
+# A turn's question and reply share createdAt and turnId, so two turns saved in the same millisecond
+# still read back as question, reply, question, reply instead of interleaving.
+MESSAGE_ORDER = [("createdAt", ASCENDING), ("turnId", ASCENDING), ("position", ASCENDING)]
+MESSAGE_ORDER_INDEX = [("conversationId", ASCENDING)] + MESSAGE_ORDER
 
 
 class ChatStore:
@@ -23,7 +26,7 @@ class ChatStore:
 
     def ensure_indexes(self):
         self.conversations.create_index([("userId", ASCENDING), ("updatedAt", DESCENDING)])
-        self.messages.create_index([("conversationId", ASCENDING), ("createdAt", ASCENDING)])
+        self.messages.create_index(MESSAGE_ORDER_INDEX)
         self.knowledge.create_index([("source", ASCENDING)])
         self.tickets.create_index([("userId", ASCENDING), ("createdAt", DESCENDING)])
 
@@ -36,6 +39,9 @@ class ChatStore:
     # ---- KnowledgeChunk ----
     def chunks(self, fingerprint):
         return list(self.knowledge.find({"embedder": fingerprint}))
+
+    def has_chunks(self, fingerprint):
+        return self.knowledge.find_one({"embedder": fingerprint}, {"_id": 1}) is not None
 
     def chunk_hashes(self, source, fingerprint):
         return {c["_id"]: c["contentHash"] for c in
@@ -56,26 +62,23 @@ class ChatStore:
 
     def list_messages(self, user_id, conversation_id, limit=MAX_HISTORY):
         found = self.messages.find({"conversationId": conversation_id, "userId": user_id})
-        return list(found.sort("createdAt", ASCENDING).limit(limit))
+        return list(found.sort(MESSAGE_ORDER).limit(limit))
 
     def recent_messages(self, user_id, conversation_id, limit):
         found = self.messages.find({"conversationId": conversation_id, "userId": user_id})
-        return list(found.sort("createdAt", DESCENDING).limit(limit))[::-1]
+        return list(found.sort([(key, DESCENDING) for key, _ in MESSAGE_ORDER]).limit(limit))[::-1]
 
     def append_exchange(self, user_id, conversation_id, question, answer, create):
         """Store one question/answer pair; `create` opens the conversation on its first message."""
-        # MongoDB keeps milliseconds; the reply is stamped one later so history order is stable.
-        asked = now()
-        asked = asked.replace(microsecond=asked.microsecond // 1000 * 1000)
+        asked, turn = now(), uuid.uuid4().hex
+        base = {"conversationId": conversation_id, "userId": user_id, "turnId": turn, "createdAt": asked}
         if create:
             self.conversations.insert_one({"_id": conversation_id, "userId": user_id, "title": question[:80],
                                            "messageCount": 0, "createdAt": asked, "updatedAt": asked})
-        reply = {"_id": uuid.uuid4().hex, "conversationId": conversation_id, "userId": user_id, "role": "assistant",
-                 "content": answer["reply"], "intent": answer["intent"], "sources": answer["sources"],
-                 "createdAt": asked + timedelta(milliseconds=1)}
+        reply = {**base, "_id": uuid.uuid4().hex, "position": 1, "role": "assistant", "content": answer["reply"],
+                 "intent": answer["intent"], "sources": answer["sources"]}
         self.messages.insert_many([
-            {"_id": uuid.uuid4().hex, "conversationId": conversation_id, "userId": user_id, "role": "user",
-             "content": question, "createdAt": asked}, reply])
+            {**base, "_id": uuid.uuid4().hex, "position": 0, "role": "user", "content": question}, reply])
         self.conversations.update_one({"_id": conversation_id, "userId": user_id},
                                       {"$inc": {"messageCount": 2}, "$set": {"updatedAt": asked}})
         return conversation_id, reply["_id"]

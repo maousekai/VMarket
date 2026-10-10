@@ -38,7 +38,7 @@ class MemoryStore:
 
     def __init__(self):
         self.knowledge, self.conversations, self.messages, self.tickets = {}, {}, [], []
-        self.fail = False
+        self.fail, self.indexed = False, 0
 
     def check(self):
         if self.fail:
@@ -46,6 +46,11 @@ class MemoryStore:
 
     def ensure_indexes(self):
         self.check()
+        self.indexed += 1
+
+    def has_chunks(self, fingerprint):
+        self.check()
+        return any(c["embedder"] == fingerprint for c in self.knowledge.values())
 
     def ping(self):
         self.check()
@@ -89,7 +94,8 @@ class MemoryStore:
             self.conversations[conversation_id] = {"_id": conversation_id, "userId": user_id, "title": question[:80],
                                                    "messageCount": 0, "createdAt": now(), "updatedAt": now()}
         self.conversations[conversation_id]["messageCount"] += 2
-        base = {"conversationId": conversation_id, "userId": user_id, "createdAt": now()}
+        base = {"conversationId": conversation_id, "userId": user_id, "createdAt": now(),
+                "turnId": f"t{len(self.messages)}"}
         self.messages.append({**base, "_id": f"m{len(self.messages)}", "role": "user", "content": question})
         self.messages.append({**base, "_id": f"m{len(self.messages)}", "role": "assistant", "content": answer["reply"],
                               "intent": answer["intent"], "sources": answer["sources"]})
@@ -137,13 +143,15 @@ class OrderService:
 
 class Provider:
     def __init__(self, content="Bạn được trả hàng trong 7 ngày."):
-        self.content, self.bodies, self.fail = content, [], False
+        self.content, self.bodies, self.fail, self.echo = content, [], False, False
 
     def __call__(self, request):
         if self.fail:
             return httpx.Response(500)
         self.bodies.append(json.loads(request.content))
-        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": self.content}}]})
+        question = self.bodies[-1]["messages"][-1]["content"].rsplit("CÂU HỎI: ", 1)[-1]
+        content = "Trả lời cho: " + question if self.echo else self.content
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": content}}]})
 
 
 LLM = dict(llm_url="https://provider.test/v1", llm_model="m", llm_key="k", external_text=True)
@@ -456,6 +464,28 @@ class ChatApi(unittest.TestCase):
         self.assertEqual([m["role"] for m in sent], ["system", "user", "assistant", "user"])
         self.assertNotIn(ORDER, json.dumps(sent, ensure_ascii=False))
 
+    def test_turns_stored_side_by_side_are_still_paired_by_turn(self):
+        h = Harness(**LLM)
+        h.provider.echo = True
+        headers = bearer()
+        first, second = "Chính sách đổi trả như thế nào?", "làm sao để hủy đơn hàng"
+        conversation = h.ask(first, headers).json()["conversationId"]
+        h.ask(second, headers, conversationId=conversation)
+        # Two requests of one conversation written in the same millisecond can read back interleaved.
+        question_a, answer_a, question_b, answer_b = h.store.messages
+        h.store.messages[:] = [question_a, question_b, answer_a, answer_b]
+        h.ask("quên mật khẩu phải làm gì", headers, conversationId=conversation)
+        history = [m["content"] for m in h.provider.bodies[-1]["messages"][1:-1]]
+        self.assertEqual(history, [first, "Trả lời cho: " + first, second, "Trả lời cho: " + second])
+        listed = h.client.get(f"{BASE}/conversations/{conversation}/messages", headers=headers).json()["messages"]
+        self.assertEqual(listed[0]["turnId"], question_a["turnId"])
+        # A turn cut in half by the history window is dropped rather than paired with a stranger.
+        h.store.messages[:] = [answer_a, question_b, answer_b]
+        h.ask("giao hàng thất bại thì sao", headers, conversationId=conversation)
+        history = [m["content"] for m in h.provider.bodies[-1]["messages"][1:-1]]
+        self.assertEqual(history[:2], [second, "Trả lời cho: " + second])
+        self.assertNotIn("Trả lời cho: " + first, history)
+
     def test_handoff_creates_ticket_for_user_and_guides_guest(self):
         h = Harness()
         guest = h.ask("cho tôi gặp nhân viên hỗ trợ").json()
@@ -495,6 +525,21 @@ class ChatApi(unittest.TestCase):
             h.store.fail = True
             self.assertEqual(h.client.get(BASE + "/health").json()["database"], "unavailable")
             self.assertEqual(h.client.get(BASE + "/conversations", headers=bearer()).status_code, 503)
+
+    def test_mongodb_down_at_startup_is_set_up_once_it_recovers(self):
+        settings, store = Settings(jwt_secret=SECRET), MemoryStore()
+        store.fail = True
+        question = {"message": "Chính sách đổi trả như thế nào?"}
+        with TestClient(create_app(settings, store, HashingEmbedder())) as client:
+            self.assertEqual(client.post(BASE + "/messages", json=question).status_code, 503)
+            self.assertEqual((store.indexed, store.knowledge), (0, {}))
+            store.fail = False
+            body = client.post(BASE + "/messages", json=question).json()
+            self.assertEqual(body["intent"], "answer")
+            self.assertIn("7 ngày", body["reply"])
+            self.assertEqual(len(store.knowledge), len(faq_chunks()))
+            client.post(BASE + "/messages", json=question)
+            self.assertEqual(store.indexed, 1)  # Setup ran exactly once, after the recovery.
 
     def test_first_start_loads_bundled_faq(self):
         settings, store = Settings(jwt_secret=SECRET), MemoryStore()

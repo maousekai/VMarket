@@ -45,18 +45,21 @@ def create_app(settings=None, store=None, embedder=None, answerer=None, orders=N
     embedder = embedder or create_embedder(settings)
     answerer = answerer or Answerer(settings)
     orders = orders or OrderClient(settings)
-    index = KnowledgeIndex(store, embedder, settings)
+
+    def prepare():
+        store.ensure_indexes()
+        if not store.has_chunks(embedder.fingerprint):
+            # First start: load the bundled FAQ so the assistant is not empty out of the box.
+            ingest_faq(store, embedder)
+
+    index = KnowledgeIndex(store, embedder, settings, prepare)
     service = ChatService(settings, store, index, answerer, orders)
 
     @asynccontextmanager
     async def lifespan(app):
         try:
-            # MongoDB may start after this service; indexes and chunks are retried on first use.
-            await asyncio.to_thread(store.ensure_indexes)
-            if not await asyncio.to_thread(index.load):
-                # First start: load the bundled FAQ so the assistant is not empty out of the box.
-                await asyncio.to_thread(ingest_faq, store, embedder)
-                await asyncio.to_thread(index.load)
+            # MongoDB may start after this service: a failure here is retried by the next request.
+            await asyncio.to_thread(index.current)
         except Exception as error:
             log_failure("chat_startup_degraded", error)
         yield

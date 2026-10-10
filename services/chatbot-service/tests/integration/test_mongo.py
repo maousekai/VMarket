@@ -2,6 +2,8 @@
 import os
 import unittest
 import uuid
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -52,6 +54,20 @@ class MongoChecks(unittest.TestCase):
         ticket = self.store.create_ticket("alice", conversation, "gặp nhân viên")
         self.assertEqual(self.store.list_tickets("bob"), [])
         self.assertEqual([t["_id"] for t in self.store.list_tickets()], [ticket["_id"]])
+
+    def test_turns_saved_in_the_same_millisecond_do_not_interleave(self):
+        self.store.ensure_indexes()
+        moment = datetime(2026, 10, 9, 12, 0, 0, 123000, tzinfo=timezone.utc)
+        with patch("store.now", return_value=moment):
+            for number in range(4):
+                self.store.append_exchange("alice", "d" * 32, f"hỏi {number}", {"reply": f"đáp {number}", "intent": "answer",
+                                                                                 "sources": []}, number == 0)
+        messages = self.store.list_messages("alice", "d" * 32)
+        self.assertEqual([m["role"] for m in messages], ["user", "assistant"] * 4)
+        for question, reply in zip(messages[::2], messages[1::2]):
+            self.assertEqual((question["turnId"], reply["content"]), (reply["turnId"], question["content"].replace("hỏi", "đáp")))
+        recent = self.store.recent_messages("alice", "d" * 32, 4)
+        self.assertEqual(recent, messages[-4:])
 
     def test_api_end_to_end_on_mongodb(self):
         with TestClient(create_app(self.settings, ChatStore(self.settings))) as client:

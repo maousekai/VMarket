@@ -98,8 +98,13 @@ class ChatService:
         if not turns:
             return []
         messages = await self.call(self.store.recent_messages, user_id, conversation_id, turns * 4)
-        pairs = [(q, a) for q, a in zip(messages, messages[1:])
-                 if q["role"] == "user" and a["role"] == "assistant" and a.get("intent") == "answer"]
+        # Pair by turnId, never by neighbouring rows: concurrent turns can be stored side by side.
+        by_turn = {}
+        for message in messages:
+            if message.get("turnId"):
+                by_turn.setdefault(message["turnId"], {})[message["role"]] = message
+        pairs = [(turn["user"], turn["assistant"]) for turn in by_turn.values()
+                 if "user" in turn and turn.get("assistant", {}).get("intent") == "answer"]
         return [m for pair in pairs[-turns:] for m in pair]
 
     def refusal(self):

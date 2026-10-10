@@ -160,9 +160,10 @@ components:
         updatedAt: {type: string, format: date-time}
     Message:
       type: object
-      required: [id, role, content, intent, sources, createdAt]
+      required: [id, turnId, role, content, intent, sources, createdAt]
       properties:
         id: {type: string}
+        turnId: {type: [string, 'null'], description: Shared by a question and its reply}
         role: {type: string, enum: [user, assistant]}
         content: {type: string}
         intent: {type: [string, 'null']}

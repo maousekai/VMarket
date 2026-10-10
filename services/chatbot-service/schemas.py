@@ -42,7 +42,7 @@ class ChatRequest(BaseModel):
 
 
 def public_message(message):
-    return {"id": message["_id"], "role": message["role"], "content": message["content"],
+    return {"id": message["_id"], "turnId": message.get("turnId"), "role": message["role"], "content": message["content"],
             "intent": message.get("intent"), "sources": message.get("sources", []),
             "createdAt": iso(message["createdAt"])}
 
