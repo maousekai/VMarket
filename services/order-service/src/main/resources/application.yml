@@ -50,7 +50,7 @@ app:
     confirmed-publication: true
     listen: ${EVENTS_LISTEN:true}
     queue: order-service.events
-    bindings: [DeliveryStatusChanged]
+    bindings: [PaymentSucceeded, PaymentFailed, StockReserved, StockReservationFailed, DeliveryStatusChanged]
   # API noi bo cart-service: doc gio hang khi dat hang (FR-ORDER-01) va xoa gio sau
   # khi tao don thanh cong. Tu PBL6-16, cart-service TU verify JWT va chi tin header
   # X-User-Id khi request kem khoa noi bo -> order-service gui X-Internal-Api-Key
