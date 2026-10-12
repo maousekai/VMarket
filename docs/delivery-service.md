@@ -4,7 +4,7 @@
 
 Delivery chạy cổng 8088, dùng PostgreSQL riêng, Redis (cache LocationPing, vé WebSocket và pub/sub giữa các instance), RabbitMQ (sự kiện nghiệp vụ). Flyway quản lý schema. JWT và `INTERNAL_API_KEY` phải trùng Auth/Order. Không dùng root `.env` thay cho `.env` của service.
 
-**Merge PBL6-19 / PR #29 trước khi sử dụng luồng bàn giao.** Order phải có trạng thái thanh toán và `stockReserved` do PBL6-19 quản lý. Khi thiếu hợp đồng này, bàn giao trả `503 PAYMENT_INTEGRATION_REQUIRED`; chưa giữ tồn kho, chưa thanh toán, hoặc đơn đã huỷ đều không được giao. Có thể review/build PBL6-20 độc lập từ `dev`. Khi tích hợp hai PR, giữ cả các binding Payment/Stock của PBL6-19 và DeliveryStatusChanged của PBL6-20, cùng cấu hình publisher confirms và hai outbox. Hai migration Order dùng V3 (payment) và V4 (delivery).
+**Merge PBL6-19 / PR #29 trước PBL6-20.** Nhánh PBL6-20 đã đồng bộ commit `31fc364` của PBL6-19, gồm bản sửa review về hủy đơn và trạng thái link PayOS. Order giữ các binding Payment/Stock và DeliveryStatusChanged trong một khối cấu hình, publisher confirms và hai outbox; migration V3 (payment) và V4 (delivery) không trùng. Order phải có trạng thái thanh toán và `stockReserved`; khi thiếu hợp đồng này, bàn giao trả `503 PAYMENT_INTEGRATION_REQUIRED`. Chưa giữ tồn kho, chưa thanh toán, hoặc đơn đã huỷ đều không được giao. Nhóm review/merge PR #29 riêng trước để phần diff PBL6-20 chỉ còn chức năng giao hàng.
 
 ## API
 
