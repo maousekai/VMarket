@@ -38,7 +38,7 @@ class HttpPayosClientTest {
     @Test void requestIncludesFixedCallbacksDeadlineAndVerifiableSignature() throws Exception {
         server.createContext("/v2/payment-requests", exchange -> {
             sent.set(mapper.readValue(exchange.getRequestBody(), Map.class));
-            var data = Map.<String,Object>of("orderCode", 1000000, "amount", 3000, "paymentLinkId", "a".repeat(32), "checkoutUrl", "https://pay.payos.vn/test", "qrCode", "QR");
+            var data = Map.<String,Object>of("orderCode", 1000000, "amount", 3000, "paymentLinkId", "a".repeat(32), "checkoutUrl", "https://pay.payos.vn/test", "qrCode", "QR", "status", "PENDING");
             respond(exchange, Map.of("code", "00", "data", data, "signature", signature.sign(data, properties.getChecksumKey())));
         }); server.start();
         var expires = Instant.parse("2026-10-06T15:15:00Z");
@@ -63,6 +63,29 @@ class HttpPayosClientTest {
     }
     @Test void tamperedProviderResponseCannotBecomePaymentLink() throws Exception {
         server.createContext("/v2/payment-requests", exchange -> respond(exchange, Map.of("code", "00", "data", Map.of("orderCode", 1000000, "amount", 1), "signature", "0".repeat(64)))); server.start();
+        assertThatThrownBy(() -> client().create(1000000, 3000, Instant.now().plusSeconds(900)))
+            .isInstanceOf(com.vmarket.payment.exception.ApiException.class);
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"CANCELLED", "EXPIRED", "PAID", "PROCESSING"})
+    void recoveredNonPendingLinkNeverExposesAnotherPaymentAttempt(String state) throws Exception {
+        server.createContext("/v2/payment-requests", exchange -> {
+            if (exchange.getRequestMethod().equals("POST")) respond(exchange, Map.of("code", "231"));
+            else {
+                var data = Map.<String,Object>of("orderCode", 1000000, "amount", 3000, "id", "a".repeat(32),
+                    "status", state, "checkoutUrl", "https://pay.payos.vn/old", "qrCode", "old-qr");
+                respond(exchange, Map.of("code", "00", "data", data, "signature", signature.sign(data, properties.getChecksumKey())));
+            }
+        }); server.start();
+        var recovered = client().create(1000000, 3000, Instant.now().plusSeconds(900));
+        assertThat(recovered.status().name()).isEqualTo(state);
+        assertThat(recovered.checkoutUrl()).isNull(); assertThat(recovered.qrCode()).isNull();
+    }
+    @Test void unknownSignedProviderStatusIsRejected() throws Exception {
+        server.createContext("/v2/payment-requests", exchange -> {
+            var data = Map.<String,Object>of("orderCode", 1000000, "amount", 3000, "id", "a".repeat(32), "status", "UNKNOWN");
+            respond(exchange, Map.of("code", "00", "data", data, "signature", signature.sign(data, properties.getChecksumKey())));
+        }); server.start();
         assertThatThrownBy(() -> client().create(1000000, 3000, Instant.now().plusSeconds(900)))
             .isInstanceOf(com.vmarket.payment.exception.ApiException.class);
     }

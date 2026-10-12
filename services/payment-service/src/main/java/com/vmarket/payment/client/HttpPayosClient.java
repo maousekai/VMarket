@@ -36,11 +36,17 @@ public class HttpPayosClient implements PayosClient {
         if (data.path("orderCode").asLong() != code || data.path("amount").asLong() != amount) throw unavailable();
         String linkId = data.path("paymentLinkId").asString("");
         if (linkId.isBlank()) linkId = data.path("id").asString("");
+        if (linkId.isBlank() || linkId.length() > 64) throw unavailable();
+        Status status;
+        try { status = Status.valueOf(data.path("status").asString("")); }
+        catch (IllegalArgumentException ex) { throw unavailable(); }
+        // Only a signed PENDING link can be offered for another payment attempt.
+        if (status != Status.PENDING) return new Link(linkId, null, null, status);
         String checkout = data.path("checkoutUrl").asString("");
         if (checkout.isBlank() && linkId.matches("[a-fA-F0-9]{32}")) checkout = "https://pay.payos.vn/web/" + linkId;
         if (linkId.isBlank() || checkout.isBlank()) throw unavailable();
         String qr = data.path("qrCode").asString("");
-        return new Link(linkId, checkout, qr.isBlank() ? null : qr);
+        return new Link(linkId, checkout, qr.isBlank() ? null : qr, status);
     }
     @Override public void cancel(long code) {
         var response = call("POST", "/v2/payment-requests/" + code + "/cancel", Map.of("cancellationReason", "Payment deadline expired"));

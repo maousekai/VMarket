@@ -23,7 +23,8 @@ public class PaymentStore {
     private final PaymentOrderStateInitializer stateInitializer;
     @Transactional
     public Long reserve(String buyer, OrderView order) {
-        orderState(order.id());
+        var state = orderState(order.id());
+        if (state.isCancelled()) throw ApiException.conflict("ORDER_NOT_PAYABLE", "Đơn đã hủy, không thể tạo thanh toán");
         var existing = payments.lockByOrderId(order.id());
         if (existing.isPresent()) {
             if (!buyer.equals(existing.get().getBuyerId())) throw ApiException.notFound("PAYMENT_NOT_FOUND", "Không tìm thấy giao dịch");
@@ -58,7 +59,22 @@ public class PaymentStore {
         if (!"CREATED".equals(p.getStatus())) return PaymentResponse.from(p);
         if (!clock.instant().isBefore(p.getExpiresAt())) { expire(p); return PaymentResponse.from(p); }
         var link = client.create(p.getId(), p.getAmount(), p.getExpiresAt());
-        p.setPaymentLinkId(link.paymentLinkId()); p.setCheckoutUrl(link.checkoutUrl()); p.setQrCode(link.qrCode()); p.setStatus("PENDING");
+        p.setPaymentLinkId(link.paymentLinkId());
+        switch (link.status()) {
+            case PENDING -> {
+                p.setCheckoutUrl(link.checkoutUrl()); p.setQrCode(link.qrCode()); p.setStatus("PENDING");
+            }
+            case CANCELLED, EXPIRED -> {
+                p.setCheckoutUrl(null); p.setQrCode(null); p.setStatus(link.status().name());
+                outbox.add(EventType.PAYMENT_FAILED, new PaymentFailed(p.getOrderId(), link.status().name()));
+            }
+            case PAID, PROCESSING -> {
+                // Preserve this signed provider state durably. Only a verified success webhook
+                // with a matching bank reference may emit PaymentSucceeded or request a refund.
+                p.setCheckoutUrl(null); p.setQrCode(null); p.setStatus("RECONCILING");
+                p.setReconciliationRequired(true);
+            }
+        }
         return PaymentResponse.from(p);
     }
     @Transactional

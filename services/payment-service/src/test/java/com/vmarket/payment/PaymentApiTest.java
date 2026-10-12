@@ -174,6 +174,54 @@ class PaymentApiTest {
         mvc.perform(post("/api/payments").header("Authorization", token("alice", "BUYER")).contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("orderId", ORDER)))).andExpect(status().isConflict());
         verifyNoInteractions(payos);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"PAYOS", "COD"})
+    void cancellationAfterOrderSnapshotPreventsFirstReservation(String method) throws Exception {
+        var snapshot = new OrderClient.OrderView(ORDER, method.equals("PAYOS") ? "WAITING_PAYMENT" : "PENDING",
+            new BigDecimal("3000"), method, method.equals("PAYOS") ? now.plusSeconds(900) : null, true);
+        when(orders.getOwn(anyString(), eq(ORDER))).thenAnswer(invocation -> {
+            // The cancellation event commits after the snapshot was read, before reserve locks it.
+            store.cancelled(ORDER);
+            return snapshot;
+        });
+        mvc.perform(post("/api/payments").header("Authorization", token("alice", "BUYER"))
+            .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("orderId", ORDER))))
+            .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("ORDER_NOT_PAYABLE"));
+        assertThat(payments.count()).isZero(); assertThat(states.findById(ORDER).orElseThrow().isCancelled()).isTrue();
+        verifyNoInteractions(payos);
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"CANCELLED", "EXPIRED"})
+    void recoveredTerminalProviderLinkIsPersistedAndFailsOrderOnce(String state) throws Exception {
+        doReturn(new PayosClient.Link("test-link", null, null, PayosClient.Status.valueOf(state)))
+            .when(payos).create(anyLong(), anyLong(), any());
+        for (int i = 0; i < 2; i++) mvc.perform(post("/api/payments").header("Authorization", token("alice", "BUYER"))
+            .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("orderId", ORDER))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value(state))
+            .andExpect(jsonPath("$.checkoutUrl").isEmpty()).andExpect(jsonPath("$.qrAvailable").value(false));
+        assertThat(payments.findByOrderId(ORDER).orElseThrow().getStatus()).isEqualTo(state);
+        assertThat(events.findAll()).extracting(OutboxEvent::getEventType).containsExactly("PaymentFailed");
+        verify(payos, times(1)).create(anyLong(), anyLong(), any());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"PAID", "PROCESSING"})
+    void recoveredPaidProviderLinkRequiresWebhookBeforeSuccess(String state) throws Exception {
+        doReturn(new PayosClient.Link("test-link", null, null, PayosClient.Status.valueOf(state)))
+            .when(payos).create(anyLong(), anyLong(), any());
+        for (int i = 0; i < 2; i++) mvc.perform(post("/api/payments").header("Authorization", token("alice", "BUYER"))
+            .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("orderId", ORDER))))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("RECONCILING"))
+            .andExpect(jsonPath("$.reconciliationRequired").value(true)).andExpect(jsonPath("$.checkoutUrl").isEmpty());
+        var p = payments.findByOrderId(ORDER).orElseThrow();
+        assertThat(p.getPaidAt()).isNull(); assertThat(events.count()).isZero();
+        verify(payos, times(1)).create(anyLong(), anyLong(), any());
+        mvc.perform(get("/api/payments/admin/reconciliations").header("Authorization", token("admin", "ADMIN")))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        var data = data(p.getId()); webhook(data, signature.sign(data, properties.getChecksumKey()));
+        webhook(data, signature.sign(data, properties.getChecksumKey()));
+        assertThat(payments.findById(p.getId()).orElseThrow().isReconciliationRequired()).isFalse();
+        assertThat(events.findAll()).extracting(OutboxEvent::getEventType).containsExactly("PaymentSucceeded");
+    }
     @Test void codDoesNotContactProvider() throws Exception {
         when(orders.getOwn(anyString(), eq(ORDER))).thenReturn(new OrderClient.OrderView(ORDER, "PENDING", new BigDecimal("3000"), "COD", null, false));
         mvc.perform(post("/api/payments").header("Authorization", token("alice", "BUYER")).contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(Map.of("orderId", ORDER))))

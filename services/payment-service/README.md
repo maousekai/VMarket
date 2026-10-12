@@ -40,14 +40,22 @@ All APIs require an auth-service bearer JWT except health, docs and the signed w
    Pending provider cancellation retries separately. Late payments create a pending refund;
    they do not revive canceled orders. Retryable failures can reuse the same link before expiry.
 
+Payment creation checks the locked cancellation tombstone even when the Order API snapshot
+was read before a cancellation event. A canceled order cannot create its first PayOS/COD record.
+Duplicate-code recovery verifies the signed provider status as well as code and amount.
+Only `PENDING` returns a checkout URL/QR. `CANCELLED`/`EXPIRED` persist a terminal payment
+and emit `PaymentFailed` once. Signed `PAID`/`PROCESSING` enter `RECONCILING` with
+`reconciliationRequired=true`, no payment link and no success event until a verified webhook
+supplies the bank reference. Retrying creation does not offer another payment attempt.
+
 `GET /api/payments?page=0&size=20` and `GET /api/payments/{id}` show only the caller's history.
 Admin-only APIs:
 
 - `GET /api/payments/admin/refunds`: pending refund queue, paginated.
-- `GET /api/payments/admin/reconciliations`: persistent queue of canceled/expired
-  payments for which PayOS reports signed `PAID` but the bank webhook is missing.
-  These remain flagged `reconciliationRequired=true` with scheduled provider retries;
-  a verified webhook records the bank reference/amount and creates a refund once.
+- `GET /api/payments/admin/reconciliations`: persistent queue of payments awaiting
+  the bank webhook after signed provider `PAID`/`PROCESSING`, including late canceled/expired
+  payments. Canceled links keep their scheduled cancellation retries. A verified webhook
+  clears the flag and records success, or creates a refund once if the order expired/canceled.
 - `POST /api/payments/admin/{paymentId}/refunds` with `reason`: record a manual refund
   for an already paid transaction. Admin must verify cancellation/accepted return evidence.
 - `PUT /api/payments/admin/refunds/{refundId}/confirm` with `transferReference`:
