@@ -1,13 +1,12 @@
 package com.vmarket.delivery;
-
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-@SpringBootApplication
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
+@ConfigurationPropertiesScan
+@EnableScheduling
 public class DeliveryServiceApplication {
-
-	public static void main(String[] args) {
-		SpringApplication.run(DeliveryServiceApplication.class, args);
-	}
-
+    public static void main(String[] args) { SpringApplication.run(DeliveryServiceApplication.class, args); }
 }

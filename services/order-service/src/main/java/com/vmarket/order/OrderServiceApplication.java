@@ -14,6 +14,7 @@ import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoCon
  * mặc định.
  */
 @SpringBootApplication(exclude = { UserDetailsServiceAutoConfiguration.class })
+@org.springframework.scheduling.annotation.EnableScheduling
 @ConfigurationPropertiesScan
 public class OrderServiceApplication {
 

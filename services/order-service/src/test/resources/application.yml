@@ -17,6 +17,11 @@ spring:
     enabled: false
 
 app:
+  jobs:
+    enabled: false
+  delivery-outbox-enabled: false
+  events:
+    listen: false
   cors:
     allowed-origins: http://localhost:5173
   cart-service:

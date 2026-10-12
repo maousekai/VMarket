@@ -208,7 +208,8 @@ public class OrderService {
 	 */
 	@Transactional
 	public OrderResponse cancelMyOrder(String userId, String orderId) {
-		Order order = mustFindOwn(userId, orderId);
+		Order order = orderRepository.lock(orderId).filter(o -> userId.equals(o.getUserId()))
+            .orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
 		if (order.getStatus() != OrderStatus.PENDING) {
 			throw ApiException.conflict("ORDER_NOT_CANCELLABLE",
 					"Đơn hàng đang được xử lý, không thể huỷ. Vui lòng liên hệ người bán.");

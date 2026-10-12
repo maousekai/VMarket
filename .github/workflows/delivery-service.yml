@@ -18,6 +18,7 @@ on:
       - "services/delivery-service/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
       - "services/pom.xml"
+      - "services/shared-events/**"
       - "services/mvnw"
       # Sua chinh CI thi cung phai chay lai de kiem chung
       - ".github/workflows/delivery-service.yml"
@@ -27,6 +28,7 @@ on:
     paths:
       - "services/delivery-service/**"
       - "services/pom.xml"
+      - "services/shared-events/**"
       - "services/mvnw"
       - ".github/workflows/delivery-service.yml"
       - ".github/workflows/service-ci.yml"
