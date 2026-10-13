@@ -4,6 +4,9 @@ from contextlib import asynccontextmanager
 import jwt
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException
+from starlette.responses import JSONResponse
 
 from event_consumer import Consumer
 from schemas import RecommendationError, error_response, valid_id
@@ -21,7 +24,7 @@ def authenticated_user(request, secret):
         if len(values) != 1 or not values[0].startswith("Bearer "):
             raise ValueError("Invalid authorization")
         claims = jwt.decode(values[0][7:], secret, algorithms=["HS256"], issuer="auth-service",
-                            options={"require": ["exp", "sub", "iss"]})
+                            leeway=30, options={"require": ["exp", "sub", "iss"]})
         if not valid_id(claims["sub"]):
             raise ValueError("Invalid subject")
         return claims["sub"]
@@ -32,7 +35,10 @@ def authenticated_user(request, secret):
 def parameters(request, category=False):
     pairs = list(request.query_params.multi_items())
     allowed = {"limit", "category_id"} if category else {"limit"}
-    if any(k not in allowed for k, _ in pairs) or len({k for k, _ in pairs}) != len(pairs):
+    if any(k in {"user_id", "category_id"} and k not in allowed for k, _ in pairs):
+        raise RecommendationError(400, "INVALID_QUERY", "Invalid query parameters")
+    pairs = [(k, v) for k, v in pairs if k in allowed]
+    if len({k for k, _ in pairs}) != len(pairs):
         raise RecommendationError(400, "INVALID_QUERY", "Invalid query parameters")
     values = dict(pairs)
     limit = values.get("limit", "12")
@@ -71,6 +77,18 @@ def create_app(settings=None, store=None, run_consumer=True):
     async def recommendation_error(request, error):
         return error_response(error, request.url.path)
 
+    @app.exception_handler(HTTPException)
+    async def http_error(request, error):
+        code = "METHOD_NOT_ALLOWED" if error.status_code == 405 else "NOT_FOUND"
+        response = error_response(RecommendationError(error.status_code, code, str(error.detail)), request.url.path)
+        if error.headers:
+            response.headers.update(error.headers)
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, error):
+        return error_response(RecommendationError(422, "INVALID_QUERY", "Invalid request parameters"), request.url.path)
+
     def recommend(**options):
         try:
             return store.recommendations(**options)
@@ -96,8 +114,11 @@ def create_app(settings=None, store=None, run_consumer=True):
 
     @app.get(BASE + "/health")
     def health():
-        return {"status": "UP", "service": "recommendation-service", **store.health(),
-                "rabbitmq": "ready" if consumer and consumer.connected else "unavailable"}
+        state = store.health()
+        ready = state["postgres"] == "ready"
+        return JSONResponse({"status": "UP" if ready else "DOWN", "service": "recommendation-service", **state,
+                "rabbitmq": "ready" if consumer and consumer.connected else "unavailable",
+                "rabbitmqDeadLetters": consumer.dead_letters if consumer else None}, status_code=200 if ready else 503)
 
     return app
 

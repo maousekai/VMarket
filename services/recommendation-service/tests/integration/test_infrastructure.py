@@ -11,7 +11,7 @@ import unittest
 import uuid
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.parse import urlsplit, parse_qs
 
 import httpx
@@ -25,7 +25,7 @@ from main import BASE, create_app
 from manage import seed
 from schemas import Snapshot
 from settings import Settings
-from store import Store
+from store import RANK_FIELDS, Store
 from tests.fixtures import snapshot
 
 ENABLED = os.environ.get("RECOMMENDATION_INTEGRATION") == "true"
@@ -166,6 +166,8 @@ class InfrastructureTest(unittest.TestCase):
         try:
             channel = connection.channel()
             await_true(lambda: channel.queue_declare(queue=self.settings.queue + ".dead", passive=True).method.message_count == 1)
+            self.consumer.connection.add_callback_threadsafe(self.consumer.check_dead_letters)
+            await_true(lambda: self.consumer.dead_letters == 1)
         finally:
             connection.close()
 
@@ -206,8 +208,33 @@ class InfrastructureTest(unittest.TestCase):
         self.assertEqual(seed(self.store), 2)
         self.assertEqual(next(p for p in self.store.products() if p["id"] == "p1")["name"], "Newer")
         self.start_consumer()
-        with self.assertRaisesRegex(RuntimeError, "Stop"):
-            seed(self.store)
+        self.assertEqual(seed(self.store), 2)
+        self.assertEqual(next(p for p in self.store.products() if p["id"] == "p1")["name"], "Newer")
+
+    def test_parent_category_sold_out_seed_projection_and_retention(self):
+        for i in range(80):
+            self.store.apply(Snapshot.model_validate(snapshot(str(i), soldCount=i,
+                categoryPath=["fashion", "clothing"], description="Cotton " * 1000)))
+        self.store.apply(Snapshot.model_validate(snapshot("sold-out", availableStock=0,
+                                                        categoryPath=["fashion", "clothing"])))
+        self.assertEqual(len(self.store.products("fashion")), 80)
+        projected = list(self.store.ranking_products("fashion", popularity=True))
+        self.assertEqual(len(projected), 50)
+        self.assertEqual(set(projected[0]), set(RANK_FIELDS))
+        self.assertEqual(projected[0]["id"], "79")
+        self.assertEqual(len(self.store.recommendations(seed_id="sold-out", limit=50)), 50)
+        self.assertEqual(len(self.store.recommendations(category="fashion", limit=12)), 12)
+        self.assertEqual(len(self.store.recommendations(category="fashion", limit=50)), 50)
+        old, recent = str(uuid.uuid4()), str(uuid.uuid4())
+        self.store.apply(Snapshot.model_validate(snapshot(version=4)), old)
+        self.store.apply(Snapshot.model_validate(snapshot(version=3)), recent)
+        with self.store.pool.connection() as conn:
+            conn.execute("UPDATE processed_event SET processed_at = CURRENT_TIMESTAMP - INTERVAL '31 days' WHERE event_id = %s", (old,))
+        self.assertEqual(self.store.prune_receipts(), 1)
+        self.assertFalse(self.store.seen(old))
+        self.assertTrue(self.store.seen(recent))
+        self.store.apply(Snapshot.model_validate(snapshot(version=1)), old)
+        self.assertEqual(next(p for p in self.store.products() if p["id"] == "p1")["productVersion"], 4)
 
     def test_api_cache_and_demo_latency(self):
         seed(self.store)
@@ -229,6 +256,10 @@ class InfrastructureTest(unittest.TestCase):
             self.assertEqual(client.get(BASE + "/for-you").status_code, 200)
             self.store.cache.close()
             self.store.cache = actual_cache
+            with patch.object(self.store.pool, "connection", side_effect=psycopg.OperationalError("offline")):
+                health = client.get(BASE + "/health")
+                self.assertEqual(health.status_code, 503)
+                self.assertEqual(health.json()["status"], "DOWN")
             actual_products = self.store.products
             self.store.products = Mock(side_effect=psycopg.OperationalError("offline"))
             self.assertEqual(client.get(BASE + "/for-you").status_code, 503)

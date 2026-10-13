@@ -1,4 +1,4 @@
-"""Run Flyway or seed catalog snapshots during a paused-writer maintenance window."""
+"""Run Flyway, prune 30-day receipts, or seed catalog snapshots while Product writers are paused."""
 import argparse
 import os
 import subprocess
@@ -16,9 +16,6 @@ def seed(store):
     try:
         channel = connection.channel()
         declare_topology(channel, store.settings)
-        state = channel.queue_declare(queue=store.settings.queue, passive=True).method
-        if state.consumer_count:
-            raise RuntimeError("Stop the recommendation consumer before seeding")
         count, page = 0, 0
         while True:
             response = store.client.get("/api/products/internal/search-snapshots", params={"page": page, "size": 100})
@@ -40,9 +37,8 @@ def seed(store):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["migrate", "seed"])
+    parser.add_argument("command", choices=["migrate", "seed", "cleanup"])
     parser.add_argument("--writers-paused", action="store_true")
-    parser.add_argument("--consumer-stopped", action="store_true")
     args = parser.parse_args()
     settings = Settings.load()
     if args.command == "migrate":
@@ -52,14 +48,17 @@ def main():
         subprocess.run([wrapper, "-f", "recommendation-service/pom.xml", "flyway:migrate"],
                        cwd=ROOT.parent, env=env, check=True)
     else:
-        if not args.writers_paused or not args.consumer_stopped:
-            parser.error("seed requires --writers-paused --consumer-stopped")
-        if not settings.internal_key:
+        if args.command == "seed" and not args.writers_paused:
+            parser.error("seed requires --writers-paused: Product export uses offset pagination")
+        if args.command == "seed" and not settings.internal_key:
             parser.error("Set INTERNAL_API_KEY")
         store = Store(settings)
         try:
             store.start()
-            print(f"Seeded {seed(store)} snapshots; start the consumer to drain queued catalog events.")
+            if args.command == "cleanup":
+                print(f"Removed {store.prune_receipts()} receipts older than 30 days.")
+            else:
+                print(f"Seeded {seed(store)} snapshots; keep the consumer running to drain queued catalog events.")
         finally:
             store.close()
 

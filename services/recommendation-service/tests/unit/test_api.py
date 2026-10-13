@@ -1,6 +1,8 @@
 import json
 import time
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -10,13 +12,15 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
 from main import BASE, create_app
-from store import Store
+from store import RANK_FIELDS, Store
 from tests.fixtures import settings, snapshot
 
 
 class MemoryStore(Store):
     def __init__(self, rows):
         self.settings = settings()
+        self.rank_locks = [threading.Lock() for _ in range(32)]
+        self.cache_retry_at = 0
         self.rows = {row["id"]: row for row in rows}
         self.cached = {}
         self.cache = Mock()
@@ -33,10 +37,13 @@ class MemoryStore(Store):
     def health(self):
         return {"postgres": "ready", "redis": "ready", "catalog": {"items": len(self.rows), "lastRefreshAt": None}}
 
-    def products(self, category=None, ids=None):
+    def products(self, category=None, ids=None, *, in_stock=True):
         return [row for row in self.rows.values() if row["catalogVisible"] and not row["deleted"]
-                and row["availableStock"] > 0 and (category is None or row["categoryId"] == category)
+                and (not in_stock or row["availableStock"] > 0) and (category is None or category in row["categoryPath"])
                 and (ids is None or row["id"] in ids)]
+
+    def ranking_products(self, category=None, *, popularity=False):
+        return ({field: row[field] for field in RANK_FIELDS} for row in self.products(category))
 
 
 class ApiTest(unittest.TestCase):
@@ -89,15 +96,19 @@ class ApiTest(unittest.TestCase):
 
     def test_invalid_queries_and_seeds(self):
         for query in ("user_id=another", "limit=0", "limit=51", "limit=-1", "limit=1.5", "limit=１２",
-                      "limit=1&limit=2", "category_id=", "category_id=a&category_id=b", "unexpected=1"):
+                      "limit=1&limit=2", "category_id=", "category_id=a&category_id=b"):
             response = self.client.get(BASE + "/for-you?" + query)
             self.assertEqual(response.status_code, 400, query)
             self.assertEqual(response.json()["status"], 400)
-        for seed in ("missing", "hidden", "stock"):
+        for seed in ("missing", "hidden"):
             self.assertEqual(self.client.get(BASE + "/similar/" + seed).status_code, 404)
         self.assertEqual(self.client.get(BASE + "/similar/seed?category_id=clothing").status_code, 400)
         self.assertEqual(self.client.get(BASE + "/similar/%20").status_code, 400)
         self.assertEqual(self.client.get(BASE + "/for-you?category_id=unknown").json()["items"], [])
+        self.assertEqual(self.client.get(BASE + "/for-you?_=123&unexpected=1").status_code, 200)
+        alternatives = self.client.get(BASE + "/similar/stock").json()["items"]
+        self.assertTrue(alternatives)
+        self.assertTrue(all(p["availableStock"] > 0 and p["id"] != "stock" for p in alternatives))
 
     def test_similarity_cache_freshness_and_dependency_failures(self):
         path = BASE + "/similar/seed?limit=2"
@@ -109,7 +120,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual([p["id"] for p in items], ["popular"])
         self.assertEqual(items[0]["name"], "Updated name")
         self.store.rows["seed"]["availableStock"] = 0
-        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.client.get(path).status_code, 200)
         self.store.cache.get.side_effect = ConnectionError("not a RedisError")
         self.assertEqual(self.client.get(BASE + "/for-you").status_code, 503)
         self.store.cache.get.side_effect = __import__("redis").ConnectionError()
@@ -119,6 +130,56 @@ class ApiTest(unittest.TestCase):
         result = self.client.get(BASE + "/for-you")
         self.assertEqual(result.status_code, 503)
         self.assertNotIn("private connection detail", result.text)
+
+    def test_parent_categories_cache_sharing_and_concurrent_misses(self):
+        self.store.rows = {str(i): snapshot(str(i), soldCount=i, categoryPath=["fashion", "clothing"])
+                           for i in range(80)}
+        self.store.ranking_products = Mock(wraps=self.store.ranking_products)
+        barrier = threading.Barrier(6)
+        def request(limit):
+            barrier.wait()
+            return self.store.recommendations(category="fashion", limit=limit)
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results = list(executor.map(request, [1, 2, 10, 12, 20, 50]))
+        self.assertEqual([len(r) for r in results], [1, 2, 10, 12, 20, 50])
+        self.assertEqual(results[0][0]["id"], "79")
+        self.store.ranking_products.assert_called_once()
+        self.store.cache.setex.assert_called_once()
+        self.assertEqual(len(json.loads(next(iter(self.store.cached.values())))), 50)
+
+    def test_clock_skew_health_and_framework_errors(self):
+        @self.client.app.get("/validation-test")
+        def validation_test(count: int):
+            return count
+        self.assertEqual(self.client.get("/validation-test").json()["status"], 422)
+        self.assertEqual(self.client.get("/validation-test").json()["error"]["code"], "INVALID_QUERY")
+        for expiry, expected in ((time.time() - 10, 200), (time.time() - 60, 401)):
+            response = self.client.get(BASE + "/for-you", headers={"Authorization": "Bearer " + self.token(exp=expiry)})
+            self.assertEqual(response.status_code, expected)
+        self.store.health = Mock(return_value={"postgres": "unavailable", "redis": "ready",
+                                             "catalog": {"items": None, "lastRefreshAt": None}})
+        response = self.client.get(BASE + "/health")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["status"], "DOWN")
+        self.store.health.return_value["postgres"] = "ready"
+        self.store.health.return_value["redis"] = "unavailable"
+        self.assertEqual(self.client.get(BASE + "/health").status_code, 200)
+        for response, code in ((self.client.get(BASE + "/unknown"), "NOT_FOUND"),
+                               (self.client.post(BASE + "/for-you"), "METHOD_NOT_ALLOWED")):
+            self.assertEqual(response.json()["error"]["code"], code)
+            self.assertEqual(response.json()["status"], response.status_code)
+            self.assertNotIn("detail", response.json())
+
+    def test_redis_outage_backoff(self):
+        self.store.cache.get.side_effect = __import__("redis").ConnectionError()
+        for _ in range(3):
+            self.assertEqual(self.client.get(BASE + "/for-you").status_code, 200)
+        self.store.cache.get.assert_called_once()
+        self.store.cache.setex.assert_not_called()
+        self.store.cache_retry_at = 0
+        self.store.cache.get.side_effect = self.store.cached.get
+        self.assertEqual(self.client.get(BASE + "/for-you").status_code, 200)
+        self.store.cache.setex.assert_called_once()
 
     def test_corrupt_cache_and_empty_catalog(self):
         self.client.get(BASE + "/for-you")

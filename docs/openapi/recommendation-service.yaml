@@ -7,7 +7,7 @@ servers: [{url: 'http://localhost:8080'}]
 paths:
   /api/ai/recommendations/for-you:
     get:
-      description: Optional bearer auth. Invalid supplied tokens return 401. Only category_id and limit are accepted.
+      description: Optional bearer auth with 30 seconds of clock skew. Invalid supplied tokens return 401; clients should refresh or omit them for guest access. category_id matches the leaf and ancestor categories in categoryPath. Unknown query parameters are ignored; identity overrides and repeated supported parameters return 400.
       security: [{Bearer: []}, {}]
       parameters:
         - {name: category_id, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
@@ -28,7 +28,7 @@ paths:
         '503': {$ref: '#/components/responses/Error'}
   /api/ai/recommendations/similar/{product_id}:
     get:
-      description: Content/category similarity with price proximity as tie-breaker. Ineligible seeds return 404. Only limit is accepted.
+      description: Category-path/text similarity with price proximity as tie-breaker. A visible, non-deleted seed may be out of stock; only in-stock alternatives are returned. Missing, hidden or deleted seeds return 404. Unknown query parameters are ignored; category_id is not supported here.
       security: [{Bearer: []}, {}]
       parameters:
         - {name: product_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
@@ -52,30 +52,37 @@ paths:
     get:
       responses:
         '200':
-          description: Liveness and coarse dependency state; last refresh does not certify complete synchronization.
+          description: PostgreSQL is ready. Redis/RabbitMQ may be degraded. DLQ count is sampled every 30 seconds; last refresh does not certify complete synchronization.
           content:
             application/json:
-              schema:
-                type: object
-                required: [status, service, postgres, redis, rabbitmq, catalog]
-                properties:
-                  status: {type: string, enum: [UP]}
-                  service: {type: string, const: recommendation-service}
-                  postgres: {type: string, enum: [ready, unavailable]}
-                  redis: {type: string, enum: [ready, unavailable]}
-                  rabbitmq: {type: string, enum: [ready, unavailable]}
-                  catalog:
-                    type: object
-                    required: [items, lastRefreshAt]
-                    properties:
-                      items: {type: [integer, 'null'], minimum: 0}
-                      lastRefreshAt: {type: [string, 'null'], format: date-time}
+              schema: {$ref: '#/components/schemas/Health'}
+        '503':
+          description: Required PostgreSQL dependency is unavailable; status is DOWN.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Health'}
 components:
   securitySchemes:
     Bearer: {type: http, scheme: bearer, bearerFormat: JWT}
   parameters:
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 12}}
   schemas:
+    Health:
+      type: object
+      required: [status, service, postgres, redis, rabbitmq, rabbitmqDeadLetters, catalog]
+      properties:
+        status: {type: string, enum: [UP, DOWN]}
+        service: {type: string, const: recommendation-service}
+        postgres: {type: string, enum: [ready, unavailable]}
+        redis: {type: string, enum: [ready, unavailable]}
+        rabbitmq: {type: string, enum: [ready, unavailable]}
+        rabbitmqDeadLetters: {type: [integer, 'null'], minimum: 0, description: Null while the consumer is disconnected or disabled}
+        catalog:
+          type: object
+          required: [items, lastRefreshAt]
+          properties:
+            items: {type: [integer, 'null'], minimum: 0}
+            lastRefreshAt: {type: [string, 'null'], format: date-time}
     Items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/Product'}}
     Product:
       type: object
@@ -106,7 +113,7 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: {type: string, enum: [INVALID_QUERY, UNAUTHORIZED, PRODUCT_NOT_FOUND, RECOMMENDATION_UNAVAILABLE]}
+            code: {type: string, enum: [INVALID_QUERY, UNAUTHORIZED, PRODUCT_NOT_FOUND, RECOMMENDATION_UNAVAILABLE, NOT_FOUND, METHOD_NOT_ALLOWED]}
             message: {type: string}
   responses:
     Error:

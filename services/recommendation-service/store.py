@@ -2,6 +2,8 @@
 import hashlib
 import json
 import logging
+import threading
+import time
 from urllib.parse import quote
 
 import httpx
@@ -14,13 +16,16 @@ from psycopg_pool import ConnectionPool
 from ranking import popular, similar
 from schemas import PUBLIC_FIELDS, RecommendationError, Snapshot
 
-ELIGIBLE = """snapshot->>'catalogVisible' = 'true' AND snapshot->>'deleted' = 'false'
-              AND (snapshot->>'availableStock')::bigint > 0"""
+VISIBLE = "snapshot->>'catalogVisible' = 'true' AND snapshot->>'deleted' = 'false'"
+ELIGIBLE = VISIBLE + " AND (snapshot->>'availableStock')::bigint > 0"
+RANK_FIELDS = ("id", "name", "description", "categoryPath", "minPrice", "soldCount", "ratingAverage")
 
 
 class Store:
     def __init__(self, settings):
         self.settings = settings
+        self.rank_locks = [threading.Lock() for _ in range(32)]
+        self.cache_retry_at = 0
         self.pool = ConnectionPool(open=False, min_size=1, max_size=8, timeout=settings.timeout,
             kwargs={"host": settings.db_host, "port": settings.db_port, "dbname": settings.db_name,
                     "user": settings.db_user, "password": settings.db_password,
@@ -77,11 +82,11 @@ class Store:
                     (snapshot.id, snapshot.productVersion, Jsonb(snapshot.model_dump())))
         return True
 
-    def products(self, category=None, ids=None):
-        query = "SELECT snapshot FROM item_feature WHERE " + ELIGIBLE
+    def products(self, category=None, ids=None, *, in_stock=True):
+        query = "SELECT snapshot FROM item_feature WHERE " + (ELIGIBLE if in_stock else VISIBLE)
         args = []
         if category is not None:
-            query += " AND snapshot->>'categoryId' = %s"
+            query += " AND snapshot->'categoryPath' ? %s"
             args.append(category)
         if ids is not None:
             query += " AND product_id = ANY(%s)"
@@ -89,35 +94,61 @@ class Store:
         with self.pool.connection() as conn:
             return [row[0] for row in conn.execute(query, args).fetchall()]
 
+    def ranking_products(self, category=None, *, popularity=False):
+        fields = ", ".join(f"'{field}', snapshot->'{field}'" for field in RANK_FIELDS)
+        query = "SELECT jsonb_build_object(" + fields + ") FROM item_feature WHERE " + ELIGIBLE
+        args = []
+        if category is not None:
+            query += " AND snapshot->'categoryPath' ? %s"
+            args.append(category)
+        if popularity:
+            query += " ORDER BY (snapshot->>'soldCount')::bigint DESC, (snapshot->>'ratingAverage')::numeric DESC, product_id LIMIT 50"
+        with self.pool.connection() as conn, conn.cursor(name="recommendation_candidates") as cursor:
+            cursor.itersize = 100
+            cursor.execute(query, args)
+            yield from (row[0] for row in cursor)
+
+    def prune_receipts(self):
+        with self.pool.connection() as conn:
+            return conn.execute("DELETE FROM processed_event WHERE processed_at < CURRENT_TIMESTAMP - INTERVAL '30 days'").rowcount
+
     def recommendations(self, *, category=None, seed_id=None, limit=12):
         seed = None
         if seed_id is not None:
-            seeds = self.products(ids=[seed_id])
+            seeds = self.products(ids=[seed_id], in_stock=False)
             if not seeds:
                 raise RecommendationError(404, "PRODUCT_NOT_FOUND", "Product does not exist")
             seed = seeds[0]
-        key = "recommendation:v1:" + hashlib.sha256(
-            json.dumps([category, seed_id, limit], ensure_ascii=False).encode()).hexdigest()
-        ids = None
-        try:
-            raw = self.cache.get(key)
-            if raw is not None:
-                ids = json.loads(raw)
-                if (not isinstance(ids, list) or len(ids) > limit
-                        or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids)
-                        or seed_id in ids):
-                    ids = None
-        except (redis.RedisError, ValueError, TypeError):
-            logging.warning("recommendation_cache_read_failed")
-        if ids is None:
-            products = self.products(category)
-            # shortcut: rank the demo catalog in memory; add bounded retrieval when catalog size requires it.
-            ranked = similar(seed, products) if seed is not None else popular(products)
-            ids = [item["id"] for item in ranked[:limit]]
+        digest = hashlib.sha256(json.dumps([category, seed_id], ensure_ascii=False).encode()).hexdigest()
+        key = "recommendation:v2:" + digest
+        # One worker is configured; bounded locks share cache-miss work within that process.
+        with self.rank_locks[int(digest[:2], 16) % len(self.rank_locks)]:
+            ids = None
             try:
-                self.cache.setex(key, 60, json.dumps(ids))
+                raw = self.cache.get(key) if time.monotonic() >= self.cache_retry_at else None
+                if raw is not None:
+                    ids = json.loads(raw)
+                    if (not isinstance(ids, list) or len(ids) > 50
+                            or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids)
+                            or seed_id in ids):
+                        ids = None
             except redis.RedisError:
-                logging.warning("recommendation_cache_write_failed")
+                self.cache_retry_at = time.monotonic() + 5
+                logging.warning("recommendation_cache_read_failed")
+            except (ValueError, TypeError):
+                logging.warning("recommendation_cache_invalid")
+            if ids is None:
+                products = self.ranking_products(category, popularity=seed is None)
+                # shortcut: exact similarity scans ranking fields; add indexed candidates when catalog size requires it.
+                ranked = similar(seed, products) if seed is not None else popular(products)
+                ids = [item["id"] for item in ranked]
+                if time.monotonic() >= self.cache_retry_at:
+                    try:
+                        self.cache.setex(key, 60, json.dumps(ids))
+                    except redis.RedisError:
+                        self.cache_retry_at = time.monotonic() + 5
+                        logging.warning("recommendation_cache_write_failed")
+        ids = ids[:limit]
         # Cache never decides visibility or response fields.
         current = {item["id"]: item for item in self.products(category, ids)}
         return [{field: current[i].get(field) for field in PUBLIC_FIELDS} for i in ids if i in current]

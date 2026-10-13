@@ -15,4 +15,6 @@ def snapshot(product_id="p1", version=1, **changes):
             "availableStock": 10, "soldCount": 5, "ratingAverage": 4.5, "ratingCount": 3,
             "createdAt": "2026-10-01T00:00:00Z", "updatedAt": "2026-10-01T00:00:00Z"}
     data.update(changes)
+    if "categoryId" in changes and "categoryPath" not in changes:
+        data["categoryPath"] = [changes["categoryId"]] if changes["categoryId"] else []
     return data

@@ -12,7 +12,9 @@ from psycopg_pool import PoolTimeout
 
 from schemas import valid_id
 
-EVENT_TYPES = ("ProductCreated", "ProductUpdated", "ProductDeleted", "OrderPlaced", "OrderStatusChanged")
+PRODUCT_EVENTS = ("ProductCreated", "ProductUpdated", "ProductDeleted")
+ORDER_EVENTS = ("OrderPlaced", "OrderStatusChanged")
+EVENT_TYPES = PRODUCT_EVENTS + ORDER_EVENTS
 
 
 def connection_parameters(settings):
@@ -46,22 +48,8 @@ def validate_event(body, key):
     payload = data["payload"]
     if not isinstance(payload, dict):
         raise ValueError("Invalid payload")
-    if key.startswith("Product"):
-        if not valid_id(payload.get("productId")):
-            raise ValueError("Invalid product ID")
-    else:
-        if not valid_id(payload.get("orderId")):
-            raise ValueError("Invalid order ID")
-        if key == "OrderPlaced":
-            items = payload.get("items")
-            if not isinstance(items, list) or not items or len(items) > 500:
-                raise ValueError("Invalid order items")
-            for item in items:
-                if (not isinstance(item, dict) or not valid_id(item.get("productId"))
-                        or type(item.get("quantity")) is not int or not 1 <= item["quantity"] <= 2**31 - 1):
-                    raise ValueError("Invalid order item")
-        elif not isinstance(payload.get("status"), str) or not payload["status"].strip():
-            raise ValueError("Invalid order status")
+    if key not in PRODUCT_EVENTS or not valid_id(payload.get("productId")):
+        raise ValueError("Invalid product event")
     return event_id, payload
 
 
@@ -76,12 +64,16 @@ class Consumer:
         self.store = store
         self.stop = threading.Event()
         self.connected = False
+        self.dead_letters = None
         self.connection = None
         self.channel = None
         self.thread = None
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="recommendation-metadata")
 
     def handle(self, body, key):
+        # Preserve documented bindings; order behavior is outside PR-1 and needs no receipt or validation.
+        if key in ORDER_EVENTS:
+            return
         event_id, payload = validate_event(body, key)
         for attempt in range(3):
             if self.stop.is_set():
@@ -89,7 +81,7 @@ class Consumer:
             try:
                 if self.store.seen(event_id):
                     return
-                snapshot = self.store.fetch_snapshot(payload["productId"]) if key.startswith("Product") else None
+                snapshot = self.store.fetch_snapshot(payload["productId"])
                 self.store.apply(snapshot, event_id)
                 return
             except Exception as error:
@@ -120,12 +112,21 @@ class Consumer:
                     pass
         future.add_done_callback(completed)
 
+    def check_dead_letters(self):
+        if self.stop.is_set():
+            return
+        self.dead_letters = self.channel.queue_declare(queue=self.store.settings.queue + ".dead", passive=True).method.message_count
+        if self.dead_letters:
+            logging.warning("recommendation_dead_letters_pending count=%s", self.dead_letters)
+        self.connection.call_later(30, self.check_dead_letters)
+
     def run(self):
         while not self.stop.is_set():
             try:
                 self.connection = pika.BlockingConnection(connection_parameters(self.store.settings))
                 self.channel = self.connection.channel()
                 declare_topology(self.channel, self.store.settings)
+                self.check_dead_letters()
                 self.channel.basic_qos(prefetch_count=1)
                 self.channel.basic_consume(queue=self.store.settings.queue, on_message_callback=self.on_message)
                 self.connected = True
@@ -136,6 +137,7 @@ class Consumer:
                     logging.warning("recommendation_broker_disconnected type=%s", type(error).__name__)
             finally:
                 self.connected = False
+                self.dead_letters = None
                 if self.connection is not None and self.connection.is_open:
                     try:
                         self.connection.close()

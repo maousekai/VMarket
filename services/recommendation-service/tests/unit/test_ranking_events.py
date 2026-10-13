@@ -34,6 +34,9 @@ class RankingAndEventTest(unittest.TestCase):
                                        {"name": "", "description": "", "categoryId": None}), 0)
         self.assertEqual(price_distance({"minPrice": 0}, {"minPrice": 0}), 0)
         self.assertEqual(price_distance({"minPrice": None}, same), float("inf"))
+        sibling = snapshot("sibling", name="Phone", description="", categoryPath=["fashion", "shoes"])
+        seed["categoryPath"] = ["fashion", "clothing"]
+        self.assertGreater(content_score(seed, sibling), content_score(seed, unrelated))
 
     def test_snapshot_validation_and_settings(self):
         Snapshot.model_validate(snapshot())
@@ -54,7 +57,6 @@ class RankingAndEventTest(unittest.TestCase):
 
     def test_envelopes_and_queue_compatibility(self):
         validate_event(event(), "ProductCreated")
-        validate_event(event("OrderPlaced", {"orderId": "o1", "items": [{"productId": "p1", "quantity": 1}]}), "OrderPlaced")
         for body, key in ((event(), "ProductDeleted"), (b"[]", "ProductCreated"),
                           (event(payload={"productId": "../"}), "ProductCreated"),
                           (event("UserBehaviorTracked"), "UserBehaviorTracked"),
@@ -84,9 +86,12 @@ class RankingAndEventTest(unittest.TestCase):
             store.apply.assert_not_called()
             store.seen.return_value = False
             store.fetch_snapshot.reset_mock()
-            consumer.handle(event("OrderStatusChanged", {"orderId": "o1", "status": "CANCELLED"}), "OrderStatusChanged")
+            store.seen.reset_mock()
+            for key in ("OrderPlaced", "OrderStatusChanged"):
+                consumer.handle(b"irrelevant or malformed order body", key)
             store.fetch_snapshot.assert_not_called()
-            self.assertIsNone(store.apply.call_args.args[0])
+            store.apply.assert_not_called()
+            store.seen.assert_not_called()
         finally:
             consumer.close()
 
@@ -112,8 +117,27 @@ class RankingAndEventTest(unittest.TestCase):
             callbacks.get(timeout=2)()
             self.assertEqual(channel.basic_ack.call_count, 1)
             self.assertEqual(channel.basic_nack.call_count, 2)
+            method.routing_key = "OrderPlaced"
+            consumer.on_message(channel, method, None, b"not-json")
+            callbacks.get(timeout=2)()
+            self.assertEqual(channel.basic_ack.call_count, 2)
+            self.assertEqual(channel.basic_nack.call_count, 2)
             consumer.stop.set()
             with self.assertRaises(InterruptedError):
                 consumer.handle(event(), "ProductCreated")
+        finally:
+            consumer.close()
+
+    def test_dead_letter_monitor(self):
+        consumer = Consumer(Mock(settings=settings()))
+        consumer.channel = Mock()
+        consumer.channel.queue_declare.return_value.method.message_count = 2
+        consumer.connection = Mock(is_open=False)
+        try:
+            with self.assertLogs(level="WARNING") as logs:
+                consumer.check_dead_letters()
+            self.assertEqual(consumer.dead_letters, 2)
+            self.assertIn("recommendation_dead_letters_pending count=2", logs.output[0])
+            consumer.connection.call_later.assert_called_once_with(30, consumer.check_dead_letters)
         finally:
             consumer.close()
