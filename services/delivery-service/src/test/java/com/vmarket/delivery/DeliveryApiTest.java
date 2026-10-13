@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.net.URI;
@@ -191,12 +193,14 @@ class DeliveryApiTest {
     @Test void outboxKeepsFailedEventsAndRetriesWithoutLostDomainState() throws Exception {
         String id=handoff();
         EventPublisher publisher=mock(EventPublisher.class); RedisTracking tracking=mock(RedisTracking.class);
-        var outbox=new DeliveryOutbox(jdbc,json,publisher,tracking);
+        var outbox=new DeliveryOutbox(jdbc,json,publisher,tracking,Clock.systemUTC());
         doThrow(new IllegalStateException("broker down")).when(publisher).publish(anyString(),any());
         outbox.events();
         assertThat(jdbc.queryForObject("select count(*) from delivery_outbox where event_type='DeliveryAssigned'",Integer.class)).isEqualTo(1);
         assertThat(repo.find(id,false).getShipperId()).isEqualTo(SHIPPER);
-        reset(publisher); outbox.events(); outbox.tracking();
+        reset(publisher);
+        jdbc.update("update delivery_outbox set next_attempt_at=?",java.sql.Timestamp.from(Instant.EPOCH));
+        outbox.events(); outbox.tracking();
         assertThat(jdbc.queryForObject("select count(*) from delivery_outbox",Integer.class)).isZero();
         verify(publisher).publish(eq("DeliveryAssigned"),any()); verify(tracking).publish(anyString());
     }
@@ -204,10 +208,53 @@ class DeliveryApiTest {
         String id=handoff(); inTransit(id);
         EventPublisher publisher=mock(EventPublisher.class);
         doThrow(new IllegalStateException("No notification binding")).when(publisher).publish(eq("DeliveryAssigned"),any());
-        new DeliveryOutbox(jdbc,json,publisher,mock(RedisTracking.class)).events();
+        new DeliveryOutbox(jdbc,json,publisher,mock(RedisTracking.class),Clock.systemUTC()).events();
         assertThat(jdbc.queryForObject("select count(*) from delivery_outbox where event_type='DeliveryAssigned'",Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from delivery_outbox where event_type='DeliveryStatusChanged'",Integer.class)).isZero();
         verify(publisher,times(2)).publish(eq("DeliveryStatusChanged"),any());
+    }
+    @Test void fullBatchOfUnroutableAssignmentsCannotStarveLaterStatusOrCod() throws Exception {
+        String id=handoff(); inTransit(id);
+        jdbc.update("delete from delivery_outbox");
+        var assignment=repo.find(id,false);
+        for (int i=0; i<100; i++) repo.outbox(assignment,"DeliveryAssigned","{}");
+        jdbc.update("update delivery_outbox set created_at=?",java.sql.Timestamp.from(Instant.parse("2020-01-01T00:00:00Z")));
+        repo.outbox(assignment,"DeliveryStatusChanged",json.writeValueAsString(new com.vmarket.events.DeliveryStatusChanged(ORDER,"DELIVERED",10)));
+        repo.outbox(assignment,"CodCollected",json.writeValueAsString(new com.vmarket.events.CodCollected(ORDER,BUYER,100000L,id)));
+        EventPublisher publisher=mock(EventPublisher.class);
+        doThrow(new IllegalStateException("No notification binding")).when(publisher).publish(eq("DeliveryAssigned"),any());
+        var outbox=new DeliveryOutbox(jdbc,json,publisher,mock(RedisTracking.class),Clock.systemUTC());
+        for (int i=0; i<3; i++) outbox.events();
+        assertThat(jdbc.queryForObject("select count(*) from delivery_outbox where event_type in ('DeliveryStatusChanged','CodCollected')",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from delivery_outbox where event_type='DeliveryAssigned'",Integer.class)).isEqualTo(100);
+        verify(publisher).publish(eq("DeliveryStatusChanged"),any());
+        verify(publisher).publish(eq("CodCollected"),any());
+        verify(publisher,times(100)).publish(eq("DeliveryAssigned"),any());
+    }
+    @Test void retryDeadlineSurvivesDispatcherRestartAndBackoffIsBounded() throws Exception {
+        String id=handoff();
+        jdbc.update("delete from delivery_outbox");
+        repo.outbox(repo.find(id,false),"DeliveryAssigned","{}");
+        Instant now=Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        EventPublisher publisher=mock(EventPublisher.class);
+        doThrow(new IllegalStateException("broker down")).when(publisher).publish(anyString(),any());
+        long[] delays={5,10,20,40,80,160,300,300,300};
+        for (int attempt=0; attempt<delays.length; attempt++) {
+            Clock due=Clock.fixed(now,ZoneOffset.UTC);
+            new DeliveryOutbox(jdbc,json,publisher,mock(RedisTracking.class),due).events();
+            long wait=delays[attempt];
+            Instant retryAt=jdbc.queryForObject("select next_attempt_at from delivery_outbox",java.time.OffsetDateTime.class).toInstant();
+            assertThat(retryAt).isEqualTo(now.plusSeconds(wait));
+            assertThat(jdbc.queryForObject("select retry_attempts from delivery_outbox",Integer.class)).isEqualTo(attempt+1);
+            // A new dispatcher must honor the persisted deadline, even after a restart.
+            new DeliveryOutbox(jdbc,json,publisher,mock(RedisTracking.class),Clock.fixed(retryAt.minusMillis(1),ZoneOffset.UTC)).events();
+            verify(publisher,times(attempt+1)).publish(eq("DeliveryAssigned"),any());
+            now=retryAt;
+        }
+        reset(publisher);
+        new DeliveryOutbox(jdbc,json,publisher,mock(RedisTracking.class),Clock.fixed(now,ZoneOffset.UTC)).events();
+        verify(publisher).publish(eq("DeliveryAssigned"),any());
+        assertThat(jdbc.queryForObject("select count(*) from delivery_outbox",Integer.class)).isZero();
     }
     @Test void actualWebSocketIsScopedSingleUseAndDeliversGpsUnderFiveSeconds() throws Exception {
         String id=handoff(); inTransit(id);
@@ -231,7 +278,7 @@ class DeliveryApiTest {
         // Mock Redis pub/sub boundary while using the real outbox and actual socket transport.
         RedisTracking tracking=mock(RedisTracking.class);
         doAnswer(inv -> { socket.accept(inv.getArgument(0)); return null; }).when(tracking).publish(anyString());
-        new DeliveryOutbox(jdbc,json,mock(EventPublisher.class),tracking).tracking();
+        new DeliveryOutbox(jdbc,json,mock(EventPublisher.class),tracking,Clock.systemUTC()).tracking();
         String update=messages.poll(5,TimeUnit.SECONDS);
         assertThat(update).contains("16.04");
         assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-start)).isLessThan(5000);

@@ -90,6 +90,6 @@ public class DeliveryRepository {
         jdbc.update("insert into route_logs values (?, ?, ?, ?, ?, ?)", UUID.randomUUID().toString(), a.getId(), a.getVersion(), a.getLatitude(), a.getLongitude(), java.sql.Timestamp.from(a.getLocationAt()));
     }
     public void outbox(Assignment a, String type, String body) {
-        jdbc.update("insert into delivery_outbox values (?, ?, ?, ?, CURRENT_TIMESTAMP)", UUID.randomUUID().toString(), a.getId(), type, body);
+        jdbc.update("insert into delivery_outbox (id, assignment_id, event_type, payload, created_at) values (?, ?, ?, ?, CURRENT_TIMESTAMP)", UUID.randomUUID().toString(), a.getId(), type, body);
     }
 }

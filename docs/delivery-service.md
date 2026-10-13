@@ -51,6 +51,8 @@ COD lấy từ số tiền Order trả về, không nhận giá tiền do ngư�
 
 `DeliveryAssigned` và `DeliveryStatusChanged(orderId,status,version)` được lưu cùng trạng thái trong SQL outbox. Order chỉ áp dụng phiên bản mới hơn, không quay ngược đơn terminal; outbox Order phát OrderStatusChanged sau giao dịch. Chỉ xoá outbox khi RabbitMQ xác nhận ACK và không trả về thông điệp không có route. Consumer phải chấp nhận gửi lại. Nhóm vận hành theo dõi/replay dead-letter khi có lỗi kéo dài.
 
+Outbox Delivery lưu số lần lỗi và thời điểm thử lại bằng migration V2. Worker chỉ lấy tối đa 100 bản ghi đã đến hạn, ưu tiên thời điểm đến hạn; khi lỗi, lùi lần thử tiếp theo từ 5 giây, tăng gấp đôi và giới hạn 5 phút. Lịch retry sống qua khởi động lại. Vì vậy một batch đầy DeliveryAssigned thiếu binding Notification không chiếm lại mọi lượt xử lý, để DeliveryStatusChanged/CodCollected phía sau được gửi. Bản ghi lỗi được giữ để thử lại khi route/phụ thuộc phục hồi.
+
 ## WebSocket và GPS
 
 Client lấy vé bằng REST, rồi mở URL **`webSocketUrl` trả về trong phản hồi**. `DELIVERY_WS_URL` cấu hình đường vào riêng tới Delivery; mặc định local là `ws://localhost:8088/api/delivery/ws`, production bắt buộc cấu hình URL WSS qua reverse proxy tới Delivery. Cấu hình `CORS_ALLOWED_ORIGINS` bằng origin frontend cụ thể. Gateway hiện dùng Server Web MVC; REST đi cổng 8080, endpoint WebSocket cần đường ingress riêng tới cổng 8088. Không dùng JWT trên query string. Proxy không ghi giá trị ticket trong access log.
@@ -69,3 +71,5 @@ cd services
 ```
 
 DeliveryApiTest kiểm tra JWT/quyền, bàn giao nhiều shop, trạng thái/COD, giới hạn giao lại, route, khoá, phân trang, outbox và WebSocket TCP thật dưới 5 giây. Redis/pubsub và HTTP sang service khác được mock ở ranh giới; kết quả này không khẳng định Redis/RabbitMQ production hay trình duyệt đã chạy. Auth kiểm tra tạo role, OTP pending, idempotency, khoá và internal key. Order kiểm tra internal key, phụ thuộc PBL6-19 và chống sự kiện trùng/đảo thứ tự. Flyway chạy trên H2 PostgreSQL mode; CI build image riêng từng service.
+
+Regression outbox tạo 100 DeliveryAssigned lỗi trước trạng thái/COD hợp lệ, xác nhận sự kiện phía sau vẫn đi qua và bản ghi lỗi còn nguyên. Test retry kiểm tra thời điểm đến hạn, giới hạn 5 phút và khởi động lại dispatcher; test migration nâng V1 lên V2 với sự kiện đang chờ, giữ payload và kiểm tra mặc định cho sự kiện mới.
