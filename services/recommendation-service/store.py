@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 import time
+from contextlib import closing
 from urllib.parse import quote
 
 import httpx
@@ -26,6 +27,9 @@ class Store:
         self.settings = settings
         self.rank_locks = [threading.Lock() for _ in range(32)]
         self.cache_retry_at = 0
+        self.catalog_stats = {"items": None, "lastRefreshAt": None}
+        self.catalog_retry_at = 0
+        self.catalog_lock = threading.Lock()
         self.pool = ConnectionPool(open=False, min_size=1, max_size=8, timeout=settings.timeout,
             kwargs={"host": settings.db_host, "port": settings.db_port, "dbname": settings.db_name,
                     "user": settings.db_user, "password": settings.db_password,
@@ -112,6 +116,23 @@ class Store:
         with self.pool.connection() as conn:
             return conn.execute("DELETE FROM processed_event WHERE processed_at < CURRENT_TIMESTAMP - INTERVAL '30 days'").rowcount
 
+    def cached_ids(self, key, seed_id):
+        try:
+            raw = self.cache.get(key) if time.monotonic() >= self.cache_retry_at else None
+            if raw is not None:
+                ids = json.loads(raw)
+                if (isinstance(ids, list) and len(ids) <= 50
+                        and all(isinstance(i, str) for i in ids) and len(set(ids)) == len(ids)
+                        and seed_id not in ids):
+                    return ids
+                logging.warning("recommendation_cache_invalid")
+        except redis.RedisError:
+            self.cache_retry_at = time.monotonic() + 5
+            logging.warning("recommendation_cache_read_failed")
+        except (ValueError, TypeError):
+            logging.warning("recommendation_cache_invalid")
+        return None
+
     def recommendations(self, *, category=None, seed_id=None, limit=12):
         seed = None
         if seed_id is not None:
@@ -121,33 +142,26 @@ class Store:
             seed = seeds[0]
         digest = hashlib.sha256(json.dumps([category, seed_id], ensure_ascii=False).encode()).hexdigest()
         key = "recommendation:v2:" + digest
-        # One worker is configured; bounded locks share cache-miss work within that process.
-        with self.rank_locks[int(digest[:2], 16) % len(self.rank_locks)]:
-            ids = None
+        ids = self.cached_ids(key, seed_id)
+        if ids is None:
+            lock = self.rank_locks[int(digest[:2], 16) % len(self.rank_locks)]
+            if not lock.acquire(timeout=self.settings.timeout):
+                raise RecommendationError(503, "RECOMMENDATION_UNAVAILABLE", "Recommendation ranking busy")
             try:
-                raw = self.cache.get(key) if time.monotonic() >= self.cache_retry_at else None
-                if raw is not None:
-                    ids = json.loads(raw)
-                    if (not isinstance(ids, list) or len(ids) > 50
-                            or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids)
-                            or seed_id in ids):
-                        ids = None
-            except redis.RedisError:
-                self.cache_retry_at = time.monotonic() + 5
-                logging.warning("recommendation_cache_read_failed")
-            except (ValueError, TypeError):
-                logging.warning("recommendation_cache_invalid")
-            if ids is None:
-                products = self.ranking_products(category, popularity=seed is None)
-                # shortcut: exact similarity scans ranking fields; add indexed candidates when catalog size requires it.
-                ranked = similar(seed, products) if seed is not None else popular(products)
-                ids = [item["id"] for item in ranked]
-                if time.monotonic() >= self.cache_retry_at:
-                    try:
-                        self.cache.setex(key, 60, json.dumps(ids))
-                    except redis.RedisError:
-                        self.cache_retry_at = time.monotonic() + 5
-                        logging.warning("recommendation_cache_write_failed")
+                ids = self.cached_ids(key, seed_id)
+                if ids is None:
+                    with closing(self.ranking_products(category, popularity=seed is None)) as products:
+                        # shortcut: exact similarity scans ranking fields; add indexed candidates when catalog size requires it.
+                        ranked = similar(seed, products) if seed is not None else popular(products)
+                    ids = [item["id"] for item in ranked]
+                    if time.monotonic() >= self.cache_retry_at:
+                        try:
+                            self.cache.setex(key, 60, json.dumps(ids))
+                        except redis.RedisError:
+                            self.cache_retry_at = time.monotonic() + 5
+                            logging.warning("recommendation_cache_write_failed")
+            finally:
+                lock.release()
         ids = ids[:limit]
         # Cache never decides visibility or response fields.
         current = {item["id"]: item for item in self.products(category, ids)}
@@ -158,12 +172,23 @@ class Store:
                   "catalog": {"items": None, "lastRefreshAt": None}}
         try:
             with self.pool.connection() as conn:
-                count, refreshed = conn.execute(
-                    "SELECT count(*) FILTER (WHERE " + ELIGIBLE + "), max(refreshed_at) FROM item_feature").fetchone()
+                conn.execute("SELECT 1")
             result["postgres"] = "ready"
-            result["catalog"] = {"items": count, "lastRefreshAt": refreshed.isoformat() if refreshed else None}
         except Exception as error:
             logging.warning("recommendation_health_postgres_failed type=%s", type(error).__name__)
+        if result["postgres"] == "ready":
+            if time.monotonic() >= self.catalog_retry_at and self.catalog_lock.acquire(blocking=False):
+                try:
+                    with self.pool.connection() as conn:
+                        count, refreshed = conn.execute(
+                            "SELECT count(*) FILTER (WHERE " + ELIGIBLE + "), max(refreshed_at) FROM item_feature").fetchone()
+                    self.catalog_stats = {"items": count, "lastRefreshAt": refreshed.isoformat() if refreshed else None}
+                except Exception as error:
+                    logging.warning("recommendation_health_catalog_failed type=%s", type(error).__name__)
+                finally:
+                    self.catalog_retry_at = time.monotonic() + 30
+                    self.catalog_lock.release()
+            result["catalog"] = self.catalog_stats
         try:
             self.cache.ping()
             result["redis"] = "ready"

@@ -52,7 +52,7 @@ paths:
     get:
       responses:
         '200':
-          description: PostgreSQL is ready. Redis/RabbitMQ may be degraded. DLQ count is sampled every 30 seconds; last refresh does not certify complete synchronization.
+          description: PostgreSQL readiness is checked on every request using SELECT 1. Catalog statistics are cached for 30 seconds; Redis/RabbitMQ may be degraded. DLQ count is sampled every 30 seconds; last refresh does not certify complete synchronization.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
@@ -113,9 +113,9 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: {type: string, enum: [INVALID_QUERY, UNAUTHORIZED, PRODUCT_NOT_FOUND, RECOMMENDATION_UNAVAILABLE, NOT_FOUND, METHOD_NOT_ALLOWED]}
+            code: {type: string, enum: [INVALID_QUERY, UNAUTHORIZED, PRODUCT_NOT_FOUND, RECOMMENDATION_UNAVAILABLE, FORBIDDEN, NOT_FOUND, METHOD_NOT_ALLOWED, PAYLOAD_TOO_LARGE, TOO_MANY_REQUESTS, HTTP_ERROR]}
             message: {type: string}
   responses:
     Error:
-      description: Stable validation/auth/not-found/dependency error.
+      description: Stable validation/auth/not-found/dependency error. Request validation returns 400 INVALID_QUERY; other framework errors map by HTTP status.
       content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}

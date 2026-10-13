@@ -267,3 +267,20 @@ class InfrastructureTest(unittest.TestCase):
         p95 = statistics.quantiles(samples, n=20)[18]
         print(f"Demo read p95: {p95:.1f} ms (30 sequential ASGI requests, 2 fixture products, local PostgreSQL/Redis)")
         self.assertLess(p95, 500)
+
+    def test_ranking_error_returns_cursor_connection_to_pool(self):
+        seed(self.store)
+        def fail(seed_product, products):
+            next(products)
+            raise ValueError("Ranking failed")
+        errors = []
+        with patch("store.similar", side_effect=fail):
+            for _ in range(3):
+                try:
+                    self.store.recommendations(seed_id="p1")
+                except ValueError as error:
+                    errors.append(error)
+        self.assertEqual(len(errors), 3)
+        stats = self.store.pool.get_stats()
+        self.assertEqual(stats["pool_available"], stats["pool_size"])
+        self.assertEqual(self.store.recommendations(seed_id="p1")[0]["id"], "p2")

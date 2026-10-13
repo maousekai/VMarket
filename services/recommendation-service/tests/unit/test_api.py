@@ -1,15 +1,20 @@
 import json
+import asyncio
 import time
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import jwt
+import httpx
 import yaml
+from anyio import to_thread
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+from starlette.exceptions import HTTPException
 
 from main import BASE, create_app
 from store import RANK_FIELDS, Store
@@ -151,8 +156,17 @@ class ApiTest(unittest.TestCase):
         @self.client.app.get("/validation-test")
         def validation_test(count: int):
             return count
-        self.assertEqual(self.client.get("/validation-test").json()["status"], 422)
+        self.assertEqual(self.client.get("/validation-test").status_code, 400)
+        self.assertEqual(self.client.get("/validation-test").json()["status"], 400)
         self.assertEqual(self.client.get("/validation-test").json()["error"]["code"], "INVALID_QUERY")
+        @self.client.app.get("/http-error-test/{status}")
+        def http_error_test(status: int):
+            raise HTTPException(status, "Test error", headers={"Retry-After": "1"})
+        for status, code in ((400, "INVALID_QUERY"), (413, "PAYLOAD_TOO_LARGE"), (429, "TOO_MANY_REQUESTS"), (499, "HTTP_ERROR")):
+            response = self.client.get(f"/http-error-test/{status}")
+            self.assertEqual(response.status_code, status)
+            self.assertEqual(response.json()["error"]["code"], code)
+            self.assertEqual(response.headers["Retry-After"], "1")
         for expiry, expected in ((time.time() - 10, 200), (time.time() - 60, 401)):
             response = self.client.get(BASE + "/for-you", headers={"Authorization": "Bearer " + self.token(exp=expiry)})
             self.assertEqual(response.status_code, expected)
@@ -180,6 +194,89 @@ class ApiTest(unittest.TestCase):
         self.store.cache.get.side_effect = self.store.cached.get
         self.assertEqual(self.client.get(BASE + "/for-you").status_code, 200)
         self.store.cache.setex.assert_called_once()
+
+    def test_cache_hits_bypass_held_locks_and_misses_time_out(self):
+        self.store.settings = replace(self.store.settings, timeout=0.03)
+        self.store.recommendations()
+        self.store.recommendations(category="clothing")
+        self.store.ranking_products = Mock(wraps=self.store.ranking_products)
+        for lock in self.store.rank_locks:
+            lock.acquire()
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            for query, status in (("", 200), ("?category_id=clothing", 200), ("?category_id=shoes", 503)):
+                response = executor.submit(self.client.get, BASE + "/for-you" + query).result(timeout=1)
+                self.assertEqual(response.status_code, status)
+            self.store.ranking_products.assert_not_called()
+        finally:
+            for lock in self.store.rank_locks:
+                lock.release()
+            executor.shutdown(wait=True)
+        self.assertEqual(self.client.get(BASE + "/for-you?category_id=shoes").status_code, 200)
+
+    def test_ranking_failure_closes_iterator_and_releases_lock(self):
+        for path, ranker in (("/for-you", "popular"), ("/similar/seed", "similar")):
+            closed = threading.Event()
+            def candidates():
+                try:
+                    yield snapshot("near")
+                finally:
+                    closed.set()
+            stream = candidates()
+            self.store.ranking_products = Mock(return_value=stream)
+            def fail(*args):
+                next(args[-1])
+                raise ValueError("Ranking failed")
+            with patch("store." + ranker, side_effect=fail):
+                self.assertEqual(self.client.get(BASE + path).status_code, 503)
+            self.assertTrue(closed.is_set())
+            for lock in self.store.rank_locks:
+                self.assertTrue(lock.acquire(blocking=False))
+                lock.release()
+
+    def test_health_does_not_wait_for_synchronous_request_workers(self):
+        started, release = threading.Event(), threading.Event()
+        def slow_ranking(**options):
+            started.set()
+            release.wait(timeout=5)
+            return []
+        self.store.recommendations = slow_ranking
+        async def exercise():
+            limiter = to_thread.current_default_thread_limiter()
+            original = limiter.total_tokens
+            limiter.total_tokens = 1
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.client.app), base_url="http://test") as client:
+                request = asyncio.create_task(client.get(BASE + "/for-you"))
+                try:
+                    self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                    health = await asyncio.wait_for(client.get(BASE + "/health"), timeout=1)
+                    self.assertEqual(health.status_code, 200)
+                finally:
+                    release.set()
+                    await request
+                    limiter.total_tokens = original
+        asyncio.run(exercise())
+
+    def test_health_caches_statistics_but_checks_postgres_each_time(self):
+        store = Store(settings())
+        conn = Mock()
+        conn.execute.return_value.fetchone.return_value = (2, None)
+        try:
+            with patch.object(store.pool, "connection") as connection, patch.object(store.cache, "ping"):
+                connection.return_value.__enter__.return_value = conn
+                self.assertEqual(store.health()["catalog"]["items"], 2)
+                conn.execute.reset_mock()
+                self.assertEqual(store.health()["postgres"], "ready")
+                conn.execute.assert_called_once_with("SELECT 1")
+                store.catalog_retry_at = 0
+                conn.execute.return_value.fetchone.return_value = (3, None)
+                self.assertEqual(store.health()["catalog"]["items"], 3)
+                connection.side_effect = RuntimeError("offline")
+                result = store.health()
+                self.assertEqual(result["postgres"], "unavailable")
+                self.assertIsNone(result["catalog"]["items"])
+        finally:
+            store.close()
 
     def test_corrupt_cache_and_empty_catalog(self):
         self.client.get(BASE + "/for-you")

@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 import jwt
@@ -79,7 +80,8 @@ def create_app(settings=None, store=None, run_consumer=True):
 
     @app.exception_handler(HTTPException)
     async def http_error(request, error):
-        code = "METHOD_NOT_ALLOWED" if error.status_code == 405 else "NOT_FOUND"
+        code = {400: "INVALID_QUERY", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND",
+                405: "METHOD_NOT_ALLOWED", 413: "PAYLOAD_TOO_LARGE", 429: "TOO_MANY_REQUESTS"}.get(error.status_code, "HTTP_ERROR")
         response = error_response(RecommendationError(error.status_code, code, str(error.detail)), request.url.path)
         if error.headers:
             response.headers.update(error.headers)
@@ -87,7 +89,7 @@ def create_app(settings=None, store=None, run_consumer=True):
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, error):
-        return error_response(RecommendationError(422, "INVALID_QUERY", "Invalid request parameters"), request.url.path)
+        return error_response(RecommendationError(400, "INVALID_QUERY", "Invalid request parameters"), request.url.path)
 
     def recommend(**options):
         try:
@@ -113,8 +115,8 @@ def create_app(settings=None, store=None, run_consumer=True):
         return {"product_id": product_id, "items": recommend(seed_id=product_id, limit=limit)}
 
     @app.get(BASE + "/health")
-    def health():
-        state = store.health()
+    async def health():
+        state = await asyncio.to_thread(store.health)
         ready = state["postgres"] == "ready"
         return JSONResponse({"status": "UP" if ready else "DOWN", "service": "recommendation-service", **state,
                 "rabbitmq": "ready" if consumer and consumer.connected else "unavailable",
