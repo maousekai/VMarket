@@ -504,7 +504,10 @@ export function createSessionManager({
     refresh,
     logout,
     login: (values) =>
-      authenticate('loginAccount', { email: values.email.trim(), password: values.password }),
+      authenticate('loginAccount', {
+        identifier: values.identifier.trim(),
+        password: values.password,
+      }),
     verifyOtp: (values) =>
       authenticate('verifyOtp', { email: values.email.trim(), otp: values.otp }),
     loadProfile,

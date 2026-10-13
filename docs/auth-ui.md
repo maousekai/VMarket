@@ -20,6 +20,12 @@ The only persisted session metadata is the non-secret `vmarket-auth-revision` co
 which orders cookie changes between tabs under Web Locks. It contains no credentials or
 profile data. When storage is unavailable, tabs reconcile through the server cookie.
 
+Login accepts username or email in a single field and sends `{identifier, password}`.
+Auth still accepts the legacy `{email, password}` payload. Email is case-insensitive;
+username preserves its registration case. Both lookup paths lock the same user row and
+share failed-attempt counters, temporary locks and administrative suspension. Password
+recovery and OTP still use email; a username is not prefilled into password recovery.
+
 Registration includes username, name and phone. The Auth registration DTO receives only
 email, username and password. OTP verification creates the session; the frontend then
 loads and updates the User profile while preserving its other fields. A failed profile
@@ -116,10 +122,12 @@ role destinations; their business dashboards remain separate tickets.
 
 ## Acceptance evidence — 13 October 2026
 
-- Frontend: 63 unit/component tests passed; lint, format check and production build passed.
+- Frontend: 66 unit/component tests passed; lint, format check and production build passed.
+- Auth: 158 tests passed on Java 17, with zero skipped tests, including PostgreSQL
+  Testcontainers, the legacy email payload and mixed username/email lockout.
 - Gateway: 50 tests passed on Java 17, including 12 allowlist regression cases.
-- Browser: all 18 Playwright cases passed against source-built Gateway/Auth/User/Shop,
-  PostgreSQL 17 and RabbitMQ; the expanded duplicate-email/username case also passed.
+- Browser: all 19 Playwright cases passed against source-built Gateway/Auth/User/Shop,
+  PostgreSQL 17 and RabbitMQ, including username/email login and shared lockout.
 - Desktop 1280px and responsive 390px layouts rendered all assets without horizontal overflow.
 
 Local Docker's Alpine runtime had an empty `/bin/busybox` after the disk-space failure.

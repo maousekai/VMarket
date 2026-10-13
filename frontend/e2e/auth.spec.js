@@ -181,18 +181,23 @@ test('wrong, exhausted and expired OTP; resend issues a real fresh code', async 
   await expect(page).not.toHaveURL(/\/verify-email/)
 })
 
-test('five wrong passwords lock login; resetting password clears temporary lock', async ({
+test('email and username share five-attempt lock; resetting password clears temporary lock', async ({
   page,
 }) => {
   const account = await createAccount(page.request)
   await page.goto('/login')
-  await page.getByLabel('Email', { exact: true }).fill(account.email)
+  await page.getByLabel('Tên tài khoản hoặc email', { exact: true }).fill(account.email)
   await page.getByLabel('Mật khẩu', { exact: true }).fill('WrongPassword1!')
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page
+      .getByLabel('Tên tài khoản hoặc email', { exact: true })
+      .fill(attempt % 2 ? account.username : account.email)
     const response = page.waitForResponse((res) => res.url().endsWith('/api/auth/login'))
     await page.getByRole('button', { name: 'Đăng nhập', exact: true }).click()
     expect((await response).status()).toBe(attempt === 4 ? 423 : 401)
   }
+  await expect(page.getByRole('alert')).toContainText(/(khoá|khóa).*phút/i)
+  await login(page, account, { identifier: account.username })
   await expect(page.getByRole('alert')).toContainText(/(khoá|khóa).*phút/i)
   await page.goto('/forgot-password')
   await page.getByLabel('Email', { exact: true }).fill(account.email)
@@ -203,6 +208,25 @@ test('five wrong passwords lock login; resetting password clears temporary lock'
   await expect(page).toHaveURL(/\/login/)
   await login(page, { ...account, password })
   await expect(page).not.toHaveURL(/\/login/)
+})
+
+test('username and email log in to the same real account', async ({ page }) => {
+  const account = await createAccount(page.request)
+  await login(page, account, { identifier: ` ${account.username} ` })
+  await page.goto('/profile')
+  await expect(
+    page.getByRole('region', { name: 'Hồ sơ cá nhân' }).getByText(account.email, { exact: true }),
+  ).toBeVisible()
+  await openAccountMenu(page)
+  await page.getByRole('menuitem', { name: 'Đăng xuất', exact: true }).click()
+  await expect(page).toHaveURL(/\/login/)
+  await login(page, account, { identifier: account.email.toUpperCase() })
+  await page.goto('/profile')
+  await expect(
+    page
+      .getByRole('region', { name: 'Hồ sơ cá nhân' })
+      .getByText(account.username, { exact: true }),
+  ).toBeVisible()
 })
 
 test('forgot-password conceals unknown email and reset explains expiration', async ({ page }) => {
@@ -432,11 +456,11 @@ test('auth forms remain usable at narrow width with keyboard and omit deferred c
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/login')
-  await expect(page.getByLabel('Email', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Tên tài khoản hoặc email', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Đăng nhập', exact: true })).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /google/i })).toHaveCount(0)
-  await page.getByLabel('Email', { exact: true }).focus()
+  await page.getByLabel('Tên tài khoản hoặc email', { exact: true }).focus()
   await page.keyboard.press('Tab')
   await expect(page.getByLabel('Mật khẩu', { exact: true })).toBeFocused()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(

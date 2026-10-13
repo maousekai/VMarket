@@ -144,7 +144,7 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | Method & path            | Mô tả                                                      |
 | ------------------------ | -------------------------------------------------------- |
 | `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
-| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse` + cookie `refresh_token`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
+| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng username hoặc email. 200 (`TokenResponse` + cookie `refresh_token`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
 | `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token bằng cookie `refresh_token` (xoay vòng). 200 / 401 (`REFRESH_TOKEN_MISSING`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`, `REFRESH_TOKEN_ROTATION_CONFLICT`) |
 | `POST /api/auth/logout`  | FR-AUTH-06 — thu hồi phiên hiện tại (cookie `refresh_token`) + xoá cookie. 200 (`MessageResponse`, idempotent) |
 | `GET /api/auth/sessions` | FR-AUTH-06 — liệt kê phiên/thiết bị đang hoạt động của user gọi. 200 (`SessionSummary[]`) / 401 (`REFRESH_TOKEN_MISSING`, `SESSION_NOT_FOUND`) |
@@ -189,6 +189,14 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 ≥1 số + ≥1 ký tự đặc biệt (hash BCrypt).
 
 **Đăng nhập (FR-AUTH-02):**
+- Request mới: `{ "identifier": "an.nguyen", "password": "Abcd1234@" }`.
+  `identifier` nhận username hoặc email (trim, không rỗng, tối đa 320 ký tự).
+  Email không phân biệt hoa/thường; username phân biệt hoa/thường như lúc đăng ký.
+  Request cũ `{ "email": "an.nguyen@example.com", "password": "..." }` vẫn được hỗ trợ.
+- Cả hai cách tìm tài khoản đều khoá cùng dòng user trước khi kiểm tra mật khẩu:
+  đổi qua lại username/email vẫn cộng dồn cùng bộ đếm sai, không vượt qua khoá tạm
+  hoặc khoá quản trị. Thông báo sai thông tin không tiết lộ tài khoản có tồn tại.
+  OTP/quên/đặt lại mật khẩu vẫn dùng email.
 - Access token: JWT HS256, `exp` mặc định 15 phút. Claims: `sub` (user id), `email`,
   `username`, `roles`, `email_verified`, `jti`, `iss=auth-service`.
 - Refresh token: chuỗi ngẫu nhiên mờ (không phải JWT), sống 15 ngày, DB chỉ lưu SHA-256.

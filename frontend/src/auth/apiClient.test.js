@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import apiClient, { bindSessionManager, getApiError } from '../services/api/apiClient'
+import { loginAccount } from '../services/api/authApi'
 
 function setup() {
   let session = { accessToken: 'old-access-token' }
@@ -33,6 +34,25 @@ const rejected = (config, status = 401, code = 'UNAUTHORIZED') =>
 const successful = (config) => ({ data: { okay: true }, status: 200, config, headers: {} })
 
 afterEach(() => bindSessionManager(undefined))
+
+describe('login API contract', () => {
+  it.each(['An.Nguyen', 'an@example.com'])(
+    'sends identifier %s through the real API wrapper',
+    async (identifier) => {
+      const original = apiClient.defaults.adapter
+      const adapter = vi.fn(async (config) => successful(config))
+      apiClient.defaults.adapter = adapter
+      try {
+        await loginAccount({ identifier, password: 'legacy' })
+        const config = adapter.mock.calls[0][0]
+        expect(config.url).toBe('/api/auth/login')
+        expect(JSON.parse(config.data)).toEqual({ identifier, password: 'legacy' })
+      } finally {
+        apiClient.defaults.adapter = original
+      }
+    },
+  )
+})
 
 describe('protected API requests', () => {
   it('uses a refreshed token and retries the original request exactly once', async () => {

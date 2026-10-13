@@ -119,7 +119,7 @@ describe('session refresh', () => {
 
   it('retries a rotation conflict once and retains session if the conflict persists', async () => {
     const { api, manager } = setup()
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockRejectedValue(apiError('REFRESH_TOKEN_ROTATION_CONFLICT'))
     await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
     expect(api.refreshSession).toHaveBeenCalledTimes(2)
@@ -129,7 +129,7 @@ describe('session refresh', () => {
 
   it('retains a live session on network failure and allows a later successful retry', async () => {
     const { api, manager } = setup()
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockRejectedValueOnce(new Error('network disconnected'))
     await expect(manager.refresh()).rejects.toThrow('network disconnected')
     expect(manager.getSnapshot().session.userId).toBe('user-1')
@@ -140,7 +140,7 @@ describe('session refresh', () => {
 
   it('clears an expired refresh token but treats a missing bootstrap cookie as a guest', async () => {
     const { api, manager } = setup()
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockRejectedValueOnce(apiError('REFRESH_TOKEN_EXPIRED'))
     await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
     expect(manager.getSnapshot()).toMatchObject({ session: null, bootstrapState: 'ready' })
@@ -152,7 +152,7 @@ describe('session refresh', () => {
   it('ignores a refresh response that arrives after logout has started', async () => {
     const request = deferred()
     const { api, manager } = setup()
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockReturnValue(request.promise)
     const refreshing = manager.refresh()
     const rejected = expect(refreshing).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
@@ -166,7 +166,7 @@ describe('session refresh', () => {
 
   it('does not report logout success or discard session when backend logout fails', async () => {
     const { api, manager } = setup()
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     api.logoutAccount.mockRejectedValueOnce(new Error('network disconnected'))
     await expect(manager.logout()).rejects.toThrow('network disconnected')
     expect(manager.getSnapshot().session.userId).toBe('user-1')
@@ -177,7 +177,7 @@ describe('session refresh', () => {
   it('recovers an interrupted profile request after logout fails', async () => {
     const request = deferred()
     const { api, manager, profiles } = setup()
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     profiles.getMyProfile.mockReturnValueOnce(request.promise)
     const loading = manager.loadProfile()
     const rejected = expect(loading).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
@@ -203,7 +203,7 @@ describe('session refresh', () => {
     }
     const request = deferred()
     const { api, manager } = setup({ locks })
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockReturnValue(request.promise)
     const refreshing = manager.refresh()
     const rejected = expect(refreshing).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
@@ -270,8 +270,8 @@ describe('session refresh', () => {
         revisionStorage: storage,
         channelFactory: () => secondChannel,
       })
-      await first.login({ email: 'user-1@example.com', password: 'Secret@123' })
-      await second.login({ email: 'user-1@example.com', password: 'Secret@123' })
+      await first.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+      await second.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
       first.start()
       second.start()
       await first.refresh()
@@ -308,7 +308,7 @@ describe('session refresh', () => {
       revisionStorage: brokenStorage,
       channelFactory: () => channel,
     })
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     manager.start()
     const seen = []
     manager.subscribe(() => seen.push(manager.getSnapshot().session?.userId || null))
@@ -347,7 +347,7 @@ describe('profile persistence', () => {
     const { manager, profiles } = setup({
       profiles: { getMyProfile: vi.fn().mockResolvedValue(current) },
     })
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     profiles.updateMyProfile.mockRejectedValueOnce(new Error('timeout'))
     const changes = { fullName: 'Nguyễn An', phone: '0987654321' }
     await expect(manager.saveProfile(changes)).rejects.toThrow('timeout')
@@ -393,7 +393,7 @@ describe('profile persistence', () => {
     const { api, manager, profiles } = setup()
     manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
     api.loginAccount.mockResolvedValue(tokenResponse('user-2'))
-    await manager.login({ email: 'user-2@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-2@example.com', password: 'Secret@123' })
     expect(manager.getSnapshot().registrationDraft).toBeNull()
     expect(profiles.updateMyProfile).not.toHaveBeenCalled()
   })
@@ -401,7 +401,7 @@ describe('profile persistence', () => {
   it('cannot restore a profile after logout', async () => {
     const request = deferred()
     const { manager } = setup({ profiles: { getMyProfile: vi.fn(() => request.promise) } })
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
     const loading = manager.loadProfile()
     const rejected = expect(loading).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
     await manager.logout()

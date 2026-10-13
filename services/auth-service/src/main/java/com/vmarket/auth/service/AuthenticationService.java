@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
  * FR-AUTH-02 — Đăng nhập bằng mật khẩu (JWT) và làm mới access token.
  *
  * <ul>
- *   <li>Đăng nhập bằng email. Sai 5 lần liên tiếp → khoá tài khoản 15 phút và thu
+ *   <li>Đăng nhập bằng username hoặc email. Sai 5 lần liên tiếp → khoá tài khoản 15 phút và thu
  *       hồi toàn bộ refresh token của user (SRS FR-AUTH-06).</li>
  *   <li>User chưa xác thực email vẫn đăng nhập được — response {@code status = PENDING}.</li>
  *   <li>{@code /refresh} xoay vòng. Dùng lại token đã thu hồi <b>quá</b> khoảng ân
@@ -75,12 +75,16 @@ public class AuthenticationService {
 
 	@Transactional(noRollbackFor = ApiException.class)
 	public TokenIssuer.IssuedTokens login(LoginRequest request, DeviceMeta device) {
-		String email = request.email().trim().toLowerCase(Locale.ROOT);
-		User user = userRepository.findByEmailForUpdate(email).orElse(null);
+		String identifier = request.identifier().trim();
+		// Username không chứa @; giữ nguyên hoa/thường như lúc đăng ký.
+		// Cả hai truy vấn khoá cùng dòng user trước khi đọc trạng thái hay tăng số lần sai.
+		User user = (identifier.contains("@")
+				? userRepository.findByEmailForUpdate(identifier.toLowerCase(Locale.ROOT))
+				: userRepository.findByUsernameForUpdate(identifier)).orElse(null);
 
 		if (user == null || !StringUtils.hasText(user.getPasswordHash())) {
 			// So sánh giả để thời gian phản hồi giống nhánh có user (chống timing oracle).
-			// user == null: email chưa đăng ký. passwordHash rỗng: tài khoản tạo qua OTP, chưa đặt mật khẩu.
+			// user == null: định danh chưa đăng ký. passwordHash rỗng: tài khoản tạo qua OTP, chưa đặt mật khẩu.
 			passwordEncoder.matches(request.password(), DUMMY_HASH);
 			throw invalidCredentials();
 		}
@@ -211,7 +215,7 @@ public class AuthenticationService {
 
 	private ApiException invalidCredentials() {
 		return new ApiException("INVALID_CREDENTIALS", HttpStatus.UNAUTHORIZED,
-				"Email hoặc mật khẩu không đúng");
+				"Tên tài khoản, email hoặc mật khẩu không đúng");
 	}
 
 	ApiException accountLocked(Instant lockedUntil, Instant now) {

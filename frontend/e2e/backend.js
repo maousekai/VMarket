@@ -205,9 +205,9 @@ export function addShop(id, status = 'PENDING') {
   )
 }
 
-export async function login(page, account, { navigate = true } = {}) {
+export async function login(page, account, { navigate = true, identifier = account.email } = {}) {
   if (navigate) await page.goto('/login')
-  await page.getByLabel('Email', { exact: true }).fill(account.email)
+  await page.getByLabel('Tên tài khoản hoặc email', { exact: true }).fill(identifier)
   await page.getByLabel('Mật khẩu', { exact: true }).fill(account.password)
   const response = page.waitForResponse(
     (result) => result.url().endsWith('/api/auth/login') && result.request().method() === 'POST',

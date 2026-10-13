@@ -54,6 +54,11 @@ public interface UserRepository extends JpaRepository<User, String>, JpaSpecific
 	@Query("select u from User u where u.email = :email")
 	Optional<User> findByEmailForUpdate(@Param("email") String email);
 
+	/** Cùng khoá dòng với đăng nhập bằng email để chia sẻ bộ đếm sai và trạng thái khoá. */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select u from User u where u.username = :username")
+	Optional<User> findByUsernameForUpdate(@Param("username") String username);
+
 	/** Tăng bộ đếm đăng nhập sai bằng UPDATE nguyên tử (tránh mất tăng khi song song). */
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("update User u set u.failedLoginAttempts = u.failedLoginAttempts + 1 where u.id = :id")

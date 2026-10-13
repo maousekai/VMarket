@@ -130,6 +130,20 @@ describe('Safe post-login navigation', () => {
 })
 
 describe('Login flow', () => {
+  it('submits username and does not pass it into email-only password recovery', async () => {
+    const login = vi
+      .fn()
+      .mockRejectedValue(failure(401, 'INVALID_CREDENTIALS', 'Thông tin không đúng.'))
+    renderPage(<LoginPage />, '/login', { login })
+    change('Tên tài khoản hoặc email', 'An.Nguyen')
+    change('Mật khẩu', 'legacy')
+    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập', exact: true }))
+    await screen.findByRole('alert')
+    expect(login).toHaveBeenCalledWith({ identifier: 'An.Nguyen', password: 'legacy' })
+    fireEvent.click(screen.getByRole('link', { name: 'Quên mật khẩu?' }))
+    await screen.findByTestId('destination')
+    expect(destination()).toEqual({ path: '/forgot-password', state: { email: '' } })
+  })
   it('preserves returnTo when an existing Pending session redirects to verification', async () => {
     renderPage(<LoginPage />, '/login', { session: pending }, { returnTo: '/profile' })
     await screen.findByTestId('destination')
@@ -141,11 +155,11 @@ describe('Login flow', () => {
       .fn()
       .mockRejectedValue(failure(423, 'ACCOUNT_SUSPENDED', 'Tài khoản bị quản trị viên khoá.'))
     renderPage(<LoginPage />, '/login', { login })
-    change('Email', active.email)
+    change('Tên tài khoản hoặc email', active.email)
     change('Mật khẩu', 'legacy')
     fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập', exact: true }))
     expect(await screen.findByRole('alert')).toBeTruthy()
-    expect(login).toHaveBeenCalledWith({ email: active.email, password: 'legacy' })
+    expect(login).toHaveBeenCalledWith({ identifier: active.email, password: 'legacy' })
   })
 })
 

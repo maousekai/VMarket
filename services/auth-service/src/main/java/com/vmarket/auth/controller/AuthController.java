@@ -66,7 +66,7 @@ public class AuthController {
 	}
 
 	@Operation(summary = "Đăng nhập (FR-AUTH-02)",
-			description = "Xác thực email + mật khẩu, trả về access token (JWT). Refresh token được gắn "
+			description = "Xác thực username hoặc email + mật khẩu qua trường identifier (vẫn nhận email từ client cũ), trả về access token (JWT). Refresh token được gắn "
 					+ "vào cookie HttpOnly `refresh_token` (không nằm trong body — PBL6-46). Sai 5 lần "
 					+ "liên tiếp → khoá tài khoản 15 phút. User chưa xác thực email vẫn đăng nhập được "
 					+ "(status = PENDING).")
@@ -75,7 +75,7 @@ public class AuthController {
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
 			@ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ (VALIDATION_ERROR)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "401", description = "Sai email/mật khẩu (INVALID_CREDENTIALS)",
+			@ApiResponse(responseCode = "401", description = "Sai username/email hoặc mật khẩu (INVALID_CREDENTIALS)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "423", description = "Tài khoản đang bị khoá tạm (ACCOUNT_LOCKED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),

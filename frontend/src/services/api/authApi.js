@@ -4,7 +4,7 @@ const post = async (path, body) => (await apiClient.post(`/api/auth${path}`, bod
 
 export const registerAccount = ({ email, username, password }) =>
   post('/register', { email, username, password })
-export const loginAccount = ({ email, password }) => post('/login', { email, password })
+export const loginAccount = ({ identifier, password }) => post('/login', { identifier, password })
 export const requestOtp = ({ email }) => post('/otp/request', { email })
 export const verifyOtp = ({ email, otp }) => post('/otp/verify', { email, otp })
 export const refreshSession = () => post('/refresh')

@@ -13,7 +13,7 @@ export default function LoginPage() {
   const auth = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [values, setValues] = useState({ email: '', password: '' })
+  const [values, setValues] = useState({ identifier: '', password: '' })
   const [fields, setFields] = useState({})
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -71,15 +71,18 @@ export default function LoginPage() {
       <FormMessage error={error} />
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy}>
         <FormField
-          label="Email"
-          name="email"
-          type="email"
-          value={values.email}
+          label="Tên tài khoản hoặc email"
+          name="identifier"
+          type="text"
+          value={values.identifier}
           onChange={change}
           disabled={busy}
           autoComplete="username"
-          placeholder="Email của bạn"
-          error={fields.email}
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="Nhập tên tài khoản hoặc email"
+          error={fields.identifier}
+          maxLength={320}
           required
         />
         <FormField
@@ -93,7 +96,11 @@ export default function LoginPage() {
           error={fields.password}
           required
         />
-        <Link className="auth-forgot" to="/forgot-password" state={{ email: values.email }}>
+        <Link
+          className="auth-forgot"
+          to="/forgot-password"
+          state={{ email: values.identifier.includes('@') ? values.identifier : '' }}
+        >
           Quên mật khẩu?
         </Link>
         <button className="button button--primary" disabled={busy}>

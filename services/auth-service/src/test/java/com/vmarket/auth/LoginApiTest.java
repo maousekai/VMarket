@@ -74,6 +74,71 @@ class LoginApiTest {
 				.content("{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}"));
 	}
 
+	private ResultActions loginIdentifier(String identifier, String password) throws Exception {
+		return mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"identifier\":\"" + identifier + "\",\"password\":\"" + password + "\"}"));
+	}
+
+	@Test
+	void identifier_acceptsUsernameAndNormalizedEmail() throws Exception {
+		loginIdentifier(" an.nguyen ", PASSWORD)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("ACTIVE"))
+				.andExpect(cookie().httpOnly("refresh_token", true));
+		loginIdentifier(" AN.NGUYEN@EXAMPLE.COM ", PASSWORD)
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void username_preservesRegistrationCase_andUnknownIdentifiersShareError() throws Exception {
+		user.setUsername("An.Nguyen");
+		userRepository.save(user);
+		loginIdentifier("an.nguyen", PASSWORD)
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
+		loginIdentifier("unknown@example.com", PASSWORD)
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
+		loginIdentifier("An.Nguyen", PASSWORD).andExpect(status().isOk());
+	}
+
+	@Test
+	void alternatingUsernameAndEmail_shareFailedAttemptsAndLock() throws Exception {
+		for (int i = 0; i < 4; i++) {
+			loginIdentifier(i % 2 == 0 ? "an.nguyen" : EMAIL, "Wrong123@")
+					.andExpect(status().isUnauthorized());
+		}
+		loginIdentifier("an.nguyen", "Wrong123@")
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
+		loginIdentifier(EMAIL, PASSWORD).andExpect(status().isLocked());
+		loginIdentifier("an.nguyen", PASSWORD).andExpect(status().isLocked());
+	}
+
+	@Test
+	void username_respectsPendingAndAdministrativeSuspension() throws Exception {
+		user.setEmailVerified(false);
+		userRepository.save(user);
+		loginIdentifier("an.nguyen", PASSWORD)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("PENDING"));
+		user.setSuspendedAt(java.time.Instant.now());
+		userRepository.save(user);
+		loginIdentifier("an.nguyen", PASSWORD)
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"));
+	}
+
+	@Test
+	void missingOrOversizedIdentifier_isValidationError() throws Exception {
+		loginIdentifier("   ", PASSWORD).andExpect(status().isBadRequest());
+		loginIdentifier("a".repeat(321), PASSWORD).andExpect(status().isBadRequest());
+		mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"password\":\"Abcd1234@\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
 	@Test
 	void login_success_returnsAccessToken_setsRefreshCookie() throws Exception {
 		login(EMAIL, PASSWORD)
