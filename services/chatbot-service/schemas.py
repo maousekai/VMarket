@@ -35,7 +35,8 @@ class ChatRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def printable(cls, value):
-        value = value.strip()
+        # Browsers submit <textarea> line breaks as CRLF; keep one kind of line break.
+        value = value.replace("\r\n", "\n").replace("\r", "\n").strip()
         if not value or any(ord(c) < 32 and c not in "\n\t" for c in value):
             raise ValueError("Invalid message")
         return value

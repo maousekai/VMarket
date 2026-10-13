@@ -13,7 +13,7 @@ MAX_HISTORY = 200
 # A turn's question and reply share createdAt and turnId, so two turns saved in the same millisecond
 # still read back as question, reply, question, reply instead of interleaving.
 MESSAGE_ORDER = [("createdAt", ASCENDING), ("turnId", ASCENDING), ("position", ASCENDING)]
-MESSAGE_ORDER_INDEX = [("conversationId", ASCENDING)] + MESSAGE_ORDER
+MESSAGE_ORDER_INDEX = [("conversationId", ASCENDING), ("userId", ASCENDING)] + MESSAGE_ORDER
 
 
 class ChatStore:
@@ -28,7 +28,10 @@ class ChatStore:
         self.conversations.create_index([("userId", ASCENDING), ("updatedAt", DESCENDING)])
         self.messages.create_index(MESSAGE_ORDER_INDEX)
         self.knowledge.create_index([("source", ASCENDING)])
+        self.knowledge.create_index([("embedder", ASCENDING)])
         self.tickets.create_index([("userId", ASCENDING), ("createdAt", DESCENDING)])
+        self.tickets.create_index([("createdAt", DESCENDING)])  # An ADMIN lists every ticket, newest first.
+        self.tickets.create_index([("conversationId", ASCENDING)])
 
     def ping(self):
         self.client.admin.command("ping")
@@ -89,6 +92,14 @@ class ChatStore:
                   "question": question, "status": "OPEN", "createdAt": now()}
         self.tickets.insert_one(ticket)
         return ticket
+
+    def open_ticket(self, user_id, conversation_id):
+        return self.tickets.find_one({"conversationId": conversation_id, "userId": user_id, "status": "OPEN"})
+
+    def ticket_owner(self, conversation_id):
+        """The user who asked for support from this conversation, or None when nobody did."""
+        ticket = self.tickets.find_one({"conversationId": conversation_id}, {"userId": 1})
+        return ticket["userId"] if ticket else None
 
     def list_tickets(self, user_id=None, limit=100):
         return list(self.tickets.find({} if user_id is None else {"userId": user_id})

@@ -107,6 +107,13 @@ class MemoryStore:
         self.tickets.append(ticket)
         return ticket
 
+    def open_ticket(self, user_id, conversation_id):
+        return next((t for t in self.tickets if t["conversationId"] == conversation_id and t["userId"] == user_id
+                     and t["status"] == "OPEN"), None)
+
+    def ticket_owner(self, conversation_id):
+        return next((t["userId"] for t in self.tickets if t["conversationId"] == conversation_id), None)
+
     def list_tickets(self, user_id=None, limit=100):
         return [t for t in self.tickets if user_id is None or t["userId"] == user_id]
 
@@ -317,12 +324,14 @@ class IdentityChecks(unittest.TestCase):
         lookups = {"đơn hàng của tôi tới đâu rồi": None, "kiểm tra đơn hàng giúp mình": None,
                    "don hang cua toi da giao chua": None, "trạng thái đơn hàng": None,
                    f"đơn {ORDER.lower()} sao rồi": ORDER, f"kiểm tra {ORDER}": ORDER,
-                   "tôi vừa đặt 1 đơn, khi nào giao": None}
+                   "tôi vừa đặt 1 đơn, khi nào giao": None, "Xem các đơn hàng": None,
+                   "Cho tôi xem danh sách đơn hàng": None, "Lịch sử đơn hàng": None}
         for message, order_id in lookups.items():
             with self.subTest(message=message):
                 self.assertEqual(order_intent(message), (True, order_id))
         for message in ("làm sao để hủy đơn hàng", "chính sách đổi trả đơn hàng của tôi", "thủ tục đơn giản không",
-                        "hướng dẫn theo dõi đơn hàng", f"sản phẩm {ORDER} còn hàng không", "COD là gì"):
+                        "hướng dẫn theo dõi đơn hàng", f"sản phẩm {ORDER} còn hàng không", "COD là gì",
+                        "hướng dẫn xem lịch sử đơn hàng", "danh sách sản phẩm đang bán"):
             with self.subTest(message=message):
                 self.assertFalse(order_intent(message)[0])
 
@@ -500,11 +509,46 @@ class ChatApi(unittest.TestCase):
         self.assertNotIn("userId", tickets(user=ALICE)[0])
         self.assertEqual([(t["id"], t["userId"]) for t in tickets(user="admin", roles=("ADMIN",))], [("T1", ALICE), ("T2", BOB)])
 
+    def test_asking_for_support_again_reuses_the_open_ticket(self):
+        h = Harness()
+        alice = bearer(user=ALICE)
+        first = h.ask("cho tôi gặp nhân viên hỗ trợ", alice).json()
+        again = h.ask("alo nhân viên đâu rồi", alice, conversationId=first["conversationId"]).json()
+        self.assertEqual((again["intent"], again["handoff"]), ("handoff", {"suggested": True, "ticketId": "T1"}))
+        self.assertIn("#T1", again["reply"])
+        self.assertEqual(len(h.store.tickets), 1)
+        # A closed ticket, another conversation and another user each get a ticket of their own.
+        h.store.tickets[0]["status"] = "CLOSED"
+        reopened = h.ask("cho tôi gặp nhân viên", alice, conversationId=first["conversationId"]).json()
+        other = h.ask("cho tôi gặp nhân viên", alice).json()
+        theirs = h.ask("cho tôi gặp nhân viên", bearer(user=BOB)).json()
+        self.assertEqual([r["handoff"]["ticketId"] for r in (reopened, other, theirs)], ["T2", "T3", "T4"])
+
+    def test_admin_reads_only_conversations_that_raised_a_ticket(self):
+        h = Harness()
+        alice, admin = bearer(user=ALICE), bearer(user="admin", roles=("ADMIN",))
+        private = h.ask("Chính sách đổi trả như thế nào?", alice).json()["conversationId"]
+        raised = h.ask("Chính sách đổi trả như thế nào?", alice).json()["conversationId"]
+        h.ask("cho tôi gặp nhân viên hỗ trợ", alice, conversationId=raised)
+        path = BASE + "/conversations/{}/messages"
+        seen = h.client.get(path.format(raised), headers=admin)
+        self.assertEqual([m["content"] for m in seen.json()["messages"]][::2],
+                         ["Chính sách đổi trả như thế nào?", "cho tôi gặp nhân viên hỗ trợ"])
+        self.assertEqual(h.client.get(path.format(private), headers=admin).status_code, 404)
+        # Reading is all the ticket grants: no other buyer gets in, and the ADMIN cannot write into it.
+        self.assertEqual(h.client.get(path.format(raised), headers=bearer(user=BOB)).status_code, 404)
+        self.assertEqual(h.ask("xin chào", admin, conversationId=raised).status_code, 404)
+        self.assertEqual(h.client.get(BASE + "/conversations", headers=admin).json()["conversations"], [])
+
     def test_small_talk_and_validation(self):
         h = Harness()
         self.assertEqual(h.ask("Xin chào shop").json()["intent"], "small_talk")
         self.assertEqual(h.ask("cảm ơn bạn nhé").json()["intent"], "small_talk")
-        for body in ({}, {"message": ""}, {"message": "   "}, {"message": "x" * 1001}, {"message": "a\x00b"},
+        # A multi-line message typed on Windows or in a <textarea> arrives with CRLF line breaks.
+        multiline = h.ask("Chính sách đổi trả\r\nnhư thế nào?\r\n", bearer())
+        self.assertEqual((multiline.status_code, multiline.json()["intent"]), (200, "answer"))
+        self.assertEqual(h.store.messages[0]["content"], "Chính sách đổi trả\nnhư thế nào?")
+        for body in ({}, {"message": ""}, {"message": "\r\n"}, {"message": "   "}, {"message": "x" * 1001}, {"message": "a\x00b"},
                      {"message": "hi", "conversationId": "../x"}, {"message": 5}):
             with self.subTest(body=body):
                 response = h.client.post(BASE + "/messages", json=body)

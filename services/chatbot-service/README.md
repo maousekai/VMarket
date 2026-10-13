@@ -46,6 +46,7 @@ Docker (context là chính thư mục service): `docker build -t vmarket-chatbot
 Ý định được quyết định bằng luật cố định, theo thứ tự:
 
 1. **Yêu cầu gặp người hỗ trợ** (FR-BOT-03) → người đã đăng nhập được tạo phiếu hỗ trợ; khách được hướng dẫn liên hệ.
+   Hỏi lại trong cùng hội thoại khi phiếu còn `OPEN` thì nhận lại mã phiếu đó, không tạo phiếu mới.
 2. **Hỏi trạng thái đơn hàng** (FR-BOT-02) → gọi order-service; khách được yêu cầu đăng nhập.
 3. **Chào hỏi / cảm ơn** → câu chào cố định.
 4. **Còn lại là RAG** (FR-BOT-01): tìm các đoạn tri thức gần nhất theo cosine.
@@ -67,7 +68,8 @@ Mọi câu trả lời RAG kèm `sources` (đoạn tri thức đã dùng). LLM l
 - Câu trả lời đơn hàng chỉ gồm mã, trạng thái, thời điểm đặt, số sản phẩm, tổng tiền — không lặp lại địa chỉ/số
   điện thoại. Dữ liệu đơn hàng **không bao giờ** được gửi tới nhà cung cấp LLM, kể cả qua lịch sử hội thoại.
 - Lịch sử và phiếu hỗ trợ luôn được lọc theo `userId` của chủ sở hữu ngay ở tầng truy vấn MongoDB; id hội thoại
-  của người khác trả 404. Vai trò `ADMIN` xem được mọi phiếu hỗ trợ.
+  của người khác trả 404. Vai trò `ADMIN` xem được mọi phiếu hỗ trợ và đọc được (chỉ đọc) tin nhắn của hội
+  thoại đã phát sinh phiếu; hội thoại không có phiếu vẫn trả 404 với `ADMIN`.
 - Log không ghi nội dung chat, token hay URL.
 
 ## Kho tri thức

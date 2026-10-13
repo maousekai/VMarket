@@ -6,15 +6,23 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from pymongo import DESCENDING
 
 from knowledge import HashingEmbedder, KnowledgeIndex
 from main import create_app
 from manage import faq_chunks, ingest_faq
 from settings import Settings
-from store import ChatStore
+from store import MESSAGE_ORDER, ChatStore
 from support import bearer
 
 BASE = "/api/ai/chat"
+
+
+def stages(plan):
+    """Every stage name of an explain plan, whatever shape the server version nests it in."""
+    children = plan.values() if isinstance(plan, dict) else plan if isinstance(plan, list) else ()
+    found = {plan["stage"]} if isinstance(plan, dict) and "stage" in plan else set()
+    return found.union(*map(stages, children))
 
 
 class MongoChecks(unittest.TestCase):
@@ -68,6 +76,34 @@ class MongoChecks(unittest.TestCase):
             self.assertEqual((question["turnId"], reply["content"]), (reply["turnId"], question["content"].replace("hỏi", "đáp")))
         recent = self.store.recent_messages("alice", "d" * 32, 4)
         self.assertEqual(recent, messages[-4:])
+
+    def test_tickets_of_a_conversation(self):
+        ticket = self.store.create_ticket("alice", "e" * 32, "gặp nhân viên")
+        self.assertEqual(self.store.open_ticket("alice", "e" * 32)["_id"], ticket["_id"])
+        self.assertIsNone(self.store.open_ticket("bob", "e" * 32))
+        self.assertIsNone(self.store.open_ticket("alice", "f" * 32))
+        self.assertEqual((self.store.ticket_owner("e" * 32), self.store.ticket_owner("f" * 32)), ("alice", None))
+        self.store.tickets.update_one({"_id": ticket["_id"]}, {"$set": {"status": "CLOSED"}})
+        self.assertIsNone(self.store.open_ticket("alice", "e" * 32))
+
+    def test_every_query_is_served_by_an_index(self):
+        self.store.ensure_indexes()
+        owned = {"conversationId": "d" * 32, "userId": "alice"}
+        queries = {
+            "knowledge by embedder": self.store.knowledge.find({"embedder": "hashing-v1-1024"}),
+            "knowledge by source": self.store.knowledge.find({"source": "faq", "embedder": "hashing-v1-1024"}),
+            "conversations": self.store.conversations.find({"userId": "alice"}).sort("updatedAt", DESCENDING),
+            "messages": self.store.messages.find(owned).sort(MESSAGE_ORDER),
+            "recent messages": self.store.messages.find(owned).sort([(key, DESCENDING) for key, _ in MESSAGE_ORDER]),
+            "own tickets": self.store.tickets.find({"userId": "alice"}).sort("createdAt", DESCENDING),
+            "all tickets": self.store.tickets.find({}).sort("createdAt", DESCENDING),
+            "open ticket": self.store.tickets.find({**owned, "status": "OPEN"}),
+        }
+        for name, cursor in queries.items():
+            with self.subTest(query=name):
+                used = stages(cursor.explain()["queryPlanner"]["winningPlan"])
+                self.assertIn("IXSCAN", used)
+                self.assertFalse(used & {"COLLSCAN", "SORT"}, used)
 
     def test_api_end_to_end_on_mongodb(self):
         with TestClient(create_app(self.settings, ChatStore(self.settings))) as client:

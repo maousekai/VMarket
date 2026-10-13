@@ -109,9 +109,16 @@ def create_app(settings=None, store=None, embedder=None, answerer=None, orders=N
     @app.get(BASE + "/conversations/{conversation_id}/messages")
     async def messages(request: Request, conversation_id: str):
         user = require(identity(request))
-        if not CONVERSATION.fullmatch(conversation_id) or not await owned(store.conversation, user.user_id, conversation_id):
+        owner = user.user_id
+        if not CONVERSATION.fullmatch(conversation_id):
+            owner = None
+        elif not await owned(store.conversation, owner, conversation_id):
+            # An ADMIN following up a support ticket may read the conversation it was raised from,
+            # and only that: conversations without a ticket stay private to their owner.
+            owner = await owned(store.ticket_owner, conversation_id) if user.admin else None
+        if not owner:
             raise ChatError(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại")
-        found = await owned(store.list_messages, user.user_id, conversation_id)
+        found = await owned(store.list_messages, owner, conversation_id)
         return {"conversationId": conversation_id, "messages": [public_message(m) for m in found]}
 
     @app.get(BASE + "/tickets")

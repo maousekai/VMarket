@@ -19,7 +19,7 @@ ORDER_WORD = re.compile(r"\b(don(?! gian)|kien hang|order)\b")
 STATUS_CUE = re.compile(
     r"cua (toi|minh|em|anh|chi|tui)|(toi|minh|em|tui) (da |vua |moi )?(dat|mua)|trang thai|tinh trang|toi dau|den dau"
     r"|o dau|tra cuu|kiem tra|theo doi|giao chua|da giao|chua (nhan|toi|den|giao)|(bao gio|khi nao) (toi|den|giao|nhan)"
-    r"|xem don|don nao")
+    r"|xem (cac |tat ca |nhung |lai )?don|don nao|danh sach|lich su")
 HOW_TO = re.compile(r"lam sao|lam the nao|cach |huong dan|chinh sach|quy dinh|dieu kien")
 STATUS_LABELS = {"PENDING": "Chờ xác nhận", "PROCESSING": "Đang chuẩn bị hàng", "SHIPPED": "Đang giao",
                  "DELIVERED": "Đã giao", "CANCELLED": "Đã hủy"}
