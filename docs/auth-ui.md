@@ -7,10 +7,28 @@ remain responsive. There is no remember-me control or user-selectable account ro
 
 ## Run locally
 
+Use the existing Compose project `vmarket` for local development. Create a root `.env`
+from `.env.example` only when it is missing, preserving the credentials for existing
+database volumes. Fill the required MinIO credentials even when the search profile is
+disabled, and include the frontend origin in `CORS_ALLOWED_ORIGINS`.
+
+From the repository root:
+
 ```powershell
+docker compose -p vmarket up -d --build postgres rabbitmq auth-service user-service shop-service api-gateway
 cd frontend
 npm ci
 npm run dev
+```
+
+Keep the containerized frontend stopped while Vite uses port 5173. If using the nginx
+frontend, stop Vite and start `frontend` in the same `vmarket` project. Updating services
+must preserve the normal PostgreSQL volume; do not use `down -v` on this project.
+
+Local OTP/reset codes are in the Auth log:
+
+```powershell
+docker compose -p vmarket logs --since 10m auth-service
 ```
 
 Start Gateway, Auth, User and Shop with a shared `AUTH_JWT_SECRET` and PostgreSQL/RabbitMQ.
@@ -55,6 +73,13 @@ Use Java 17 for Maven. The backend Dockerfiles build and run Java 17 regardless 
 host JDK.
 
 ## Real-backend acceptance tests
+
+The persistent local development project is `vmarket`. To keep Docker Desktop showing
+only that project, run the isolated acceptance suite through GitHub Actions. Its
+containers exist on the temporary GitHub runner, are cleaned up after the job and are
+not published to a container registry. If running the isolated suite locally, remove
+its disposable project when finished; do not rename it to `vmarket` or run its fixtures
+against development data.
 
 The dedicated Compose file creates an isolated stack from current source with disposable
 PostgreSQL **tmpfs** storage. It does not mount the normal development databases or need
