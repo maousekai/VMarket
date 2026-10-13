@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import eslintConfigPrettier from 'eslint-config-prettier'
 
 export default [
-  { ignores: ['dist', 'node_modules'] },
+  {
+    ignores: ['dist', 'node_modules', '.cache', 'test-results', 'playwright-report', 'blob-report'],
+  },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {

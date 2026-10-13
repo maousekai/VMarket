@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+playwright-report/
+test-results/
+blob-report/
+.vitest/
+.cache/
 
 # Environment variables (giu .env.example trong repo)
 .env
