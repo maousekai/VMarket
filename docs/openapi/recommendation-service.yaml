@@ -1,0 +1,114 @@
+openapi: 3.1.0
+info:
+  title: VMarket Recommendation Service
+  version: 1.0.0
+  description: PR-1 implements content similarity and popular/category fallback for guests and authenticated users.
+servers: [{url: 'http://localhost:8080'}]
+paths:
+  /api/ai/recommendations/for-you:
+    get:
+      description: Optional bearer auth. Invalid supplied tokens return 401. Only category_id and limit are accepted.
+      security: [{Bearer: []}, {}]
+      parameters:
+        - {name: category_id, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Popular eligible products; PR-1 does not personalize.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, items]
+                properties:
+                  user_id: {type: string, description: Verified JWT subject or empty string for guest}
+                  items: {$ref: '#/components/schemas/Items'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/recommendations/similar/{product_id}:
+    get:
+      description: Content/category similarity with price proximity as tie-breaker. Ineligible seeds return 404. Only limit is accepted.
+      security: [{Bearer: []}, {}]
+      parameters:
+        - {name: product_id, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Unique eligible products excluding the seed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [product_id, items]
+                properties:
+                  product_id: {type: string}
+                  items: {$ref: '#/components/schemas/Items'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /api/ai/recommendations/health:
+    get:
+      responses:
+        '200':
+          description: Liveness and coarse dependency state; last refresh does not certify complete synchronization.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, postgres, redis, rabbitmq, catalog]
+                properties:
+                  status: {type: string, enum: [UP]}
+                  service: {type: string, const: recommendation-service}
+                  postgres: {type: string, enum: [ready, unavailable]}
+                  redis: {type: string, enum: [ready, unavailable]}
+                  rabbitmq: {type: string, enum: [ready, unavailable]}
+                  catalog:
+                    type: object
+                    required: [items, lastRefreshAt]
+                    properties:
+                      items: {type: [integer, 'null'], minimum: 0}
+                      lastRefreshAt: {type: [string, 'null'], format: date-time}
+components:
+  securitySchemes:
+    Bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 12}}
+  schemas:
+    Items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/Product'}}
+    Product:
+      type: object
+      additionalProperties: false
+      required: [id, shopId, name, description, imageUrls, categoryId, currency, minPrice, maxPrice, ratingAverage, ratingCount, soldCount, availableStock]
+      properties:
+        id: {type: string}
+        shopId: {type: string}
+        name: {type: string}
+        description: {type: string}
+        imageUrls: {type: array, items: {type: string}, maxItems: 9}
+        categoryId: {type: [string, 'null']}
+        currency: {type: string, const: VND}
+        minPrice: {type: [integer, 'null'], minimum: 0}
+        maxPrice: {type: [integer, 'null'], minimum: 0}
+        ratingAverage: {type: number, minimum: 0, maximum: 5}
+        ratingCount: {type: integer, minimum: 0}
+        soldCount: {type: integer, minimum: 0}
+        availableStock: {type: integer, minimum: 1}
+    Error:
+      type: object
+      required: [timestamp, status, error, path]
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer}
+        path: {type: string}
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string, enum: [INVALID_QUERY, UNAUTHORIZED, PRODUCT_NOT_FOUND, RECOMMENDATION_UNAVAILABLE]}
+            message: {type: string}
+  responses:
+    Error:
+      description: Stable validation/auth/not-found/dependency error.
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
