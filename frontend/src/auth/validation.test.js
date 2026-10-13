@@ -9,9 +9,10 @@ import {
 
 describe('form validation against backend contracts', () => {
   it('allows existing passwords during login without enforcing new-password rules', () => {
-    expect(validateLogin({ identifier: 'an@example.com', password: 'old' })).toEqual({})
-    expect(validateLogin({ identifier: 'An.Nguyen', password: 'old' })).toEqual({})
-    expect(validateLogin({ identifier: '', password: '' })).toHaveProperty('identifier')
+    expect(validateLogin({ email: 'an@example.com', password: 'old' })).toEqual({})
+    expect(validateLogin({ email: ' An@Example.com ', password: 'old' })).toEqual({})
+    expect(validateLogin({ email: 'An.Nguyen', password: 'old' })).toHaveProperty('email')
+    expect(validateLogin({ email: '', password: '' })).toHaveProperty('email')
   })
 
   it('rejects invalid usernames, weak passwords, and mismatching confirmation', () => {

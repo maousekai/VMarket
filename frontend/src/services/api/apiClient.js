@@ -43,7 +43,7 @@ apiClient.interceptors.response.use(
       config &&
       !config.skipAuth &&
       !isAuthRequest(config) &&
-      ['ACCOUNT_LOCKED', 'ACCOUNT_SUSPENDED'].includes(error.response?.data?.error?.code) &&
+      error.response?.data?.error?.code === 'ACCOUNT_SUSPENDED' &&
       config.authGeneration === sessionManager?.getGeneration()
     ) {
       sessionManager.invalidateSession()

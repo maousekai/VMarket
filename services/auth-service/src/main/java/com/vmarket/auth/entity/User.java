@@ -56,7 +56,7 @@ public class User extends BaseEntity {
 	@Column(name = "failed_login_attempts", nullable = false)
 	private int failedLoginAttempts;
 
-	/** Thời điểm hết khoá; {@code null} = không bị khoá. */
+	/** Thời điểm hết khoá thao tác mật khẩu; không thu hồi các phiên đang có. */
 	@Column(name = "locked_until")
 	private Instant lockedUntil;
 

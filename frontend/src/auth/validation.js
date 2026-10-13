@@ -16,13 +16,9 @@ function passwordError(password) {
 
 const compact = (errors) => Object.fromEntries(Object.entries(errors).filter(([, value]) => value))
 
-export const validateLogin = ({ identifier, password }) =>
+export const validateLogin = ({ email, password }) =>
   compact({
-    identifier: !identifier?.trim()
-      ? 'Vui lòng nhập tên tài khoản hoặc email.'
-      : identifier.trim().length > 320
-        ? 'Tên tài khoản hoặc email tối đa 320 ký tự.'
-        : undefined,
+    email: emailError(email),
     password: password?.trim() ? undefined : 'Vui lòng nhập mật khẩu.',
   })
 

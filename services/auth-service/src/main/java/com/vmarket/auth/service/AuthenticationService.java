@@ -30,8 +30,8 @@ import lombok.extern.slf4j.Slf4j;
  * FR-AUTH-02 — Đăng nhập bằng mật khẩu (JWT) và làm mới access token.
  *
  * <ul>
- *   <li>Đăng nhập bằng username hoặc email. Sai 5 lần liên tiếp → khoá tài khoản 15 phút và thu
- *       hồi toàn bộ refresh token của user (SRS FR-AUTH-06).</li>
+ *   <li>Đăng nhập bằng email. Sai 5 lần liên tiếp → khoá thao tác dùng mật khẩu 15 phút.
+ *       Các phiên hợp lệ đã có tiếp tục refresh; khoá quản trị vẫn thu hồi phiên.</li>
  *   <li>User chưa xác thực email vẫn đăng nhập được — response {@code status = PENDING}.</li>
  *   <li>{@code /refresh} xoay vòng. Dùng lại token đã thu hồi <b>quá</b> khoảng ân
  *       hạn → coi là bị đánh cắp → thu hồi toàn bộ phiên. Dùng lại trong khoảng ân
@@ -75,16 +75,12 @@ public class AuthenticationService {
 
 	@Transactional(noRollbackFor = ApiException.class)
 	public TokenIssuer.IssuedTokens login(LoginRequest request, DeviceMeta device) {
-		String identifier = request.identifier().trim();
-		// Username không chứa @; giữ nguyên hoa/thường như lúc đăng ký.
-		// Cả hai truy vấn khoá cùng dòng user trước khi đọc trạng thái hay tăng số lần sai.
-		User user = (identifier.contains("@")
-				? userRepository.findByEmailForUpdate(identifier.toLowerCase(Locale.ROOT))
-				: userRepository.findByUsernameForUpdate(identifier)).orElse(null);
+		String email = request.email().trim().toLowerCase(Locale.ROOT);
+		User user = userRepository.findByEmailForUpdate(email).orElse(null);
 
 		if (user == null || !StringUtils.hasText(user.getPasswordHash())) {
 			// So sánh giả để thời gian phản hồi giống nhánh có user (chống timing oracle).
-			// user == null: định danh chưa đăng ký. passwordHash rỗng: tài khoản tạo qua OTP, chưa đặt mật khẩu.
+			// user == null: email chưa đăng ký. passwordHash rỗng: tài khoản tạo qua OTP, chưa đặt mật khẩu.
 			passwordEncoder.matches(request.password(), DUMMY_HASH);
 			throw invalidCredentials();
 		}
@@ -152,12 +148,8 @@ public class AuthenticationService {
 					user.getId(), revoked);
 			throw ApiException.accountSuspended();
 		}
-		if (isLocked(user, now)) {
-			// Thu hồi toàn bộ phiên (SRS FR-AUTH-06) khi tài khoản đang bị khoá tạm.
-			int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
-			log.warn("Refresh bị từ chối do tài khoản bị khoá (userId={}), thu hồi {} phiên", user.getId(), revoked);
-			throw accountLocked(user.getLockedUntil(), now);
-		}
+		// Khoá do nhập sai chỉ áp dụng cho thao tác dùng mật khẩu. Một phiên đã xác thực
+		// không mất quyền refresh vì người khác gửi mật khẩu sai; kiểm tra Admin ở trên vẫn áp dụng.
 
 		String rawNew = tokenCodec.generate();
 		RefreshToken replacement = new RefreshToken();
@@ -194,7 +186,7 @@ public class AuthenticationService {
 
 	/**
 	 * Ghi nhận một lần đăng nhập sai (UPDATE nguyên tử). Nếu chạm ngưỡng thì khoá
-	 * tài khoản + thu hồi toàn bộ refresh token. Trả về {@code locked_until} nếu
+	 * thao tác dùng mật khẩu, giữ các phiên đang có. Trả về {@code locked_until} nếu
 	 * vừa bị khoá, ngược lại {@code null}.
 	 */
 	Instant registerFailedAttempt(User user, Instant now) {
@@ -207,20 +199,19 @@ public class AuthenticationService {
 		Instant lockedUntil = now.plus(LOCK_DURATION);
 		userRepository.lockUntil(user.getId(), lockedUntil);
 		activityRepository.save(AccountActivity.of(user.getId(), AccountActivityType.LOGIN_LOCKED, now));
-		int revoked = refreshTokenRepository.revokeAllActiveByUserId(user.getId(), now);
-		log.warn("Khoá tài khoản userId={} do {} lần đăng nhập sai; thu hồi {} phiên",
-				user.getId(), MAX_FAILED_ATTEMPTS, revoked);
+		log.warn("Khoá thao tác dùng mật khẩu userId={} do {} lần thử sai; giữ các phiên đang có",
+				user.getId(), MAX_FAILED_ATTEMPTS);
 		return lockedUntil;
 	}
 
 	private ApiException invalidCredentials() {
 		return new ApiException("INVALID_CREDENTIALS", HttpStatus.UNAUTHORIZED,
-				"Tên tài khoản, email hoặc mật khẩu không đúng");
+				"Email hoặc mật khẩu không đúng");
 	}
 
 	ApiException accountLocked(Instant lockedUntil, Instant now) {
 		long minutes = Math.max(1, Duration.between(now, lockedUntil).toMinutes() + 1);
 		return new ApiException("ACCOUNT_LOCKED", HttpStatus.LOCKED,
-				"Tài khoản tạm khoá do đăng nhập sai nhiều lần. Thử lại sau khoảng " + minutes + " phút");
+				"Thao tác dùng mật khẩu tạm khoá do nhập sai nhiều lần. Thử lại sau khoảng " + minutes + " phút");
 	}
 }

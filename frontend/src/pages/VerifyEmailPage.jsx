@@ -36,7 +36,17 @@ export default function VerifyEmailPage() {
     ['verify', 'profile-error'].includes(phase) &&
     !auth.registrationDraft
   )
-    return <Navigate to={safeReturnTo(location.state?.returnTo, auth.session.roles)} replace />
+    return (
+      <Navigate
+        to={
+          auth.registrationDraftWarning
+            ? '/profile'
+            : safeReturnTo(location.state?.returnTo, auth.session.roles)
+        }
+        state={auth.registrationDraftWarning ? { message: auth.registrationDraftWarning } : null}
+        replace
+      />
+    )
   const change = (event) => setValues({ ...values, [event.target.name]: event.target.value })
   function finish() {
     auth.clearRegistrationDraft()
@@ -86,7 +96,18 @@ export default function VerifyEmailPage() {
           return
         }
       }
-      navigate(safeReturnTo(location.state?.returnTo, session.roles), { replace: true })
+      const currentAuth = auth.getSnapshot ? auth.getSnapshot() : auth
+      navigate(
+        currentAuth.registrationDraftWarning
+          ? '/profile'
+          : safeReturnTo(location.state?.returnTo, session.roles),
+        {
+          replace: true,
+          state: currentAuth.registrationDraftWarning
+            ? { message: currentAuth.registrationDraftWarning }
+            : null,
+        },
+      )
     } catch (failure) {
       if (!action.current()) return
       setPhase('verify')
@@ -137,6 +158,7 @@ export default function VerifyEmailPage() {
           dùng sau.
         </FormMessage>
         <FormMessage error={error} />
+        <FormMessage>{auth.registrationDraftWarning}</FormMessage>
         <div className="auth-actions">
           <button className="button button--primary" disabled={busy} onClick={persistProfile}>
             {busy ? 'Đang lưu…' : 'Thử lại'}
@@ -149,6 +171,7 @@ export default function VerifyEmailPage() {
     )
   return (
     <AuthLayout title="Xác thực email" description="Nhập mã 6 số để hoàn tất tài khoản VMarket.">
+      <FormMessage>{auth.registrationDraftWarning}</FormMessage>
       <FormMessage>{message}</FormMessage>
       <FormMessage error={error} />
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy}>

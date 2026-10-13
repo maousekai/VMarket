@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { validateProfile } from '../auth/validation'
 import { getApiError } from '../services/api/apiClient'
@@ -123,6 +123,7 @@ function ProfileForm({ profile, session, saveProfile }) {
 }
 
 export default function ProfilePage() {
+  const location = useLocation()
   const { session, userProfile, profileState, profileError, loadProfile, saveProfile } = useAuth()
   const name = userProfile?.fullName || session.username
   return (
@@ -132,6 +133,11 @@ export default function ProfilePage() {
         <span aria-hidden="true">›</span>
         <span>Hồ sơ cá nhân</span>
       </nav>
+      {location.state?.message && (
+        <p className="account-notice account-notice--warning" role="status">
+          {location.state.message}
+        </p>
+      )}
       <div className="account-layout">
         <aside className="account-sidebar">
           <section className="account-card account-summary">

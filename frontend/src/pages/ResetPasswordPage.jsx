@@ -44,9 +44,9 @@ export default function ResetPasswordPage() {
         newPassword: values.newPassword,
       })
       if (!action.current()) return
-      const currentSession = auth.getSnapshot?.().session || auth.session
+      const currentSession = auth.getSnapshot ? auth.getSnapshot().session : auth.session
       if (
-        !currentSession ||
+        currentSession &&
         currentSession.email.toLowerCase() === values.email.trim().toLowerCase()
       )
         auth.invalidateSession()

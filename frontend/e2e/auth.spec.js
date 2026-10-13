@@ -38,9 +38,44 @@ async function submitReset(page, email, code, password) {
   await page.getByRole('button', { name: 'Lưu mật khẩu mới', exact: true }).click()
 }
 
-test('registration → OTP → real profile; reload restores HttpOnly session', async ({ page }) => {
+async function observeLogout(page) {
+  await page.evaluate(() => {
+    window.__logoutEvents = 0
+    window.__authCheckpoint = new Promise((resolve) => {
+      const channel = new BroadcastChannel('vmarket-auth')
+      channel.onmessage = ({ data }) => {
+        if (data?.type === 'logout') window.__logoutEvents += 1
+        if (data?.type === 'e2e-checkpoint') resolve()
+      }
+      window.__authObserver = channel
+    })
+  })
+}
+
+async function expectNoLogout(source, observer) {
+  await source.evaluate(() => {
+    const channel = new BroadcastChannel('vmarket-auth')
+    channel.postMessage({ type: 'e2e-checkpoint' })
+    channel.close()
+  })
+  await observer.evaluate(() => window.__authCheckpoint)
+  expect(await observer.evaluate(() => window.__logoutEvents)).toBe(0)
+  await expect(observer).toHaveURL(/\/profile/)
+  await expect(observer.getByRole('heading', { name: 'Hồ sơ cá nhân', exact: true })).toBeVisible()
+}
+
+test('registration draft survives OTP page reload; real profile and HttpOnly session persist', async ({
+  page,
+}) => {
   const account = newAccount()
   await fillRegistration(page, account)
+  await page.reload()
+  await expect(page.getByLabel('Email', { exact: true })).toHaveValue(account.email)
+  const draftStorage = await page.evaluate(() => JSON.stringify({ ...sessionStorage }))
+  expect(draftStorage).toContain(account.fullName)
+  expect(draftStorage).toContain(account.phone)
+  expect(draftStorage).not.toContain(account.password)
+  expect(draftStorage).not.toContain('accessToken')
   await submitOtp(page, await emailCode(account.email))
   await expect(page).not.toHaveURL(/\/verify-email/)
   await page.goto('/profile')
@@ -181,23 +216,20 @@ test('wrong, exhausted and expired OTP; resend issues a real fresh code', async 
   await expect(page).not.toHaveURL(/\/verify-email/)
 })
 
-test('email and username share five-attempt lock; resetting password clears temporary lock', async ({
+test('five failed email logins block new password login; password reset clears temporary lock', async ({
   page,
 }) => {
   const account = await createAccount(page.request)
   await page.goto('/login')
-  await page.getByLabel('Tên tài khoản hoặc email', { exact: true }).fill(account.email)
+  await page.getByLabel('Email', { exact: true }).fill(account.email)
   await page.getByLabel('Mật khẩu', { exact: true }).fill('WrongPassword1!')
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    await page
-      .getByLabel('Tên tài khoản hoặc email', { exact: true })
-      .fill(attempt % 2 ? account.username : account.email)
     const response = page.waitForResponse((res) => res.url().endsWith('/api/auth/login'))
     await page.getByRole('button', { name: 'Đăng nhập', exact: true }).click()
     expect((await response).status()).toBe(attempt === 4 ? 423 : 401)
   }
   await expect(page.getByRole('alert')).toContainText(/(khoá|khóa).*phút/i)
-  await login(page, account, { identifier: account.username })
+  await login(page, account)
   await expect(page.getByRole('alert')).toContainText(/(khoá|khóa).*phút/i)
   await page.goto('/forgot-password')
   await page.getByLabel('Email', { exact: true }).fill(account.email)
@@ -210,9 +242,19 @@ test('email and username share five-attempt lock; resetting password clears temp
   await expect(page).not.toHaveURL(/\/login/)
 })
 
-test('username and email log in to the same real account', async ({ page }) => {
+test('email login is case insensitive; username and identifier payloads are rejected', async ({
+  page,
+}) => {
   const account = await createAccount(page.request)
-  await login(page, account, { identifier: ` ${account.username} ` })
+  for (const data of [
+    { email: account.username, password: account.password },
+    { identifier: account.email, password: account.password },
+  ]) {
+    const response = await page.request.post('/api/auth/login', { data })
+    expect(response.status()).toBe(400)
+    expect((await response.json()).error.code).toBe('VALIDATION_ERROR')
+  }
+  await login(page, account, { email: account.email.toUpperCase() })
   await page.goto('/profile')
   await expect(
     page.getByRole('region', { name: 'Hồ sơ cá nhân' }).getByText(account.email, { exact: true }),
@@ -220,12 +262,132 @@ test('username and email log in to the same real account', async ({ page }) => {
   await openAccountMenu(page)
   await page.getByRole('menuitem', { name: 'Đăng xuất', exact: true }).click()
   await expect(page).toHaveURL(/\/login/)
-  await login(page, account, { identifier: account.email.toUpperCase() })
+  await login(page, account)
   await page.goto('/profile')
   await expect(
     page
       .getByRole('region', { name: 'Hồ sơ cá nhân' })
       .getByText(account.username, { exact: true }),
+  ).toBeVisible()
+})
+
+test('attacker locks new password logins without revoking sessions on either existing device', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const account = await createAccount(page.request)
+  const secondDevice = await browser.newContext({ baseURL })
+  const attacker = await browser.newContext({ baseURL })
+  try {
+    const second = await secondDevice.newPage()
+    for (const device of [page, second]) {
+      await login(device, account)
+      await device.goto('/profile')
+      await expect(
+        device.getByRole('heading', { name: 'Hồ sơ cá nhân', exact: true }),
+      ).toBeVisible()
+    }
+    const cookies = await Promise.all(
+      [page.context(), secondDevice].map(async (context) =>
+        (await context.cookies()).find((cookie) => cookie.name === 'refresh_token'),
+      ),
+    )
+    expect(cookies[0].value).not.toBe(cookies[1].value)
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await attacker.request.post('/api/auth/login', {
+        data: { email: account.email, password: 'WrongPassword1!' },
+      })
+      expect(response.status()).toBe(attempt === 4 ? 423 : 401)
+    }
+    const blocked = await attacker.request.post('/api/auth/login', {
+      data: { email: account.email, password: account.password },
+    })
+    expect(blocked.status()).toBe(423)
+    expect((await blocked.json()).error.code).toBe('ACCOUNT_LOCKED')
+    for (const [index, device] of [page, second].entries()) {
+      const refreshed = device.waitForResponse((response) =>
+        response.url().endsWith('/api/auth/refresh'),
+      )
+      await device.reload()
+      const response = await refreshed
+      expect(response.status()).toBe(200)
+      await response.finished()
+      await expect(
+        device.getByRole('heading', { name: 'Hồ sơ cá nhân', exact: true }),
+      ).toBeVisible()
+      const currentCookie = (await device.context().cookies()).find(
+        (cookie) => cookie.name === 'refresh_token',
+      )
+      expect(currentCookie.value).not.toBe(cookies[index].value)
+      await expect(
+        device
+          .getByRole('region', { name: 'Hồ sơ cá nhân' })
+          .getByText(account.email, { exact: true }),
+      ).toBeVisible()
+    }
+  } finally {
+    await secondDevice.close()
+    await attacker.close()
+  }
+})
+
+test('a guest tab with a missing refresh cookie does not broadcast logout to an active tab', async ({
+  page,
+}) => {
+  const account = await createAccount(page.request)
+  await login(page, account)
+  await page.goto('/profile')
+  await expect(page.getByRole('heading', { name: 'Hồ sơ cá nhân', exact: true })).toBeVisible()
+  await observeLogout(page)
+  const guest = await page.context().newPage()
+  // Simulate this tab having no cookie without deleting the active tab's real shared cookie.
+  await guest.route('**/api/auth/refresh', (route) =>
+    route.fulfill({
+      status: 401,
+      json: { error: { code: 'REFRESH_TOKEN_MISSING', message: 'Thiếu refresh token' } },
+    }),
+  )
+  const refreshed = guest.waitForResponse((response) =>
+    response.url().endsWith('/api/auth/refresh'),
+  )
+  await guest.goto('/login')
+  expect((await refreshed).status()).toBe(401)
+  await expect(guest.getByLabel('Email', { exact: true })).toBeVisible()
+  await expectNoLogout(guest, page)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Hồ sơ cá nhân', exact: true })).toBeVisible()
+})
+
+test('resetting another account in a guest tab preserves the signed-in account in the other tab', async ({
+  page,
+}) => {
+  const signedIn = await createAccount(page.request)
+  const resetAccount = await createAccount(page.request)
+  await login(page, signedIn)
+  await page.goto('/profile')
+  await expect(page.getByRole('heading', { name: 'Hồ sơ cá nhân', exact: true })).toBeVisible()
+  expect(
+    (
+      await page.request.post('/api/auth/password/forgot', { data: { email: resetAccount.email } })
+    ).ok(),
+  ).toBe(true)
+  const code = await emailCode(resetAccount.email, 'reset')
+  await observeLogout(page)
+  const guest = await page.context().newPage()
+  // Keep this tab's local session empty; the other tab still holds a real valid cookie/session.
+  await guest.route('**/api/auth/refresh', (route) => route.abort('failed'))
+  const unavailable = guest.waitForEvent('requestfailed', {
+    predicate: (request) => request.url().endsWith('/api/auth/refresh'),
+  })
+  await guest.goto('/reset-password')
+  await unavailable
+  await submitReset(guest, resetAccount.email, code, 'UpdatedPassword2!')
+  await expect(guest).toHaveURL(/\/login/)
+  await expectNoLogout(guest, page)
+  await page.reload()
+  await expect(
+    page.getByRole('region', { name: 'Hồ sơ cá nhân' }).getByText(signedIn.email, { exact: true }),
   ).toBeVisible()
 })
 
@@ -456,11 +618,11 @@ test('auth forms remain usable at narrow width with keyboard and omit deferred c
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/login')
-  await expect(page.getByLabel('Tên tài khoản hoặc email', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Đăng nhập', exact: true })).toBeVisible()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /google/i })).toHaveCount(0)
-  await page.getByLabel('Tên tài khoản hoặc email', { exact: true }).focus()
+  await page.getByLabel('Email', { exact: true }).focus()
   await page.keyboard.press('Tab')
   await expect(page.getByLabel('Mật khẩu', { exact: true })).toBeFocused()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(

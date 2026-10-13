@@ -10,6 +10,7 @@ import RegisterPage from './RegisterPage'
 import VerifyEmailPage from './VerifyEmailPage'
 import ForgotPasswordPage from './ForgotPasswordPage'
 import ResetPasswordPage from './ResetPasswordPage'
+import ProfilePage from './ProfilePage'
 import { registerAccount, requestOtp, forgotPassword, resetPassword } from '../services/api/authApi'
 
 vi.mock('../services/api/authApi', () => ({
@@ -130,19 +131,22 @@ describe('Safe post-login navigation', () => {
 })
 
 describe('Login flow', () => {
-  it('submits username and does not pass it into email-only password recovery', async () => {
-    const login = vi
-      .fn()
-      .mockRejectedValue(failure(401, 'INVALID_CREDENTIALS', 'Thông tin không đúng.'))
+  it('rejects username before calling the login API', async () => {
+    const login = vi.fn()
     renderPage(<LoginPage />, '/login', { login })
-    change('Tên tài khoản hoặc email', 'An.Nguyen')
+    change('Email', 'An.Nguyen')
     change('Mật khẩu', 'legacy')
     fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập', exact: true }))
-    await screen.findByRole('alert')
-    expect(login).toHaveBeenCalledWith({ identifier: 'An.Nguyen', password: 'legacy' })
+    expect(await screen.findByText('Email không đúng định dạng.')).toBeTruthy()
+    expect(login).not.toHaveBeenCalled()
+  })
+
+  it('preserves the entered email for password recovery', async () => {
+    renderPage(<LoginPage />, '/login')
+    change('Email', active.email)
     fireEvent.click(screen.getByRole('link', { name: 'Quên mật khẩu?' }))
     await screen.findByTestId('destination')
-    expect(destination()).toEqual({ path: '/forgot-password', state: { email: '' } })
+    expect(destination()).toEqual({ path: '/forgot-password', state: { email: active.email } })
   })
   it('preserves returnTo when an existing Pending session redirects to verification', async () => {
     renderPage(<LoginPage />, '/login', { session: pending }, { returnTo: '/profile' })
@@ -155,11 +159,11 @@ describe('Login flow', () => {
       .fn()
       .mockRejectedValue(failure(423, 'ACCOUNT_SUSPENDED', 'Tài khoản bị quản trị viên khoá.'))
     renderPage(<LoginPage />, '/login', { login })
-    change('Tên tài khoản hoặc email', active.email)
+    change('Email', active.email)
     change('Mật khẩu', 'legacy')
     fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập', exact: true }))
     expect(await screen.findByRole('alert')).toBeTruthy()
-    expect(login).toHaveBeenCalledWith({ identifier: active.email, password: 'legacy' })
+    expect(login).toHaveBeenCalledWith({ email: active.email, password: 'legacy' })
   })
 })
 
@@ -175,6 +179,7 @@ describe('Registration flow', () => {
     expect(destination().state.otpError.code).toBe('EMAIL_SEND_FAILED')
     expect(registerAccount).toHaveBeenCalledTimes(1)
     expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith(draft)
+    expect(flow.auth.clearRegistrationDraft).toHaveBeenCalledOnce()
     expect(registerAccount.mock.calls[0][0]).toEqual({
       email: active.email,
       username: 'buyer.one',
@@ -198,6 +203,35 @@ describe('Registration flow', () => {
 })
 
 describe('Email verification and profile completion', () => {
+  it('explains storage failure while still allowing OTP verification', () => {
+    renderPage(<VerifyEmailPage />, '/verify-email', {
+      registrationDraftWarning: 'Không thể lưu tạm. Bạn có thể nhập lại thông tin tại Hồ sơ.',
+    })
+    expect(screen.getByText(/Không thể lưu tạm/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Xác thực email', exact: true }).disabled).toBe(false)
+  })
+
+  it('takes a verified account with an expired draft to profile with an explanation', async () => {
+    const message = 'Thông tin hồ sơ tạm đã hết hạn. Bạn có thể hoàn thiện tại Hồ sơ.'
+    renderPage(<VerifyEmailPage />, '/verify-email', {
+      session: active,
+      registrationDraftWarning: message,
+    })
+    await screen.findByTestId('destination')
+    expect(destination()).toEqual({ path: '/profile', state: { message } })
+  })
+
+  it('shows the lost-draft explanation alongside the profile form', () => {
+    const message = 'Thông tin hồ sơ tạm đã hết hạn. Bạn có thể hoàn thiện tại Hồ sơ.'
+    renderPage(
+      <ProfilePage />,
+      '/profile',
+      { session: active, userProfile: { fullName: 'An', phone: '' }, profileState: 'ready' },
+      { message },
+    )
+    expect(screen.getByText(message)).toBeTruthy()
+    expect(screen.getByLabelText('Họ và tên').value).toBe('An')
+  })
   it('uses the email from a Pending session restored after the screen mounts', async () => {
     const flow = renderPage(<VerifyEmailPage />, '/verify-email')
     await act(async () => flow.changeAuth({ session: pending }))
@@ -246,6 +280,19 @@ describe('Email verification and profile completion', () => {
 })
 
 describe('Forgot/reset password', () => {
+  it.each([
+    ['a guest', null],
+    ['another signed-in account', { ...active, userId: 'other-user', email: 'other@example.com' }],
+  ])('does not invalidate %s when password reset succeeds', async (_, session) => {
+    resetPassword.mockResolvedValue({})
+    const flow = renderPage(<ResetPasswordPage />, '/reset-password', { session })
+    fillReset()
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu mật khẩu mới' }))
+    await screen.findByTestId('destination')
+    expect(flow.auth.invalidateSession).not.toHaveBeenCalled()
+    expect(flow.auth.login).not.toHaveBeenCalled()
+    expect(destination().path).toBe('/login')
+  })
   it('continues with the backend generic response for a forgot-password request', async () => {
     forgotPassword.mockResolvedValue({ message: 'Nếu email tồn tại, mã đã được gửi.' })
     renderPage(<ForgotPasswordPage />, '/forgot-password')

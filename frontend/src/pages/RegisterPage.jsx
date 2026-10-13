@@ -36,6 +36,7 @@ export default function RegisterPage() {
     if (Object.keys(invalid).length) return
     const action = beginAction(auth)
     if (!action) return
+    auth.clearRegistrationDraft()
     setBusy(true)
     try {
       const email = values.email.trim().toLowerCase()

@@ -36,17 +36,17 @@ const successful = (config) => ({ data: { okay: true }, status: 200, config, hea
 afterEach(() => bindSessionManager(undefined))
 
 describe('login API contract', () => {
-  it.each(['An.Nguyen', 'an@example.com'])(
-    'sends identifier %s through the real API wrapper',
-    async (identifier) => {
+  it.each(['an@example.com', 'An@Example.com'])(
+    'sends email %s through the real API wrapper',
+    async (email) => {
       const original = apiClient.defaults.adapter
       const adapter = vi.fn(async (config) => successful(config))
       apiClient.defaults.adapter = adapter
       try {
-        await loginAccount({ identifier, password: 'legacy' })
+        await loginAccount({ email, password: 'legacy' })
         const config = adapter.mock.calls[0][0]
         expect(config.url).toBe('/api/auth/login')
-        expect(JSON.parse(config.data)).toEqual({ identifier, password: 'legacy' })
+        expect(JSON.parse(config.data)).toEqual({ email, password: 'legacy' })
       } finally {
         apiClient.defaults.adapter = original
       }
@@ -130,6 +130,19 @@ describe('protected API requests', () => {
     await expect(apiClient.get('/api/users/me', { adapter })).rejects.toThrow('ACCOUNT_SUSPENDED')
     expect(manager.invalidateSession).toHaveBeenCalledOnce()
     expect(manager.refresh).not.toHaveBeenCalled()
+  })
+
+  it('keeps the current session when a password operation is temporarily locked', async () => {
+    const { manager } = setup()
+    const adapter = vi.fn(async (config) => {
+      throw rejected(config, 423, 'ACCOUNT_LOCKED')
+    })
+    await expect(apiClient.put('/api/users/me/password', {}, { adapter })).rejects.toThrow(
+      'ACCOUNT_LOCKED',
+    )
+    expect(manager.invalidateSession).not.toHaveBeenCalled()
+    expect(manager.refresh).not.toHaveBeenCalled()
+    expect(manager.getSnapshot().session.accessToken).toBe('old-access-token')
   })
 
   it('exposes backend field errors and a retryable network error', () => {

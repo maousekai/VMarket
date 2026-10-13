@@ -144,7 +144,7 @@ src/main/resources/db/migration/   # Flyway (V1, V2, ...)
 | Method & path            | Mô tả                                                      |
 | ------------------------ | -------------------------------------------------------- |
 | `POST /api/auth/register`| FR-AUTH-01 — đăng ký (BUYER, PENDING). 201 / 400 (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) / 409 (`EMAIL_ALREADY_EXISTS`, `USERNAME_ALREADY_EXISTS`, `REGISTRATION_CONFLICT`) |
-| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng username hoặc email. 200 (`TokenResponse` + cookie `refresh_token`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED`** |
+| `POST /api/auth/login`   | FR-AUTH-02 — đăng nhập bằng email. 200 (`TokenResponse` + cookie `refresh_token`) / 401 `INVALID_CREDENTIALS` / **423 `ACCOUNT_LOCKED` hoặc `ACCOUNT_SUSPENDED`** |
 | `POST /api/auth/refresh` | FR-AUTH-02 — làm mới access token bằng cookie `refresh_token` (xoay vòng). 200 / 401 (`REFRESH_TOKEN_MISSING`, `INVALID_REFRESH_TOKEN`, `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_REUSED`, `REFRESH_TOKEN_ROTATION_CONFLICT`) |
 | `POST /api/auth/logout`  | FR-AUTH-06 — thu hồi phiên hiện tại (cookie `refresh_token`) + xoá cookie. 200 (`MessageResponse`, idempotent) |
 | `GET /api/auth/sessions` | FR-AUTH-06 — liệt kê phiên/thiết bị đang hoạt động của user gọi. 200 (`SessionSummary[]`) / 401 (`REFRESH_TOKEN_MISSING`, `SESSION_NOT_FOUND`) |
@@ -189,14 +189,13 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 ≥1 số + ≥1 ký tự đặc biệt (hash BCrypt).
 
 **Đăng nhập (FR-AUTH-02):**
-- Request mới: `{ "identifier": "an.nguyen", "password": "Abcd1234@" }`.
-  `identifier` nhận username hoặc email (trim, không rỗng, tối đa 320 ký tự).
-  Email không phân biệt hoa/thường; username phân biệt hoa/thường như lúc đăng ký.
-  Request cũ `{ "email": "an.nguyen@example.com", "password": "..." }` vẫn được hỗ trợ.
-- Cả hai cách tìm tài khoản đều khoá cùng dòng user trước khi kiểm tra mật khẩu:
-  đổi qua lại username/email vẫn cộng dồn cùng bộ đếm sai, không vượt qua khoá tạm
-  hoặc khoá quản trị. Thông báo sai thông tin không tiết lộ tài khoản có tồn tại.
-  OTP/quên/đặt lại mật khẩu vẫn dùng email.
+- Request: `{ "email": "an.nguyen@example.com", "password": "Abcd1234@" }`.
+  Email bắt buộc hợp lệ và không phân biệt hoa/thường. Không nhận username làm
+  định danh đăng nhập hoặc trường `identifier`; payload thiếu email trả 400.
+  Username vẫn là dữ liệu đăng ký/hiển thị và giữ quy tắc hiện có.
+- Nạp tài khoản theo email và khoá dòng user trước khi kiểm tra mật khẩu để tuần tự
+  hoá đăng nhập với thay đổi mật khẩu và Admin đình chỉ tài khoản. Thông báo sai
+  email/mật khẩu không tiết lộ tài khoản có tồn tại. OTP/quên/đặt lại mật khẩu dùng email.
 - Access token: JWT HS256, `exp` mặc định 15 phút. Claims: `sub` (user id), `email`,
   `username`, `roles`, `email_verified`, `jti`, `iss=auth-service`.
 - Refresh token: chuỗi ngẫu nhiên mờ (không phải JWT), sống 15 ngày, DB chỉ lưu SHA-256.
@@ -207,8 +206,13 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
   Hai request `/refresh` chạy song song cùng token cũ (2 tab, request trùng lặp) →
   request thua trả `401 REFRESH_TOKEN_ROTATION_CONFLICT` nhưng **không** xoá cookie
   (cookie hiện tại có thể đã là token mới do request thắng cuộc ghi).
-- Khoá tài khoản: sai mật khẩu **5 lần liên tiếp** → khoá **15 phút** (423). Đăng nhập
-  đúng → reset bộ đếm.
+- Khoá thao tác mật khẩu: sai mật khẩu **5 lần liên tiếp** → chặn đăng nhập bằng
+  mật khẩu và đổi mật khẩu hiện tại trong **15 phút** (`423 ACCOUNT_LOCKED`).
+  Khoá tạm **không thu hồi refresh token**: các thiết bị đã có phiên vẫn refresh
+  và sử dụng tài khoản; refresh không xoá hoặc kéo dài khoá. Đăng nhập đúng sau
+  khi hết thời gian khoá reset bộ đếm. Xác thực OTP không bị khoá thao tác mật khẩu.
+  Chính sách này phân biệt khoá tạm với Admin đình chỉ tài khoản; logout, đổi/đặt lại
+  mật khẩu thành công, đình chỉ và phát hiện refresh token reuse vẫn thu hồi phiên.
 - User `email_verified = false` **vẫn đăng nhập được**, response `status = PENDING`
   (client hiển thị màn hình thông báo, chưa cho vào hệ thống bình thường).
 
@@ -248,7 +252,8 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 **Đổi mật khẩu (FR-USER-03):**
 - Sai mật khẩu hiện tại **tính chung bộ đếm** với đăng nhập sai (5 lần → khoá 15
   phút). Không dùng chung bộ đếm thì ai cầm được access token (còn sống ≤ 15 phút)
-  có thể dò mật khẩu không giới hạn qua endpoint đổi mật khẩu.
+  có thể dò mật khẩu không giới hạn qua endpoint đổi mật khẩu. Khoá tạm này chỉ
+  chặn thao tác cần mật khẩu; giữ nguyên các phiên đã có.
 - Sai mật khẩu hiện tại trả **400 `INVALID_CURRENT_PASSWORD`**, không phải 401: 401
   khiến frontend tưởng access token hết hạn và đăng xuất người dùng, trong khi họ
   chỉ gõ nhầm mật khẩu cũ.
@@ -297,14 +302,13 @@ Sai method → 405, sai `Content-Type` → 415, path không tồn tại → 404 
 
 **Giới hạn đã biết & đánh đổi có chủ đích (FR-USER-03 / FR-USER-04):**
 
-- **Người giữ access token có thể khoá tài khoản chủ sở hữu.** Dùng chung bộ đếm nghĩa
-  là kẻ cầm access token chỉ cần gửi 5 lần sai mật khẩu hiện tại là khoá tài khoản 15
-  phút, và `registerFailedAttempt` thu hồi mọi refresh token → chủ tài khoản bị đăng
-  xuất và chưa đăng nhập lại được. Đây là **đánh đổi có chủ đích**: không có bộ đếm thì
-  kẻ đó dò được mật khẩu, mà mất mật khẩu là thiệt hại không hồi phục được, còn khoá 15
-  phút thì có. Nhánh khoá xuất phát từ endpoint đổi mật khẩu được log **WARN riêng**
-  (kèm `userId` và ghi rõ nguồn) để còn phát hiện khi bị lạm dụng — khác với log của
-  đăng nhập sai.
+- **Có thể cố tình chặn thao tác mật khẩu của chủ sở hữu.** Người biết email có thể
+  gửi sai mật khẩu đăng nhập, hoặc người giữ access token có thể gửi sai mật khẩu
+  hiện tại, để chạm ngưỡng 5 lần. Các thao tác mật khẩu bị chặn trong 15 phút nhưng
+  các phiên đang có không bị thu hồi và vẫn refresh được. Nhánh khoá xuất phát từ
+  endpoint đổi mật khẩu được log **WARN riêng** (kèm `userId` và nguồn) để phát hiện
+  lạm dụng. Rate limit riêng theo IP/identifier là công việc tiếp theo; gateway
+  hiện chỉ có hạn mức chung và không loại bỏ được tấn công phân tán.
 - **Access token cũ sống thêm ≤ 15 phút sau khi đổi mật khẩu.** Chỉ refresh token bị
   thu hồi; access token là JWT tự chứa nên không vô hiệu hoá được mà không tra CSDL ở
   mỗi request. Khắc phục cần `token_version` trong claim hoặc denylist theo `sub + iat`

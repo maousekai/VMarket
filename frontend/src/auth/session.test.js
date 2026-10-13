@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSessionManager } from './session'
+import { registrationDraftKey, registrationDraftTtl } from './draftStorage'
 
 const deferred = () => {
   let resolve
@@ -32,6 +33,7 @@ function revisionStorage() {
   return {
     getItem: vi.fn((key) => values.get(key) ?? null),
     setItem: vi.fn((key, value) => values.set(key, value)),
+    removeItem: vi.fn((key) => values.delete(key)),
   }
 }
 
@@ -51,6 +53,7 @@ function setup(options = {}) {
   const manager = createSessionManager({
     locks: null,
     revisionStorage: null,
+    draftStorage: null,
     channelFactory: () => null,
     eventTarget: null,
     documentTarget: null,
@@ -119,7 +122,7 @@ describe('session refresh', () => {
 
   it('retries a rotation conflict once and retains session if the conflict persists', async () => {
     const { api, manager } = setup()
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockRejectedValue(apiError('REFRESH_TOKEN_ROTATION_CONFLICT'))
     await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
     expect(api.refreshSession).toHaveBeenCalledTimes(2)
@@ -129,7 +132,7 @@ describe('session refresh', () => {
 
   it('retains a live session on network failure and allows a later successful retry', async () => {
     const { api, manager } = setup()
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockRejectedValueOnce(new Error('network disconnected'))
     await expect(manager.refresh()).rejects.toThrow('network disconnected')
     expect(manager.getSnapshot().session.userId).toBe('user-1')
@@ -140,7 +143,7 @@ describe('session refresh', () => {
 
   it('clears an expired refresh token but treats a missing bootstrap cookie as a guest', async () => {
     const { api, manager } = setup()
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockRejectedValueOnce(apiError('REFRESH_TOKEN_EXPIRED'))
     await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
     expect(manager.getSnapshot()).toMatchObject({ session: null, bootstrapState: 'ready' })
@@ -149,10 +152,61 @@ describe('session refresh', () => {
     expect(manager.getSnapshot()).toMatchObject({ session: null, bootstrapState: 'ready' })
   })
 
+  it('keeps a guest bootstrap local without erasing a registration draft created in flight', async () => {
+    const request = deferred()
+    const channel = { postMessage: vi.fn(), close: vi.fn() }
+    const storage = revisionStorage()
+    const drafts = revisionStorage()
+    const { manager } = setup({
+      api: { refreshSession: vi.fn(() => request.promise) },
+      channelFactory: () => channel,
+      revisionStorage: storage,
+      draftStorage: drafts,
+    })
+    manager.start()
+    const generation = manager.getGeneration()
+    const refreshing = manager.refresh()
+    const rejected = expect(refreshing).rejects.toMatchObject({ response: { status: 401 } })
+    manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
+    request.reject(apiError('REFRESH_TOKEN_MISSING'))
+    await rejected
+    expect(manager.getSnapshot()).toMatchObject({
+      session: null,
+      bootstrapState: 'ready',
+      registrationDraft: { email: 'user-1@example.com', fullName: 'An' },
+    })
+    expect(manager.getGeneration()).toBe(generation)
+    expect(channel.postMessage).not.toHaveBeenCalled()
+    expect(storage.setItem).not.toHaveBeenCalled()
+    expect(drafts.getItem(registrationDraftKey)).toBeTruthy()
+  })
+
+  it('does not revoke a live session for a temporary password login lock', async () => {
+    const channel = { postMessage: vi.fn(), close: vi.fn() }
+    const { api, manager } = setup({ channelFactory: () => channel })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    manager.start()
+    api.refreshSession.mockRejectedValueOnce(apiError('ACCOUNT_LOCKED', 423))
+    await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 423 } })
+    expect(manager.getSnapshot().session.userId).toBe('user-1')
+    expect(channel.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('clears and broadcasts when an authenticated session actually loses its cookie', async () => {
+    const channel = { postMessage: vi.fn(), close: vi.fn() }
+    const { api, manager } = setup({ channelFactory: () => channel })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    manager.start()
+    api.refreshSession.mockRejectedValueOnce(apiError('REFRESH_TOKEN_MISSING'))
+    await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
+    expect(manager.getSnapshot().session).toBeNull()
+    expect(channel.postMessage).toHaveBeenCalledWith({ type: 'logout' })
+  })
+
   it('ignores a refresh response that arrives after logout has started', async () => {
     const request = deferred()
     const { api, manager } = setup()
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockReturnValue(request.promise)
     const refreshing = manager.refresh()
     const rejected = expect(refreshing).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
@@ -166,7 +220,7 @@ describe('session refresh', () => {
 
   it('does not report logout success or discard session when backend logout fails', async () => {
     const { api, manager } = setup()
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     api.logoutAccount.mockRejectedValueOnce(new Error('network disconnected'))
     await expect(manager.logout()).rejects.toThrow('network disconnected')
     expect(manager.getSnapshot().session.userId).toBe('user-1')
@@ -177,7 +231,7 @@ describe('session refresh', () => {
   it('recovers an interrupted profile request after logout fails', async () => {
     const request = deferred()
     const { api, manager, profiles } = setup()
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     profiles.getMyProfile.mockReturnValueOnce(request.promise)
     const loading = manager.loadProfile()
     const rejected = expect(loading).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
@@ -203,7 +257,7 @@ describe('session refresh', () => {
     }
     const request = deferred()
     const { api, manager } = setup({ locks })
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     api.refreshSession.mockReturnValue(request.promise)
     const refreshing = manager.refresh()
     const rejected = expect(refreshing).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
@@ -270,8 +324,8 @@ describe('session refresh', () => {
         revisionStorage: storage,
         channelFactory: () => secondChannel,
       })
-      await first.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
-      await second.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+      await first.login({ email: 'user-1@example.com', password: 'Secret@123' })
+      await second.login({ email: 'user-1@example.com', password: 'Secret@123' })
       first.start()
       second.start()
       await first.refresh()
@@ -308,7 +362,7 @@ describe('session refresh', () => {
       revisionStorage: brokenStorage,
       channelFactory: () => channel,
     })
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     manager.start()
     const seen = []
     manager.subscribe(() => seen.push(manager.getSnapshot().session?.userId || null))
@@ -335,6 +389,168 @@ describe('session refresh', () => {
 })
 
 describe('profile persistence', () => {
+  it('restores only the allowed profile draft after reloading without storing credentials', () => {
+    const storage = revisionStorage()
+    const { manager } = setup({ draftStorage: storage, now: () => 10000 })
+    manager.setRegistrationDraft({
+      email: ' USER-1@EXAMPLE.COM ',
+      fullName: ' An ',
+      phone: '0912345678',
+      password: 'Secret@123',
+      otp: '012345',
+      accessToken: 'jwt',
+      refreshToken: 'opaque',
+    })
+    expect(JSON.parse(storage.getItem(registrationDraftKey))).toEqual({
+      email: 'user-1@example.com',
+      fullName: 'An',
+      phone: '0912345678',
+      savedAt: 10000,
+    })
+    const reloaded = setup({ draftStorage: storage, now: () => 11000 }).manager
+    expect(reloaded.getSnapshot()).toMatchObject({
+      registrationDraft: { email: 'user-1@example.com', fullName: 'An', phone: '0912345678' },
+      registrationDraftWarning: null,
+    })
+  })
+
+  it.each([
+    [
+      'expired',
+      JSON.stringify({ email: 'user-1@example.com', fullName: 'An', phone: '', savedAt: 0 }),
+    ],
+    [
+      'future timestamp',
+      JSON.stringify({
+        email: 'user-1@example.com',
+        fullName: 'An',
+        phone: '',
+        savedAt: registrationDraftTtl + 1,
+      }),
+    ],
+    ['malformed JSON', '{'],
+    ['wrong type', '[]'],
+    ['invalid email', JSON.stringify({ email: 'bad', fullName: 'An', phone: '', savedAt: 1 })],
+    [
+      'invalid phone',
+      JSON.stringify({ email: 'user-1@example.com', fullName: 'An', phone: '123', savedAt: 1 }),
+    ],
+    [
+      'unexpected secrets',
+      JSON.stringify({
+        email: 'user-1@example.com',
+        fullName: 'An',
+        phone: '',
+        savedAt: 1,
+        password: 'Secret@123',
+      }),
+    ],
+  ])('discards a %s stored draft and explains how to complete the profile', (_, stored) => {
+    const storage = revisionStorage()
+    storage.setItem(registrationDraftKey, stored)
+    const { manager } = setup({ draftStorage: storage, now: () => registrationDraftTtl })
+    expect(manager.getSnapshot().registrationDraft).toBeNull()
+    expect(manager.getSnapshot().registrationDraftWarning).toMatch(/Hồ sơ cá nhân/)
+    expect(storage.getItem(registrationDraftKey)).toBeNull()
+  })
+
+  it('expires an in-memory draft before saving even without reloading', async () => {
+    let clock = 10000
+    const storage = revisionStorage()
+    const { manager, profiles } = setup({ draftStorage: storage, now: () => clock })
+    manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
+    await manager.verifyOtp({ email: 'user-1@example.com', otp: '012345' })
+    clock += registrationDraftTtl
+    await manager.saveRegistrationProfile()
+    expect(profiles.updateMyProfile).not.toHaveBeenCalled()
+    expect(manager.getSnapshot().registrationDraftWarning).toMatch(/hết hạn/)
+    expect(storage.getItem(registrationDraftKey)).toBeNull()
+  })
+
+  it('expires an idle draft while the manager is running', async () => {
+    vi.useFakeTimers()
+    const storage = revisionStorage()
+    const { manager } = setup({
+      draftStorage: storage,
+      api: { refreshSession: vi.fn().mockRejectedValue(apiError('REFRESH_TOKEN_MISSING')) },
+    })
+    manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
+    manager.start()
+    await vi.advanceTimersByTimeAsync(registrationDraftTtl)
+    expect(manager.getSnapshot().registrationDraft).toBeNull()
+    expect(manager.getSnapshot().registrationDraftWarning).toMatch(/hết hạn/)
+    expect(storage.getItem(registrationDraftKey)).toBeNull()
+  })
+
+  it('continues with its in-memory draft when session storage is blocked', async () => {
+    const blocked = {
+      getItem: () => {
+        throw new Error('blocked')
+      },
+      setItem: () => {
+        throw new Error('blocked')
+      },
+      removeItem: () => {
+        throw new Error('blocked')
+      },
+    }
+    const { manager, profiles } = setup({ draftStorage: blocked })
+    expect(manager.getSnapshot().registrationDraftWarning).toMatch(/Trình duyệt/)
+    manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
+    await manager.verifyOtp({ email: 'user-1@example.com', otp: '012345' })
+    expect(manager.getSnapshot().registrationDraft.fullName).toBe('An')
+    await manager.saveRegistrationProfile()
+    expect(profiles.updateMyProfile).toHaveBeenCalledOnce()
+    expect(manager.getSnapshot().registrationDraft).toBeNull()
+    expect(manager.getSnapshot().registrationDraftWarning).toBeNull()
+  })
+
+  it('retains the current draft after a storage write fails and clears an older stored draft', () => {
+    const storage = revisionStorage()
+    const { manager } = setup({ draftStorage: storage })
+    manager.setRegistrationDraft({ email: 'old@example.com', fullName: 'Old', phone: '' })
+    storage.setItem.mockImplementationOnce(() => {
+      throw new Error('quota')
+    })
+    manager.setRegistrationDraft({ email: 'new@example.com', fullName: 'New', phone: '' })
+    expect(manager.getSnapshot().registrationDraft.fullName).toBe('New')
+    expect(manager.getSnapshot().registrationDraftWarning).toMatch(/Trình duyệt/)
+    expect(storage.getItem(registrationDraftKey)).toBeNull()
+  })
+
+  it.each(['save', 'defer', 'logout', 'different account'])(
+    'clears the stored profile draft after %s',
+    async (action) => {
+      const storage = revisionStorage()
+      const { manager, api } = setup({ draftStorage: storage })
+      manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
+      if (action === 'save') {
+        await manager.verifyOtp({ email: 'user-1@example.com', otp: '012345' })
+        await manager.saveRegistrationProfile()
+      } else if (action === 'defer') manager.clearRegistrationDraft()
+      else if (action === 'logout') await manager.logout()
+      else {
+        api.loginAccount.mockResolvedValue(tokenResponse('user-2'))
+        await manager.login({ email: 'user-2@example.com', password: 'Secret@123' })
+      }
+      expect(storage.getItem(registrationDraftKey)).toBeNull()
+      expect(manager.getSnapshot().registrationDraft).toBeNull()
+      expect(manager.getSnapshot().registrationDraftWarning).toBeNull()
+    },
+  )
+
+  it('binds restored profile data to the authenticated account before saving', async () => {
+    const storage = revisionStorage()
+    const { manager } = setup({ draftStorage: storage })
+    manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
+    const { manager: reloaded, profiles } = setup({ draftStorage: storage })
+    await reloaded.verifyOtp({ email: 'user-1@example.com', otp: '012345' })
+    expect(reloaded.getSnapshot().registrationDraft.userId).toBe('user-1')
+    await reloaded.saveRegistrationProfile()
+    expect(profiles.updateMyProfile).toHaveBeenCalledOnce()
+    expect(storage.getItem(registrationDraftKey)).toBeNull()
+  })
+
   it('preserves fields not edited by this form and retries with the exact body and key', async () => {
     const current = {
       userId: 'user-1',
@@ -347,7 +563,7 @@ describe('profile persistence', () => {
     const { manager, profiles } = setup({
       profiles: { getMyProfile: vi.fn().mockResolvedValue(current) },
     })
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     profiles.updateMyProfile.mockRejectedValueOnce(new Error('timeout'))
     const changes = { fullName: 'Nguyễn An', phone: '0987654321' }
     await expect(manager.saveProfile(changes)).rejects.toThrow('timeout')
@@ -393,7 +609,7 @@ describe('profile persistence', () => {
     const { api, manager, profiles } = setup()
     manager.setRegistrationDraft({ email: 'user-1@example.com', fullName: 'An', phone: '' })
     api.loginAccount.mockResolvedValue(tokenResponse('user-2'))
-    await manager.login({ identifier: 'user-2@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-2@example.com', password: 'Secret@123' })
     expect(manager.getSnapshot().registrationDraft).toBeNull()
     expect(profiles.updateMyProfile).not.toHaveBeenCalled()
   })
@@ -401,7 +617,7 @@ describe('profile persistence', () => {
   it('cannot restore a profile after logout', async () => {
     const request = deferred()
     const { manager } = setup({ profiles: { getMyProfile: vi.fn(() => request.promise) } })
-    await manager.login({ identifier: 'user-1@example.com', password: 'Secret@123' })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
     const loading = manager.loadProfile()
     const rejected = expect(loading).rejects.toMatchObject({ code: 'SESSION_CHANGED' })
     await manager.logout()

@@ -1,6 +1,14 @@
 import * as authApi from '../services/api/authApi'
 import * as userApi from '../services/api/userApi'
 import { bindSessionManager, getApiError } from '../services/api/apiClient'
+import {
+  browserDraftStorage,
+  draftExpiredWarning,
+  registrationDraftTtl,
+  removeStoredDraft,
+  restoreDraft,
+  storeDraft,
+} from './draftStorage'
 
 const terminalCodes = new Set([
   'REFRESH_TOKEN_MISSING',
@@ -8,7 +16,6 @@ const terminalCodes = new Set([
   'REFRESH_TOKEN_EXPIRED',
   'REFRESH_TOKEN_REUSED',
   'SESSION_NOT_FOUND',
-  'ACCOUNT_LOCKED',
   'ACCOUNT_SUSPENDED',
   'ACCOUNT_DISABLED',
 ])
@@ -73,6 +80,7 @@ const initialSnapshot = () => ({
   profileState: 'idle',
   profileError: null,
   registrationDraft: null,
+  registrationDraftWarning: null,
 })
 
 // Dependencies are injectable so concurrency and failure handling can be tested without a server.
@@ -82,6 +90,7 @@ export function createSessionManager({
   now = () => Date.now(),
   locks = globalThis.navigator?.locks,
   revisionStorage = browserRevisionStorage(),
+  draftStorage = browserDraftStorage(),
   channelFactory = () =>
     typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
       ? new BroadcastChannel('vmarket-auth')
@@ -95,7 +104,13 @@ export function createSessionManager({
       byte.toString(16).padStart(2, '0'),
     ).join(''),
 } = {}) {
-  let snapshot = initialSnapshot()
+  const restoredDraft = restoreDraft(draftStorage, now())
+  let snapshot = {
+    ...initialSnapshot(),
+    registrationDraft: restoredDraft.draft,
+    registrationDraftWarning: restoredDraft.warning,
+  }
+  let draftSavedAt = restoredDraft.savedAt
   let generation = 0
   let refreshFlight
   let logoutFlight
@@ -104,6 +119,7 @@ export function createSessionManager({
   let saveFlight
   let pendingSave
   let timer
+  let draftTimer
   let channel
   let started = false
   let lastRevision = 0
@@ -114,6 +130,27 @@ export function createSessionManager({
   const update = (changes) => {
     snapshot = { ...snapshot, ...changes }
     subscribers.forEach((subscriber) => subscriber())
+  }
+  function clearRegistrationDraft(warning = null) {
+    clearTimeout(draftTimer)
+    draftSavedAt = null
+    removeStoredDraft(draftStorage)
+    update({ registrationDraft: null, registrationDraftWarning: warning })
+  }
+  function expireRegistrationDraft() {
+    if (snapshot.registrationDraft && now() - draftSavedAt >= registrationDraftTtl)
+      clearRegistrationDraft(draftExpiredWarning)
+  }
+  function scheduleDraftExpiry() {
+    clearTimeout(draftTimer)
+    if (!started || !snapshot.registrationDraft) return
+    draftTimer = setTimeout(
+      () => {
+        expireRegistrationDraft()
+        scheduleDraftExpiry()
+      },
+      Math.max(1, draftSavedAt + registrationDraftTtl - now()),
+    )
   }
   const current = (expected) => {
     if (generation !== expected)
@@ -155,6 +192,7 @@ export function createSessionManager({
     generation += 1
     clearTimeout(timer)
     pendingSave = null
+    clearRegistrationDraft()
     update({
       session: null,
       bootstrapState: 'ready',
@@ -162,7 +200,6 @@ export function createSessionManager({
       userProfile: null,
       profileState: 'idle',
       profileError: null,
-      registrationDraft: null,
     })
     if (!notify) return
     if (cookieLockHeld) {
@@ -190,13 +227,20 @@ export function createSessionManager({
   }
 
   const applySession = (session, notify = true) => {
+    expireRegistrationDraft()
     const identityChanged = session.userId !== snapshot.session?.userId
     if (identityChanged) {
       generation += 1
       pendingSave = null
     }
     let draft = snapshot.registrationDraft
-    if (draft && !sameEmail(draft.email, session.email)) draft = null
+    if (
+      draft &&
+      (!sameEmail(draft.email, session.email) || (draft.userId && draft.userId !== session.userId))
+    ) {
+      clearRegistrationDraft()
+      draft = null
+    }
     if (draft) draft = { ...draft, userId: session.userId }
     update({
       session,
@@ -228,7 +272,10 @@ export function createSessionManager({
             current(expected)
             continue
           }
-          if (terminalCodes.has(detail.code)) {
+          if (detail.code === 'REFRESH_TOKEN_MISSING' && !snapshot.session) {
+            // A guest bootstrap has not logged anyone out or changed the shared cookie.
+            update({ bootstrapState: 'ready', error: null })
+          } else if (terminalCodes.has(detail.code)) {
             clearSession(true, true)
           } else {
             update({
@@ -387,17 +434,23 @@ export function createSessionManager({
 
   function setRegistrationDraft({ email, fullName, phone }) {
     // Explicit allowlist prevents passwords, OTPs, or other registration values entering state.
+    removeStoredDraft(draftStorage)
+    draftSavedAt = now()
+    const draft = {
+      email: email.trim().toLowerCase(),
+      fullName: fullName?.trim() || '',
+      phone: phone?.trim() || '',
+    }
     update({
-      registrationDraft: {
-        email: email.trim(),
-        fullName: fullName?.trim() || '',
-        phone: phone?.trim() || '',
-      },
+      registrationDraft: draft,
+      registrationDraftWarning: storeDraft(draftStorage, draft, draftSavedAt),
     })
+    scheduleDraftExpiry()
   }
 
   async function saveRegistrationProfile() {
     const session = requireActiveSession()
+    expireRegistrationDraft()
     const draft = snapshot.registrationDraft
     if (!draft) return snapshot.userProfile || loadProfile()
     if (!sameEmail(draft.email, session.email) || (draft.userId && draft.userId !== session.userId))
@@ -406,7 +459,7 @@ export function createSessionManager({
         'Thông tin đăng ký không thuộc phiên hiện tại.',
       )
     const profile = await saveProfile(draft)
-    if (snapshot.registrationDraft === draft) update({ registrationDraft: null })
+    if (snapshot.registrationDraft === draft) clearRegistrationDraft()
     return profile
   }
 
@@ -422,7 +475,9 @@ export function createSessionManager({
       } catch (error) {
         current(expected)
         const detail = getApiError(error)
-        if (terminalCodes.has(detail.code)) clearSession(false)
+        if (detail.code === 'REFRESH_TOKEN_MISSING' && !snapshot.session)
+          update({ bootstrapState: 'ready', error: null })
+        else if (terminalCodes.has(detail.code)) clearSession(false)
         else {
           update({ error: detail, bootstrapState: snapshot.session ? 'ready' : 'error' })
           scheduleRefresh(true)
@@ -468,6 +523,7 @@ export function createSessionManager({
   }
   const onFocus = () => {
     if (documentTarget?.visibilityState === 'hidden') return
+    expireRegistrationDraft()
     if (snapshot.session && snapshot.session.refreshAt <= now()) refresh().catch(() => {})
   }
 
@@ -478,6 +534,8 @@ export function createSessionManager({
     if (channel) channel.onmessage = onMessage
     eventTarget?.addEventListener('focus', onFocus)
     documentTarget?.addEventListener('visibilitychange', onFocus)
+    expireRegistrationDraft()
+    scheduleDraftExpiry()
     if (snapshot.bootstrapState !== 'ready') refresh().catch(() => {})
     else scheduleRefresh()
     return stop
@@ -486,6 +544,7 @@ export function createSessionManager({
   function stop() {
     started = false
     clearTimeout(timer)
+    clearTimeout(draftTimer)
     channel?.close()
     channel = null
     eventTarget?.removeEventListener('focus', onFocus)
@@ -505,7 +564,7 @@ export function createSessionManager({
     logout,
     login: (values) =>
       authenticate('loginAccount', {
-        identifier: values.identifier.trim(),
+        email: values.email.trim().toLowerCase(),
         password: values.password,
       }),
     verifyOtp: (values) =>
@@ -513,7 +572,7 @@ export function createSessionManager({
     loadProfile,
     saveProfile,
     setRegistrationDraft,
-    clearRegistrationDraft: () => update({ registrationDraft: null }),
+    clearRegistrationDraft,
     invalidateSession: () => clearSession(),
     saveRegistrationProfile,
     clearError: () => update({ error: null }),
