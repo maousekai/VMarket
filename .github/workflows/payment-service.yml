@@ -17,6 +17,7 @@ on:
     paths:
       - "services/payment-service/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
+      - "services/shared-events/**"
       - "services/pom.xml"
       - "services/mvnw"
       # Sua chinh CI thi cung phai chay lai de kiem chung
@@ -26,6 +27,7 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/payment-service/**"
+      - "services/shared-events/**"
       - "services/pom.xml"
       - "services/mvnw"
       - ".github/workflows/payment-service.yml"

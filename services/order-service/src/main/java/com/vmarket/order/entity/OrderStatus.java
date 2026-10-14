@@ -22,6 +22,7 @@ public enum OrderStatus {
 
 	/** Vừa tạo, chờ người bán xác nhận. Đây là trạng thái duy nhất được huỷ. */
 	PENDING,
+	WAITING_PAYMENT,
 
 	/** Người bán đã xác nhận, đang chuẩn bị hàng. */
 	PROCESSING,
