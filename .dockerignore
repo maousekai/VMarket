@@ -32,9 +32,10 @@ services/**/.env*
 services/**/*.md
 services/**/HELP.md
 
-# 4. AI service (Python) co Dockerfile + context rieng, khong can o day
+# 4. Chatbot uses its own context; Search/Recommendation use the repository root.
 services/chatbot-service
-services/recommendation-service
+services/recommendation-service/tests
+services/recommendation-service/.cache
 services/**/.venv
 services/**/__pycache__
 services/ai-search-service/models

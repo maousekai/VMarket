@@ -1,117 +1,161 @@
-"""Consumer Event Bus (RabbitMQ) — Recommendation Service.
-
-Theo quy ước event bus dùng chung (docs/event-bus.md):
-  - topic exchange:  vmarket.events
-  - routing key   :  tên sự kiện (PascalCase, khớp danh mục SRS §8.1)
-  - queue         :  recommendation.events, có DLX trỏ vmarket.events.dlx
-
-Recommendation lắng nghe ProductCreated/Updated/Deleted để cập nhật đặc trưng
-gợi ý (docs/event-bus.md §5) và OrderPlaced/OrderStatusChanged cho tương quan
-đơn hàng. Ở giai đoạn skeleton chỉ log payload; logic tính gợi ý sẽ điền sau.
-
-Ghi nhớ Review 3 (worklogs/PBL6-15.md): queue consumer phải được KHAI BÁO SỚM
-ngay cả khi logic chưa có — nếu không, event catalog phát ra sẽ không có queue
-nào nhận (NO_ROUTE) và kẹt ở outbox phía Product Catalog.
-"""
-
+"""Existing durable queue; ACK follows PostgreSQL commit, work leaves pika's I/O thread."""
 import json
-import os
+import logging
 import threading
-import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pika
+import psycopg
+from psycopg_pool import PoolTimeout
 
-EXCHANGE = os.getenv("EVENT_EXCHANGE", "vmarket.events")
-QUEUE = os.getenv("EVENT_QUEUE", "recommendation.events")
-# Quy ước dead-letter (docs/event-bus.md §2): {exchange}.dlx và {queue}.dead.
-DEAD_EXCHANGE = EXCHANGE + ".dlx"
-DEAD_QUEUE = QUEUE + ".dead"
-DEAD_ROUTING_KEY = QUEUE + ".dead"
+from schemas import valid_id
 
-# Các sự kiện Recommendation quan tâm (docs/event-bus.md §5).
-EVENT_TYPES = [
-    "ProductCreated",
-    "ProductUpdated",
-    "ProductDeleted",
-    "OrderPlaced",
-    "OrderStatusChanged",
-]
+PRODUCT_EVENTS = ("ProductCreated", "ProductUpdated", "ProductDeleted")
+ORDER_EVENTS = ("OrderPlaced", "OrderStatusChanged")
+EVENT_TYPES = PRODUCT_EVENTS + ORDER_EVENTS
 
 
-def _handle_event(event_type: str, payload: dict) -> None:
-    # TODO (PBL6): cập nhật đặc trưng gợi ý cá nhân hóa - FR-REC-01..04
-    print(f"[event] nhan {event_type}: {payload}", flush=True)
+def connection_parameters(settings):
+    return pika.ConnectionParameters(host=settings.rabbit_host, port=settings.rabbit_port,
+        credentials=pika.PlainCredentials(settings.rabbit_user, settings.rabbit_password),
+        heartbeat=30, blocked_connection_timeout=5, socket_timeout=settings.timeout,
+        stack_timeout=settings.timeout + 3, connection_attempts=1)
 
 
-_HANDLERS = {event_type: _handle_event for event_type in EVENT_TYPES}
-
-
-def _on_message(ch, method, _properties, body: bytes) -> None:
-    try:
-        envelope = json.loads(body.decode("utf-8"))
-        event_type = envelope.get("eventType")
-        handler = _HANDLERS.get(event_type)
-        if handler is not None:
-            handler(event_type, envelope.get("payload") or {})
-        else:
-            print(f"[event] bo qua su kien {event_type}", flush=True)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[event] loi xu ly thong diep: {exc}", flush=True)
-        # Nack không requeue → message rơi vào {queue}.dead qua vmarket.events.dlx
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-
-
-def _connection_parameters() -> pika.ConnectionParameters:
-    return pika.ConnectionParameters(
-        host=os.getenv("RABBITMQ_HOST", "localhost"),
-        port=int(os.getenv("RABBITMQ_PORT", "5672")),
-        credentials=pika.PlainCredentials(
-            os.getenv("RABBITMQ_USERNAME", "guest"),
-            os.getenv("RABBITMQ_PASSWORD", "guest"),
-        ),
-        heartbeat=30,
-        blocked_connection_timeout=30,
-    )
-
-
-def start_consumer() -> None:
-    """Kết nối RabbitMQ, khai báo exchange/queue/DLQ/binding rồi lắng nghe."""
-    connection = pika.BlockingConnection(_connection_parameters())
-    channel = connection.channel()
-
-    channel.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
-    channel.exchange_declare(exchange=DEAD_EXCHANGE, exchange_type="topic", durable=True)
-    # DLX theo đúng convention Java (EventBusAutoConfiguration) để message lỗi
-    # consumer rơi vào recommendation.events.dead thay vì bị mất.
-    channel.queue_declare(queue=QUEUE, durable=True, arguments={
-        "x-dead-letter-exchange": DEAD_EXCHANGE,
-        "x-dead-letter-routing-key": DEAD_ROUTING_KEY,
-    })
-    channel.queue_declare(queue=DEAD_QUEUE, durable=True)
-    channel.queue_bind(queue=DEAD_QUEUE, exchange=DEAD_EXCHANGE, routing_key=DEAD_ROUTING_KEY)
+def declare_topology(channel, settings):
+    exchange, queue = settings.exchange, settings.queue
+    channel.exchange_declare(exchange=exchange, exchange_type="topic", durable=True)
+    channel.exchange_declare(exchange=exchange + ".dlx", exchange_type="topic", durable=True)
+    channel.queue_declare(queue=queue, durable=True, arguments={
+        "x-dead-letter-exchange": exchange + ".dlx", "x-dead-letter-routing-key": queue + ".dead"})
+    channel.queue_declare(queue=queue + ".dead", durable=True)
+    channel.queue_bind(queue=queue + ".dead", exchange=exchange + ".dlx", routing_key=queue + ".dead")
     for event_type in EVENT_TYPES:
-        channel.queue_bind(queue=QUEUE, exchange=EXCHANGE, routing_key=event_type)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue=QUEUE, on_message_callback=_on_message)
-
-    print(f"[event] dang lang nghe exchange={EXCHANGE} queue={QUEUE}", flush=True)
-    try:
-        channel.start_consuming()
-    finally:
-        connection.close()
+        channel.queue_bind(queue=queue, exchange=exchange, routing_key=event_type)
 
 
-def start_event_consumer_thread() -> None:
-    """Chạy consumer trong luồng nền (daemon), tự reconnect khi RabbitMQ chưa sẵn sàng."""
+def validate_event(body, key):
+    if len(body) > 256 * 1024:
+        raise ValueError("Event too large")
+    data = json.loads(body)
+    if not isinstance(data, dict) or key not in EVENT_TYPES or data.get("eventType") != key:
+        raise ValueError("Event type mismatch")
+    event_id = str(uuid.UUID(data["eventId"]))
+    if type(data["timestamp"]) is not int or not 0 <= data["timestamp"] <= 2**63 - 1:
+        raise ValueError("Invalid event timestamp")
+    payload = data["payload"]
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid payload")
+    if key not in PRODUCT_EVENTS or not valid_id(payload.get("productId")):
+        raise ValueError("Invalid product event")
+    return event_id, payload
 
-    def _run() -> None:
-        while True:
+
+def transient(error):
+    return isinstance(error, (httpx.TransportError, psycopg.OperationalError, PoolTimeout,
+                              psycopg.errors.QueryCanceled)) or (
+        isinstance(error, httpx.HTTPStatusError) and error.response.status_code in {429, 500, 502, 503, 504})
+
+
+class Consumer:
+    def __init__(self, store):
+        self.store = store
+        self.stop = threading.Event()
+        self.connected = False
+        self.dead_letters = None
+        self.connection = None
+        self.channel = None
+        self.thread = None
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="recommendation-metadata")
+
+    def handle(self, body, key):
+        # Preserve documented bindings; order behavior is outside PR-1 and needs no receipt or validation.
+        if key in ORDER_EVENTS:
+            return
+        event_id, payload = validate_event(body, key)
+        for attempt in range(3):
+            if self.stop.is_set():
+                raise InterruptedError("Stopping")
             try:
-                start_consumer()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[event] chua ket noi duoc RabbitMQ ({exc}); thu lai sau 5s...", flush=True)
-                time.sleep(5)
+                if self.store.seen(event_id):
+                    return
+                snapshot = self.store.fetch_snapshot(payload["productId"])
+                self.store.apply(snapshot, event_id)
+                return
+            except Exception as error:
+                if not transient(error) or attempt == 2:
+                    raise
+                logging.warning("recommendation_event_retry type=%s attempt=%s", type(error).__name__, attempt + 1)
+                if self.stop.wait(2**attempt):
+                    raise InterruptedError("Stopping") from None
 
-    threading.Thread(target=_run, daemon=True, name="event-consumer").start()
+    def on_message(self, channel, method, properties, body):
+        owner = self.connection
+        future = self.executor.submit(self.handle, body, method.routing_key)
+
+        def completed(task):
+            error = task.exception()
+            def settle():
+                if self.stop.is_set() or not channel.is_open:
+                    return
+                if error is None:
+                    channel.basic_ack(delivery_tag=method.delivery_tag)
+                else:
+                    logging.warning("recommendation_event_dead_letter type=%s", type(error).__name__)
+                    channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            if not self.stop.is_set() and owner.is_open:
+                try:
+                    owner.add_callback_threadsafe(settle)
+                except pika.exceptions.ConnectionWrongStateError:
+                    pass
+        future.add_done_callback(completed)
+
+    def check_dead_letters(self):
+        if self.stop.is_set():
+            return
+        self.dead_letters = self.channel.queue_declare(queue=self.store.settings.queue + ".dead", passive=True).method.message_count
+        if self.dead_letters:
+            logging.warning("recommendation_dead_letters_pending count=%s", self.dead_letters)
+        self.connection.call_later(30, self.check_dead_letters)
+
+    def run(self):
+        while not self.stop.is_set():
+            try:
+                self.connection = pika.BlockingConnection(connection_parameters(self.store.settings))
+                self.channel = self.connection.channel()
+                declare_topology(self.channel, self.store.settings)
+                self.check_dead_letters()
+                self.channel.basic_qos(prefetch_count=1)
+                self.channel.basic_consume(queue=self.store.settings.queue, on_message_callback=self.on_message)
+                self.connected = True
+                if not self.stop.is_set():
+                    self.channel.start_consuming()
+            except Exception as error:
+                if not self.stop.is_set():
+                    logging.warning("recommendation_broker_disconnected type=%s", type(error).__name__)
+            finally:
+                self.connected = False
+                self.dead_letters = None
+                if self.connection is not None and self.connection.is_open:
+                    try:
+                        self.connection.close()
+                    except pika.exceptions.AMQPError:
+                        pass
+            self.stop.wait(5)
+
+    def start(self):
+        self.thread = threading.Thread(target=self.run, daemon=True, name="recommendation-consumer")
+        self.thread.start()
+
+    def close(self):
+        self.stop.set()
+        if self.connection is not None and self.connection.is_open:
+            try:
+                self.connection.add_callback_threadsafe(self.channel.stop_consuming)
+            except (pika.exceptions.ConnectionWrongStateError, AttributeError):
+                pass
+        if self.thread is not None:
+            self.thread.join()
+        self.executor.shutdown(wait=True)

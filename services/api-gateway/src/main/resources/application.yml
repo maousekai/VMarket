@@ -119,6 +119,9 @@ app:
       # END GENERATED SEARCH ROUTES
       - /api/products/**
       - /api/shops/**
+      - /api/ai/recommendations/for-you
+      - /api/ai/recommendations/similar/*
+      - /api/ai/recommendations/health
     # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi
     # nhau trực tiếp qua URL nội bộ (BACKEND_SERVICES_HOST), kèm X-Internal-Api-Key.
     internal-deny-paths:
