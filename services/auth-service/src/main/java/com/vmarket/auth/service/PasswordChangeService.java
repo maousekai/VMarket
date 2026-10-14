@@ -29,12 +29,10 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Nhập sai mật khẩu hiện tại <b>tính chung bộ đếm</b> với đăng nhập sai
  *       (FR-AUTH-02): 5 lần liên tiếp → khoá 15 phút. Không có bộ đếm thì ai cầm được
  *       access token (còn sống ≤ 15 phút) có thể dò mật khẩu không giới hạn qua đây.
- *       <p><b>Mặt trái đã cân nhắc và chấp nhận:</b> chính kẻ cầm access token cũng có
- *       thể cố tình gửi 5 lần sai để khoá tài khoản 15 phút, và
- *       {@code registerFailedAttempt} thu hồi mọi refresh token nên chủ tài khoản bị
- *       đăng xuất và chưa đăng nhập lại được trong lúc đó. Đổi lại là chặn được việc dò
- *       mật khẩu — đây mới là thiệt hại không hồi phục được. Nhánh khoá xuất phát từ
- *       endpoint này được log riêng ở mức WARN để còn phát hiện khi bị lạm dụng.</p></li>
+ *       <p>Người giữ access token có thể cố tình gửi sai để chặn thao tác dùng mật khẩu
+ *       trong 15 phút. Các phiên hợp lệ đang có vẫn được giữ và refresh bình thường;
+ *       {@code registerFailedAttempt} không thu hồi phiên vì khoá tạm này. Nhánh khoá
+ *       xuất phát từ endpoint này được log riêng ở mức WARN để phát hiện lạm dụng.</p></li>
  *   <li>Đổi thành công → <b>thu hồi mọi refresh token</b>: đổi mật khẩu thường là vì
  *       nghi bị lộ, các phiên cũ (có thể của kẻ gian) phải đăng nhập lại. Cùng quyết
  *       định với đặt lại mật khẩu (PBL6-45).</li>
@@ -85,7 +83,7 @@ public class PasswordChangeService {
 				// từ ĐỔI MẬT KHẨU nghĩa là request có access token hợp lệ. Lặp lại nhiều
 				// trên cùng một tài khoản là dấu hiệu ai đó đang cố khoá chủ tài khoản,
 				// không phải người dùng gõ nhầm.
-				log.warn("Khoá tài khoản tới {} do nhập sai mật khẩu hiện tại nhiều lần (nguồn: đổi mật "
+				log.warn("Khoá thao tác dùng mật khẩu tới {} do nhập sai mật khẩu hiện tại nhiều lần (nguồn: đổi mật "
 						+ "khẩu, request có access token hợp lệ) userId={}", lockedUntil, userId);
 				throw authenticationService.accountLocked(lockedUntil, now);
 			}

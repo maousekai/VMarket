@@ -75,6 +75,52 @@ class LoginApiTest {
 	}
 
 	@Test
+	void email_isCaseInsensitive() throws Exception {
+		login("AN.NGUYEN@EXAMPLE.COM", PASSWORD)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("ACTIVE"));
+	}
+
+	@Test
+	void usernameOrIdentifierPayload_isRejected_withoutRecordingPasswordFailure() throws Exception {
+		login("an.nguyen", PASSWORD)
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+		for (String field : java.util.List.of("identifier", "username")) {
+			mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+					.content("{\"" + field + "\":\"an.nguyen\",\"password\":\"" + PASSWORD + "\"}"))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+		}
+		assertThat(userRepository.findById(user.getId()).orElseThrow().getFailedLoginAttempts()).isZero();
+		assertThat(refreshTokenRepository.count()).isZero();
+	}
+
+	@Test
+	void email_respectsPendingAndAdministrativeSuspension() throws Exception {
+		user.setEmailVerified(false);
+		userRepository.save(user);
+		login(EMAIL, PASSWORD)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("PENDING"));
+		user.setSuspendedAt(java.time.Instant.now());
+		userRepository.save(user);
+		login(EMAIL, PASSWORD)
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"));
+	}
+
+	@Test
+	void missingOrInvalidEmail_isValidationError() throws Exception {
+		login("   ", PASSWORD).andExpect(status().isBadRequest());
+		login("invalid-email", PASSWORD).andExpect(status().isBadRequest());
+		mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"password\":\"Abcd1234@\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
 	void login_success_returnsAccessToken_setsRefreshCookie() throws Exception {
 		login(EMAIL, PASSWORD)
 				.andExpect(status().isOk())

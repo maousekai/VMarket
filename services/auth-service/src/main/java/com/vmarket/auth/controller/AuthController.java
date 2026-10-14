@@ -68,16 +68,16 @@ public class AuthController {
 	@Operation(summary = "Đăng nhập (FR-AUTH-02)",
 			description = "Xác thực email + mật khẩu, trả về access token (JWT). Refresh token được gắn "
 					+ "vào cookie HttpOnly `refresh_token` (không nằm trong body — PBL6-46). Sai 5 lần "
-					+ "liên tiếp → khoá tài khoản 15 phút. User chưa xác thực email vẫn đăng nhập được "
+					+ "liên tiếp → khoá thao tác dùng mật khẩu 15 phút, giữ các phiên đang có. User chưa xác thực email vẫn đăng nhập được "
 					+ "(status = PENDING).")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Đăng nhập thành công",
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
 			@ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ (VALIDATION_ERROR)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "401", description = "Sai email/mật khẩu (INVALID_CREDENTIALS)",
+			@ApiResponse(responseCode = "401", description = "Sai email hoặc mật khẩu (INVALID_CREDENTIALS)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "423", description = "Tài khoản đang bị khoá tạm (ACCOUNT_LOCKED)",
+			@ApiResponse(responseCode = "423", description = "Thao tác mật khẩu bị khoá tạm (ACCOUNT_LOCKED) hoặc tài khoản bị Admin khoá (ACCOUNT_SUSPENDED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PostMapping("/login")
@@ -92,11 +92,12 @@ public class AuthController {
 			description = "Dùng refresh token trong cookie HttpOnly `refresh_token` để lấy access token "
 					+ "mới (xoay vòng — cookie được ghi đè bằng refresh token mới). Refresh token cũ bị "
 					+ "thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi. Lỗi do token "
-					+ "thật sự chết (hết hạn/reused/tài khoản khoá) đều xoá luôn cookie hiện tại — trình "
+					+ "thật sự chết (hết hạn/reused/tài khoản bị Admin khoá) đều xoá luôn cookie hiện tại — trình "
 					+ "duyệt không tiếp tục gửi lại một token không còn dùng được. Riêng "
 					+ "REFRESH_TOKEN_ROTATION_CONFLICT (thua một request /refresh khác chạy song song "
 					+ "cùng token cũ) KHÔNG xoá cookie — request thắng cuộc có thể đã ghi cookie mới hợp "
-					+ "lệ, xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống.")
+					+ "lệ, xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống. Khoá thao tác mật khẩu "
+					+ "không chặn refresh của phiên hợp lệ.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "200", description = "Cấp token mới thành công",
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
@@ -104,7 +105,7 @@ public class AuthController {
 					description = "REFRESH_TOKEN_MISSING / INVALID_REFRESH_TOKEN / REFRESH_TOKEN_EXPIRED / "
 							+ "REFRESH_TOKEN_REUSED / REFRESH_TOKEN_ROTATION_CONFLICT",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "423", description = "Tài khoản đang bị khoá tạm (ACCOUNT_LOCKED)",
+			@ApiResponse(responseCode = "423", description = "Tài khoản bị Admin khoá (ACCOUNT_SUSPENDED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@SecurityRequirement(name = "cookieAuth")
