@@ -3,7 +3,7 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException
@@ -15,7 +15,8 @@ from knowledge import KnowledgeIndex, create_embedder
 from llm import Answerer
 from manage import ingest_faq
 from orders import OrderClient
-from schemas import (CONVERSATION_ID, ChatError, ChatRequest, error_response, public_conversation, public_message,
+from schemas import (CONVERSATION_ID, ChatError, ChatRequest, cursor_of, error_response, parse_cursor,
+                     public_conversation, public_message,
                      public_ticket)
 from settings import Settings
 from store import ChatStore
@@ -107,8 +108,11 @@ def create_app(settings=None, store=None, embedder=None, answerer=None, orders=N
         return {"conversations": [public_conversation(c) for c in await owned(store.list_conversations, user.user_id)]}
 
     @app.get(BASE + "/conversations/{conversation_id}/messages")
-    async def messages(request: Request, conversation_id: str):
+    async def messages(request: Request, conversation_id: str, before: str | None = Query(None, max_length=64),
+                       limit: int = Query(100, ge=1, le=200)):
+        """Newest messages first page, oldest first inside it; `nextCursor` reads further back."""
         user = require(identity(request))
+        start = parse_cursor(before) if before is not None else None
         owner = user.user_id
         if not CONVERSATION.fullmatch(conversation_id):
             owner = None
@@ -118,8 +122,9 @@ def create_app(settings=None, store=None, embedder=None, answerer=None, orders=N
             owner = await owned(store.ticket_owner, conversation_id) if user.admin else None
         if not owner:
             raise ChatError(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại")
-        found = await owned(store.list_messages, owner, conversation_id)
-        return {"conversationId": conversation_id, "messages": [public_message(m) for m in found]}
+        found, more = await owned(store.message_page, owner, conversation_id, limit, start)
+        return {"conversationId": conversation_id, "messages": [public_message(m) for m in found],
+                "hasMore": more, "nextCursor": cursor_of(found[0]) if more else None}
 
     @app.get(BASE + "/tickets")
     async def tickets(request: Request):

@@ -97,7 +97,7 @@ class ChatService:
         turns = self.settings.history_turns
         if not turns:
             return []
-        messages = await self.call(self.store.recent_messages, user_id, conversation_id, turns * 4)
+        messages, _ = await self.call(self.store.message_page, user_id, conversation_id, turns * 4)
         # Pair by turnId, never by neighbouring rows: concurrent turns can be stored side by side.
         by_turn = {}
         for message in messages:
@@ -120,12 +120,11 @@ class ChatService:
             return result("handoff", f"Bạn vui lòng đăng nhập để mình tạo phiếu hỗ trợ. Bạn cũng có thể {SELLER_HINT} "
                                      f"hoặc liên hệ quản trị viên qua {contact}.", handoff=True, login_required=True)
         # Asking again in the same conversation points back to the ticket that is already waiting.
-        ticket = await self.call(self.store.open_ticket, identity.user_id, conversation_id)
-        if ticket:
+        ticket, created = await self.call(self.store.open_ticket, identity.user_id, conversation_id, message)
+        if not created:
             return result("handoff", f"Phiếu hỗ trợ #{ticket['_id']} của bạn đang chờ quản trị viên VMarket xử lý, "
                                      f"bạn không cần gửi lại. Nếu cần gấp, bạn có thể liên hệ qua {contact}.",
                           handoff=True, ticket_id=ticket["_id"])
-        ticket = await self.call(self.store.create_ticket, identity.user_id, conversation_id, message)
         return result("handoff", f"Mình đã tạo phiếu hỗ trợ #{ticket['_id']} để quản trị viên VMarket xem xét. "
                                  f"Với vấn đề về một sản phẩm hoặc đơn hàng cụ thể, bạn cũng có thể {SELLER_HINT}.",
                       handoff=True, ticket_id=ticket["_id"])

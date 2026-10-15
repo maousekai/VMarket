@@ -5,11 +5,11 @@ cannot reach another user's history by guessing an id.
 """
 import uuid
 
-from pymongo import ASCENDING, DESCENDING, MongoClient, ReplaceOne
+from pymongo import ASCENDING, DESCENDING, MongoClient, ReplaceOne, ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from schemas import now
 
-MAX_HISTORY = 200
 # A turn's question and reply share createdAt and turnId, so two turns saved in the same millisecond
 # still read back as question, reply, question, reply instead of interleaving.
 MESSAGE_ORDER = [("createdAt", ASCENDING), ("turnId", ASCENDING), ("position", ASCENDING)]
@@ -32,6 +32,10 @@ class ChatStore:
         self.tickets.create_index([("userId", ASCENDING), ("createdAt", DESCENDING)])
         self.tickets.create_index([("createdAt", DESCENDING)])  # An ADMIN lists every ticket, newest first.
         self.tickets.create_index([("conversationId", ASCENDING)])
+        self.mark_duplicate_tickets()
+        # At most one OPEN ticket per conversation, so concurrent hand-off requests cannot open two.
+        self.tickets.create_index([("userId", ASCENDING), ("conversationId", ASCENDING)], unique=True,
+                                  partialFilterExpression={"status": "OPEN"}, name="one_open_ticket_per_conversation")
 
     def ping(self):
         self.client.admin.command("ping")
@@ -63,13 +67,20 @@ class ChatStore:
     def list_conversations(self, user_id, limit=50):
         return list(self.conversations.find({"userId": user_id}).sort("updatedAt", DESCENDING).limit(limit))
 
-    def list_messages(self, user_id, conversation_id, limit=MAX_HISTORY):
-        found = self.messages.find({"conversationId": conversation_id, "userId": user_id})
-        return list(found.sort(MESSAGE_ORDER).limit(limit))
+    def message_page(self, user_id, conversation_id, limit, before=None):
+        """The newest `limit` messages, oldest first, and whether older ones remain.
 
-    def recent_messages(self, user_id, conversation_id, limit):
-        found = self.messages.find({"conversationId": conversation_id, "userId": user_id})
-        return list(found.sort([(key, DESCENDING) for key, _ in MESSAGE_ORDER]).limit(limit))[::-1]
+        `before` is the (createdAt, turnId, position) of the oldest message already shown; the page
+        then holds the messages right before it in MESSAGE_ORDER.
+        """
+        query = {"conversationId": conversation_id, "userId": user_id}
+        if before:
+            created, turn, position = before
+            query["$or"] = [{"createdAt": {"$lt": created}},
+                            {"createdAt": created, "turnId": {"$lt": turn}},
+                            {"createdAt": created, "turnId": turn, "position": {"$lt": position}}]
+        found = list(self.messages.find(query).sort([(key, DESCENDING) for key, _ in MESSAGE_ORDER]).limit(limit + 1))
+        return found[:limit][::-1], len(found) > limit
 
     def append_exchange(self, user_id, conversation_id, question, answer, create):
         """Store one question/answer pair; `create` opens the conversation on its first message."""
@@ -87,14 +98,32 @@ class ChatStore:
         return conversation_id, reply["_id"]
 
     # ---- SupportTicket ----
-    def create_ticket(self, user_id, conversation_id, question):
-        ticket = {"_id": uuid.uuid4().hex[:12].upper(), "userId": user_id, "conversationId": conversation_id,
-                  "question": question, "status": "OPEN", "createdAt": now()}
-        self.tickets.insert_one(ticket)
-        return ticket
+    def open_ticket(self, user_id, conversation_id, question):
+        """Return (ticket, created): the conversation's OPEN ticket, opened now if there was none.
 
-    def open_ticket(self, user_id, conversation_id):
-        return self.tickets.find_one({"conversationId": conversation_id, "userId": user_id, "status": "OPEN"})
+        One atomic upsert guarded by the unique index, so concurrent requests all get the same ticket.
+        """
+        key = {"userId": user_id, "conversationId": conversation_id, "status": "OPEN"}
+        fresh = {"_id": uuid.uuid4().hex[:12].upper(), "question": question, "createdAt": now()}
+        try:
+            existing = self.tickets.find_one_and_update(key, {"$setOnInsert": fresh}, upsert=True,
+                                                        return_document=ReturnDocument.BEFORE)
+        except DuplicateKeyError:
+            # Another request inserted it between this one's match and insert: that ticket is the one.
+            existing = self.tickets.find_one(key)
+            if existing is None:
+                raise
+        return (existing, False) if existing else ({**key, **fresh}, True)
+
+    def mark_duplicate_tickets(self):
+        """Tickets opened twice before the unique index existed: keep the oldest OPEN one per conversation."""
+        groups = self.tickets.aggregate([
+            {"$match": {"status": "OPEN"}}, {"$sort": {"createdAt": ASCENDING}},
+            {"$group": {"_id": {"userId": "$userId", "conversationId": "$conversationId"}, "ids": {"$push": "$_id"}}},
+            {"$match": {"ids.1": {"$exists": True}}}])
+        for group in groups:
+            self.tickets.update_many({"_id": {"$in": group["ids"][1:]}},
+                                     {"$set": {"status": "DUPLICATE", "duplicateOf": group["ids"][0]}})
 
     def ticket_owner(self, conversation_id):
         """The user who asked for support from this conversation, or None when nobody did."""

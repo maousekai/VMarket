@@ -33,6 +33,16 @@ def bearer(**options):
     return {"Authorization": "Bearer " + token(**options)}
 
 
+def stamp():
+    """Naive UTC to the millisecond, as MongoDB returns datetimes."""
+    moment = now().replace(tzinfo=None)
+    return moment.replace(microsecond=moment.microsecond // 1000 * 1000)
+
+
+def order_key(message):
+    return message["createdAt"], message.get("turnId") or "", message.get("position", 0)
+
+
 class MemoryStore:
     """Same contract as ChatStore, including the owner filter on every read."""
 
@@ -82,11 +92,11 @@ class MemoryStore:
         self.check()
         return [c for c in self.conversations.values() if c["userId"] == user_id][:limit]
 
-    def list_messages(self, user_id, conversation_id, limit=200):
-        return [m for m in self.messages if m["conversationId"] == conversation_id and m["userId"] == user_id][:limit]
-
-    def recent_messages(self, user_id, conversation_id, limit):
-        return self.list_messages(user_id, conversation_id)[-limit:]
+    def message_page(self, user_id, conversation_id, limit, before=None):
+        # Rows come back in stored order, so a test can stand in for rows MongoDB returns side by side.
+        mine = [m for m in self.messages if m["conversationId"] == conversation_id and m["userId"] == user_id
+                and (before is None or order_key(m) < before)]
+        return mine[-limit:], len(mine) > limit
 
     def append_exchange(self, user_id, conversation_id, question, answer, create):
         self.check()
@@ -94,22 +104,23 @@ class MemoryStore:
             self.conversations[conversation_id] = {"_id": conversation_id, "userId": user_id, "title": question[:80],
                                                    "messageCount": 0, "createdAt": now(), "updatedAt": now()}
         self.conversations[conversation_id]["messageCount"] += 2
-        base = {"conversationId": conversation_id, "userId": user_id, "createdAt": now(),
-                "turnId": f"t{len(self.messages)}"}
-        self.messages.append({**base, "_id": f"m{len(self.messages)}", "role": "user", "content": question})
-        self.messages.append({**base, "_id": f"m{len(self.messages)}", "role": "assistant", "content": answer["reply"],
+        base = {"conversationId": conversation_id, "userId": user_id, "createdAt": stamp(),
+                "turnId": f"{len(self.messages):032x}"}
+        self.messages.append({**base, "_id": f"m{len(self.messages)}", "position": 0, "role": "user", "content": question})
+        self.messages.append({**base, "_id": f"m{len(self.messages)}", "position": 1, "role": "assistant",
+                              "content": answer["reply"],
                               "intent": answer["intent"], "sources": answer["sources"]})
         return conversation_id, self.messages[-1]["_id"]
 
-    def create_ticket(self, user_id, conversation_id, question):
+    def open_ticket(self, user_id, conversation_id, question):
+        found = next((t for t in self.tickets if t["conversationId"] == conversation_id and t["userId"] == user_id
+                      and t["status"] == "OPEN"), None)
+        if found:
+            return found, False
         ticket = {"_id": f"T{len(self.tickets) + 1}", "userId": user_id, "conversationId": conversation_id,
                   "question": question, "status": "OPEN", "createdAt": now()}
         self.tickets.append(ticket)
-        return ticket
-
-    def open_ticket(self, user_id, conversation_id):
-        return next((t for t in self.tickets if t["conversationId"] == conversation_id and t["userId"] == user_id
-                     and t["status"] == "OPEN"), None)
+        return ticket, True
 
     def ticket_owner(self, conversation_id):
         return next((t["userId"] for t in self.tickets if t["conversationId"] == conversation_id), None)
@@ -539,6 +550,33 @@ class ChatApi(unittest.TestCase):
         self.assertEqual(h.client.get(path.format(raised), headers=bearer(user=BOB)).status_code, 404)
         self.assertEqual(h.ask("xin chào", admin, conversationId=raised).status_code, 404)
         self.assertEqual(h.client.get(BASE + "/conversations", headers=admin).json()["conversations"], [])
+
+    def test_long_conversation_pages_back_from_the_newest_messages(self):
+        h = Harness()
+        alice, admin = bearer(user=ALICE), bearer(user="admin", roles=("ADMIN",))
+        answer = {"reply": "đáp", "intent": "answer", "sources": []}
+        conversation = "c" * 32
+        for number in range(101):
+            h.store.append_exchange(ALICE, conversation, f"hỏi {number}", answer, number == 0)
+        h.ask("cho tôi gặp nhân viên hỗ trợ", alice, conversationId=conversation)
+        path = f"{BASE}/conversations/{conversation}/messages"
+        first = h.client.get(path, headers=alice).json()
+        self.assertEqual((len(first["messages"]), first["hasMore"]), (100, True))
+        # The page a reader opens holds the latest turns, oldest first, ending with the hand-off.
+        self.assertEqual(first["messages"][-2]["content"], "cho tôi gặp nhân viên hỗ trợ")
+        self.assertEqual(first["messages"][0]["content"], "hỏi 52")
+        seen, cursor = [], None
+        while True:
+            page = h.client.get(path, headers=admin, params={"limit": 30, **({"before": cursor} if cursor else {})}).json()
+            seen = page["messages"] + seen
+            if not page["hasMore"]:
+                self.assertIsNone(page["nextCursor"])
+                break
+            cursor = page["nextCursor"]
+        self.assertEqual([m["id"] for m in seen], [m["_id"] for m in h.store.messages])
+        for params in ({"before": "nope"}, {"before": "1-zz-0"}, {"limit": 0}, {"limit": 201}):
+            with self.subTest(params=params):
+                self.assertEqual(h.client.get(path, headers=alice, params=params).status_code, 400)
 
     def test_small_talk_and_validation(self):
         h = Harness()

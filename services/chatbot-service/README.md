@@ -46,7 +46,10 @@ Docker (context là chính thư mục service): `docker build -t vmarket-chatbot
 Ý định được quyết định bằng luật cố định, theo thứ tự:
 
 1. **Yêu cầu gặp người hỗ trợ** (FR-BOT-03) → người đã đăng nhập được tạo phiếu hỗ trợ; khách được hướng dẫn liên hệ.
-   Hỏi lại trong cùng hội thoại khi phiếu còn `OPEN` thì nhận lại mã phiếu đó, không tạo phiếu mới.
+   Hỏi lại trong cùng hội thoại khi phiếu còn `OPEN` thì nhận lại mã phiếu đó, không tạo phiếu mới. Việc
+   này là một upsert nguyên tử kèm unique index một phiếu `OPEN` cho mỗi hội thoại, nên request đồng thời
+   (bấm đúp, nhiều tab) cũng chỉ ra một phiếu. Phiếu `OPEN` trùng có từ trước khi có index được đánh dấu
+   `DUPLICATE` lúc khởi động.
 2. **Hỏi trạng thái đơn hàng** (FR-BOT-02) → gọi order-service; khách được yêu cầu đăng nhập.
 3. **Chào hỏi / cảm ơn** → câu chào cố định.
 4. **Còn lại là RAG** (FR-BOT-01): tìm các đoạn tri thức gần nhất theo cosine.
@@ -71,6 +74,12 @@ Mọi câu trả lời RAG kèm `sources` (đoạn tri thức đã dùng). LLM l
   của người khác trả 404. Vai trò `ADMIN` xem được mọi phiếu hỗ trợ và đọc được (chỉ đọc) tin nhắn của hội
   thoại đã phát sinh phiếu; hội thoại không có phiếu vẫn trả 404 với `ADMIN`.
 - Log không ghi nội dung chat, token hay URL.
+
+## Lịch sử hội thoại
+
+`GET /conversations/{id}/messages` trả trang mới nhất trước (`limit` mặc định 100, tối đa 200), trong trang
+xếp cũ → mới. `hasMore: true` thì gửi `nextCursor` vào `?before=` để đọc tiếp về trước. Thứ tự ổn định theo
+`(createdAt, turnId, position)` nên các lượt cùng mili giây không bị lặp hay mất giữa hai trang.
 
 ## Kho tri thức
 
