@@ -75,6 +75,8 @@ class MongoChecks(unittest.TestCase):
                                                                                  "sources": []}, number == 0)
         messages, more = self.store.message_page("alice", "d" * 32, 10)
         self.assertEqual(([m["role"] for m in messages], more), (["user", "assistant"] * 4, False))
+        # Turns of one millisecond also keep the order they were saved in.
+        self.assertEqual([m["content"] for m in messages[::2]], [f"hỏi {number}" for number in range(4)])
         for question, reply in zip(messages[::2], messages[1::2]):
             self.assertEqual((question["turnId"], reply["content"]), (reply["turnId"], question["content"].replace("hỏi", "đáp")))
         # Paging one message at a time through turns of one millisecond still visits each exactly once.

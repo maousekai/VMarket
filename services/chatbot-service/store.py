@@ -3,6 +3,8 @@
 Every read of a conversation, message or ticket is filtered by its owner's userId here, so a caller
 cannot reach another user's history by guessing an id.
 """
+import itertools
+import time
 import uuid
 
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReplaceOne, ReturnDocument
@@ -13,6 +15,15 @@ from schemas import now
 # A turn's question and reply share createdAt and turnId, so two turns saved in the same millisecond
 # still read back as question, reply, question, reply instead of interleaving.
 MESSAGE_ORDER = [("createdAt", ASCENDING), ("turnId", ASCENDING), ("position", ASCENDING)]
+SEQUENCE = itertools.count()
+
+
+def turn_id():
+    """32 hex chars that grow with each write of this process, so turns of the same millisecond keep
+    the order they were saved in; the random tail keeps ids of different replicas apart."""
+    return f"{time.time_ns():016x}{next(SEQUENCE) & 0xFFFF:04x}{uuid.uuid4().hex[:12]}"
+
+
 MESSAGE_ORDER_INDEX = [("conversationId", ASCENDING), ("userId", ASCENDING)] + MESSAGE_ORDER
 
 
@@ -84,7 +95,7 @@ class ChatStore:
 
     def append_exchange(self, user_id, conversation_id, question, answer, create):
         """Store one question/answer pair; `create` opens the conversation on its first message."""
-        asked, turn = now(), uuid.uuid4().hex
+        asked, turn = now(), turn_id()
         base = {"conversationId": conversation_id, "userId": user_id, "turnId": turn, "createdAt": asked}
         if create:
             self.conversations.insert_one({"_id": conversation_id, "userId": user_id, "title": question[:80],
