@@ -7,7 +7,7 @@ from starlette.responses import JSONResponse
 MAX_MESSAGE = 1000
 CONVERSATION_ID = r"^[0-9a-f]{32}$"
 # Opaque to clients: milliseconds since the epoch, turnId and position of a message.
-CURSOR = re.compile(r"(\d{1,15})-([0-9a-f]{0,32})-([01])")
+CURSOR = re.compile(r"(\d{1,14})-([0-9a-f]{0,32})-([01])")
 EPOCH = datetime(1970, 1, 1)
 
 

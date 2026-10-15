@@ -574,7 +574,7 @@ class ChatApi(unittest.TestCase):
                 break
             cursor = page["nextCursor"]
         self.assertEqual([m["id"] for m in seen], [m["_id"] for m in h.store.messages])
-        for params in ({"before": "nope"}, {"before": "1-zz-0"}, {"limit": 0}, {"limit": 201}):
+        for params in ({"before": "nope"}, {"before": "1-zz-0"}, {"before": "9" * 15 + "--0"},{"limit": 0}, {"limit": 201}):
             with self.subTest(params=params):
                 self.assertEqual(h.client.get(path, headers=alice, params=params).status_code, 400)
 
