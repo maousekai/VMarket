@@ -15,7 +15,7 @@ import com.vmarket.product.service.InventoryService;
 /** Ánh xạ vòng đời đơn trong SRS sang thao tác chốt/hoàn tồn kho. */
 @Component
 public class OrderStatusChangedInventoryConsumer implements EventConsumer<OrderStatusChanged> {
-	private static final Set<String> COD_CONFIRMED_STATUSES = Set.of("CONFIRMED", "PREPARING");
+	private static final Set<String> COD_CONFIRMED_STATUSES = Set.of("CONFIRMED", "PREPARING", "PROCESSING");
 	private final InventoryService inventoryService;
 
 	public OrderStatusChangedInventoryConsumer(InventoryService inventoryService) {

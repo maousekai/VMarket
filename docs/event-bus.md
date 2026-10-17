@@ -161,6 +161,8 @@ park phía outbox của Product Catalog (xem `§7`).
 | `ProductModerationRequested` | Product Catalog | Notification/Admin workflow |
 | `PaymentSucceeded` / `PaymentFailed` | Payment | Order, Notification |
 | `DeliveryAssigned` | Delivery | Notification |
+| `DeliveryStatusChanged` | Delivery | Order |
+| `CodCollected` | Delivery | Payment (PBL6-19) |
 | `ReviewCreated` | Review | Notification, Product |
 | `ReturnRequested` / `ReturnResolved` | Order | Payment, Product, Notification |
 | `UserBehaviorTracked` | Gateway / Clients | Recommendation |
@@ -234,6 +236,19 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 - **Idempotency**: consumer nên dựa vào `eventId` để tránh xử lý trùng (vd khi retry).
 - **Phá phiên bản schema**: khi payload thay đổi, giữ tương thích ngược hoặc bump
   version và thống nhất với các service nhận trước khi deploy.
+
+## Payment integration (PBL6-19)
+
+- `PaymentFailed(orderId, reason)`: `RETRYABLE` keeps an order awaiting payment;
+  `EXPIRED`/`CANCELLED` cancels the awaiting order and releases inventory.
+- `CodCollected(orderId, buyerId, amount, reference)`: Delivery publishes only after
+  assigned-shipper authorization and collection of the trusted order amount.
+  Payment records collection idempotently by order/reference; it does not emit online
+  `PaymentSucceeded` for COD or change the delivered order back to pending.
+- Order and Payment SQL outboxes enable `app.events.confirmed-publication=true`,
+  correlated publisher confirms and mandatory returns. Nack, timeout and missing route
+  preserve the SQL row. Retries may carry a new envelope id: these consumers deduplicate
+  by business order/payment state under database locks.
 
 ## 8. Contract Product Catalog bổ sung
 

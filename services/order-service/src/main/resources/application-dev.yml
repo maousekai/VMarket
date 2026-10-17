@@ -15,6 +15,8 @@ auth:
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
 
 app:
+  delivery:
+    internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
   cart-service:
     # Local mvnw: cart-service chay cong 8085.
     base-url: ${CART_SERVICE_URL:http://localhost:8085}

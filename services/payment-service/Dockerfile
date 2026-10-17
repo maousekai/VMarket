@@ -47,6 +47,13 @@ WORKDIR /build
 COPY services/pom.xml ./pom.xml
 COPY services/${SERVICE_NAME}/pom.xml ${SERVICE_NAME}/pom.xml
 
+# shared-events is an internal artifact, unavailable from Maven Central.
+# Install its parent descriptor and library before resolving service dependencies.
+COPY services/shared-events/pom.xml shared-events/pom.xml
+COPY services/shared-events/src shared-events/src
+RUN mvn -B --no-transfer-progress -f pom.xml -N install -DskipTests \
+ && mvn -B --no-transfer-progress -f shared-events/pom.xml install -DskipTests
+
 # go-offline keo ve toan bo dependency + plugin can cho build.
 # Dependency nam han trong layer image (khong dung cache mount) de CI
 # tren runner moi tinh van tai lai duoc tu Docker layer cache.
