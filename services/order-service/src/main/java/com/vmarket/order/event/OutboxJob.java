@@ -3,7 +3,6 @@ package com.vmarket.order.event;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import org.springframework.amqp.AmqpException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -19,7 +18,7 @@ public class OutboxJob {
     public void run() {
         try {
             dispatcher.dispatch();
-        } catch (AmqpException ex) {
+        } catch (org.springframework.amqp.AmqpException ex) {
             log.warn("Broker unavailable; outbox retained");
         }
     }

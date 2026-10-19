@@ -1,8 +1,12 @@
 package com.vmarket.payment.config;
+
 import lombok.Getter;
 import lombok.Setter;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
-@Getter @Setter
+
+@Getter
+@Setter
 @ConfigurationProperties("app.payos")
 public class PayosProperties {
     private boolean enabled;

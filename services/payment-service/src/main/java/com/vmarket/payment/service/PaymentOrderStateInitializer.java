@@ -1,18 +1,22 @@
 package com.vmarket.payment.service;
-import com.vmarket.payment.entity.PaymentOrderState;
-import com.vmarket.payment.repository.PaymentOrderStateRepository;
+
 import lombok.RequiredArgsConstructor;
+
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.*;
-@Component @RequiredArgsConstructor
+
+@Component
+@RequiredArgsConstructor
 public class PaymentOrderStateInitializer {
-    private final PaymentOrderStateRepository states;
-    // Commit the identity before acquiring its domain lock. A concurrent insert can
-    // roll back in isolation without poisoning the caller's transaction.
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    private final JdbcTemplate jdbc;
+
+    // Uses the caller's connection; a racing initializer cannot abort its transaction.
+    @Transactional
     public void ensure(String orderId) {
-        if (!states.existsById(orderId)) {
-            var state = new PaymentOrderState(); state.setOrderId(orderId); states.saveAndFlush(state);
-        }
+        jdbc.update(
+                "insert into payment_order_states (order_id, cancelled) values (?, false) on"
+                        + " conflict do nothing",
+                orderId);
     }
 }

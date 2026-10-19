@@ -16,7 +16,7 @@ public interface OutboxRepository extends JpaRepository<OutboxEvent, String> {
             select 1 from event_outbox earlier where earlier.aggregate_id=e.aggregate_id
               and (earlier.created_at < e.created_at
                 or (earlier.created_at=e.created_at and earlier.event_sequence < e.event_sequence)))
-        order by e.created_at, e.event_sequence limit 50 for update skip locked
+        order by e.created_at, e.event_sequence limit 1 for update skip locked
         """,
             nativeQuery = true)
     List<OutboxEvent> next(@Param("now") Instant now);
