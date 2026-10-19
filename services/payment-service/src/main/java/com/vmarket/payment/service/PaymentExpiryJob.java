@@ -1,23 +1,60 @@
 package com.vmarket.payment.service;
-import java.time.Clock;
-import java.util.List;
-import com.vmarket.payment.repository.PaymentRepository;
+
 import com.vmarket.payment.client.PayosClient;
-import org.springframework.stereotype.Component;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.data.domain.PageRequest;
+import com.vmarket.payment.repository.PaymentRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-@Component @RequiredArgsConstructor @Slf4j
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.time.Clock;
+import java.util.List;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
 @ConditionalOnProperty(name = "app.jobs.enabled", havingValue = "true", matchIfMissing = true)
 public class PaymentExpiryJob {
-    private final PaymentRepository repository; private final PaymentStore store; private final PayosClient client; private final Clock clock;
+    private final PaymentRepository repository;
+    private final PaymentStore store;
+    private final PayosClient client;
+    private final Clock clock;
+
     @Scheduled(fixedDelayString = "${app.payment.expiry-delay:10000}")
     public void run() {
-        for (var p : repository.findByStatusInAndExpiresAtLessThanEqual(List.of("CREATED", "PENDING", "FAILED"), clock.instant(), PageRequest.of(0, 100))) store.expire(p.getId());
-        for (var p : repository.findByCancelPendingTrueAndNextCancelAttemptAtLessThanEqualOrderByNextCancelAttemptAtAscIdAsc(clock.instant(), PageRequest.of(0, 100))) {
-            try { store.cancelRemote(p.getId(), client); } catch (com.vmarket.payment.exception.ApiException ex) { log.warn("Provider cancellation pending for payment {}", p.getId()); }
+        for (var p :
+                repository
+                        .findByStatusInAndSettlementExpiresAtLessThanEqualOrderBySettlementExpiresAtAscIdAsc(
+                                List.of(
+                                        "CREATED",
+                                        "CREATING",
+                                        "PENDING",
+                                        "FAILED",
+                                        "AWAITING_WEBHOOK"),
+                                clock.instant(),
+                                PageRequest.of(0, 100))) {
+            try {
+                store.expire(p.getId());
+            } catch (RuntimeException failure) {
+                log.warn(
+                        "Payment expiry deferred for {}: {}",
+                        p.getId(),
+                        failure.getClass().getSimpleName());
+            }
+        }
+        for (var p :
+                repository
+                        .findByCancelPendingTrueAndNextCancelAttemptAtLessThanEqualOrderByNextCancelAttemptAtAscIdAsc(
+                                clock.instant(), PageRequest.of(0, 100))) {
+            try {
+                store.cancelRemote(p.getId(), client);
+            } catch (RuntimeException ex) {
+                log.warn("Provider cancellation pending for payment {}", p.getId());
+            }
         }
     }
 }
