@@ -1,4 +1,4 @@
-"""Run Flyway, prune 30-day receipts, or seed catalog snapshots while Product writers are paused."""
+"""Run Flyway, prune 30-day catalog receipts, or seed snapshots while Product writers are paused."""
 import argparse
 import os
 import subprocess
@@ -56,7 +56,7 @@ def main():
         try:
             store.start()
             if args.command == "cleanup":
-                print(f"Removed {store.prune_receipts()} receipts older than 30 days.")
+                print(f"Removed {store.prune_receipts()} catalog receipts older than 30 days; behavior history/receipts retained.")
             else:
                 print(f"Seeded {seed(store)} snapshots; keep the consumer running to drain queued catalog events.")
         finally:

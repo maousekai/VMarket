@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.responses import JSONResponse
 
 PUBLIC_FIELDS = ("id", "shopId", "name", "description", "imageUrls", "categoryId", "currency",
@@ -22,6 +22,20 @@ def error_response(error, path):
 def valid_id(value):
     return (isinstance(value, str) and 1 <= len(value) <= 128 and value.strip() == value
             and value not in {".", ".."} and not any(c in "/\\?#" or ord(c) < 32 for c in value))
+
+
+class Behavior(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    userId: str = Field(min_length=1, max_length=128)
+    productId: str = Field(min_length=1, max_length=128)
+    action: Literal["view", "add_to_cart", "purchase"]
+
+    @field_validator("userId", "productId")
+    @classmethod
+    def validate_id(cls, value):
+        if not valid_id(value):
+            raise ValueError("Invalid behavior ID")
+        return value
 
 
 class Snapshot(BaseModel):

@@ -1,4 +1,29 @@
-# PR-1 validation
+# PR-2 validation
+
+Date: 2026-10-20 (Asia/Bangkok). Branch: PBL6-24-FR-REC-01-03.
+Base: origin/dev at d985504, including merged PR #33 (merge 31ab115, 2026-10-14) and PR #34.
+
+| Check | Result |
+| --- | --- |
+| Python unit tests | 21 passed, including PR-1 regressions |
+| PostgreSQL/Redis/RabbitMQ integration tests | 10 passed, including PR-1 regressions |
+| Flyway upgrade | Isolated vmarket_recommendation_review_test upgraded V2 to V3 |
+| Fresh Flyway migration | Isolated vmarket_recommendation_pr2_test migrated V1, V2 and V3 |
+| Docker repository-root build | Passed; vmarket-recommendation:pr2 |
+| Runtime dependency audit | No known vulnerabilities found; requirements unchanged |
+| Whitespace | git diff --check passed |
+
+The new integration fixtures publish real RabbitMQ UserBehaviorTracked messages for view, add_to_cart and purchase. They verify history before catalog arrival, catalog synchronization from ProductCreated fixture messages, consumer restart/replay deduplication, one vote per peer despite repeated views, authenticated content-to-hybrid ranking changes, cold-start/category fallback, JWT/guest isolation and no query/header identity overrides. Product snapshot HTTP responses are served by the existing fixture server, not a running Product service.
+
+Redis checks cover user-scoped invalidation, a bounded scan, current purchase exclusion despite stale cached IDs after Redis invalidation fails, Redis read failure, and collaboration propagating after simulated cache expiry (Redis EXPIRE 0 on isolated test keys). SQL checks verify transaction rollback removes the receipt when history insertion fails and the maintenance cleanup preserves old behavior receipts. A pure ranking fixture verifies normalization and the equal hybrid blend, content-only ranking, all-zero fallback, purchase exclusion and popularity fill.
+
+The initial integration fixture incorrectly expected a limit=1 entry to stay warm after a purchase invalidated that user's entries. The fixture now warms the same limit after invalidation before checking cross-user TTL staleness; the complete rerun passed. Latest guest-path demo p95 was 10.2 ms over 30 sequential ASGI requests and two fixture products with local PostgreSQL/Redis. This is not a personalized load test or a 200-user capacity claim.
+
+Scope is FR-REC-01 ranking logic plus FR-REC-03 consumer behavior. FR-REC-02/04 remain regression-verified. Real behavior producers, frontend tracking and FR-REC-05 training/model versions remain absent. Behavior history/receipts are intentionally retained indefinitely pending a coordinated retention policy. Exact personalization scans candidate ranking fields and compares them with eligible history seeds; large-catalog/history scaling remains unverified.
+
+No dependencies, gateway, frontend, Cart/Order producers, shared order schemas or infrastructure definitions changed. Existing recommendation CI discovers the added tests and runs all migrations; event-bus.md now triggers this workflow too. No local gateway/frontend suite, live Product/Gateway end-to-end, production migration or deployment was performed for PR-2. Infrastructure started for verification is restored to its prior stopped state. Publication, CI and review status are tracked in the GitHub pull request; local plans retain the task's requirement limits.
+
+# PR-1 validation (historical)
 
 Updated: 2026-10-14 (Asia/Bangkok).
 Branch: PBL6-24-FR-REC-01-02-04.

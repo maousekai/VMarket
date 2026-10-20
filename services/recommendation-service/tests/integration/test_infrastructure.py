@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import urlsplit, parse_qs
 
 import httpx
+import jwt
 import pika
 import psycopg
 import redis
@@ -92,13 +93,17 @@ class InfrastructureTest(unittest.TestCase):
         self.store = Store(self.settings)
         self.store.start()
         with self.store.pool.connection() as conn:
-            conn.execute("TRUNCATE item_feature, processed_event")
+            conn.execute("TRUNCATE user_event, item_feature, processed_event")
         self.store.cache.close()
         self.store.cache = redis.Redis(host=base.redis_host, port=base.redis_port,
                                        password=base.redis_password or None, db=15, decode_responses=True)
         raw_get, raw_setex = self.store.cache.get, self.store.cache.setex
+        raw_scan = self.store.cache.scan
         self.store.cache.get = lambda key: raw_get(self.namespace + ":" + key)
         self.store.cache.setex = lambda key, ttl, value: raw_setex(self.namespace + ":" + key, ttl, value)
+        self.store.cache.scan = lambda cursor=0, match=None, count=None, **kwargs: raw_scan(
+            cursor=cursor, match=match if match and match.startswith(self.namespace + ":") else self.namespace + ":" + (match or "*"),
+            count=count, **kwargs)
         self.consumer = Consumer(self.store)
         type(self).rows = {"p1": snapshot(), "p2": snapshot("p2", soldCount=10)}
         type(self).failure = 0
@@ -138,6 +143,16 @@ class InfrastructureTest(unittest.TestCase):
                                   properties=pika.BasicProperties(delivery_mode=2), mandatory=True)
         finally:
             connection.close()
+
+    def track(self, user_id, product_id, action, event_id=None):
+        event_id = event_id or str(uuid.uuid4())
+        self.publish("UserBehaviorTracked", {"userId": user_id, "productId": product_id, "action": action}, event_id)
+        await_true(lambda: self.store.seen(event_id))
+        return event_id
+
+    def bearer(self, user_id):
+        return {"Authorization": "Bearer " + jwt.encode({"iss": "auth-service", "sub": user_id,
+            "exp": int(time.time()) + 600}, self.settings.jwt_secret, algorithm="HS256")}
 
     def test_catalog_events_duplicates_tombstones_and_dead_letters(self):
         self.start_consumer()
@@ -284,3 +299,91 @@ class InfrastructureTest(unittest.TestCase):
         stats = self.store.pool.get_stats()
         self.assertEqual(stats["pool_available"], stats["pool_size"])
         self.assertEqual(self.store.recommendations(seed_id="p1")[0]["id"], "p2")
+
+    def test_behavior_before_catalog_restart_duplicates_and_hybrid_api(self):
+        self.start_consumer()
+        viewed = self.track("buyer", "seed", "view")
+        self.assertEqual(self.store.products(), [])
+        self.consumer.close()
+        self.consumer = Consumer(self.store)
+        self.start_consumer()
+        self.track("buyer", "seed", "view", viewed)
+        self.track("buyer", "seed", "add_to_cart")
+        type(self).rows = {"seed": snapshot("seed", soldCount=1), "match": snapshot("match", soldCount=10),
+                           "popular": snapshot("popular", name="Phone", description="", categoryId="phones", soldCount=100)}
+        for product_id in type(self).rows:
+            self.publish("ProductCreated", {"productId": product_id})
+        await_true(lambda: len(self.store.products()) == 3)
+        with TestClient(create_app(self.settings, self.store, run_consumer=False)) as client:
+            path = BASE + "/for-you?limit=1"
+            self.assertEqual(client.get(path).json()["items"][0]["id"], "popular")
+            self.assertEqual(client.get(path, headers=self.bearer("buyer")).json()["items"][0]["id"], "match")
+            self.track("buyer", "seed", "purchase")
+            await_true(lambda: not list(self.store.cache.scan_iter(self.namespace + ":" + self.store.user_cache_prefix("buyer") + "*")))
+            self.assertEqual(client.get(path, headers=self.bearer("buyer")).json()["items"][0]["id"], "match")
+            await_true(lambda: all(p["id"] != "seed" for p in client.get(BASE + "/for-you", headers=self.bearer("buyer")).json()["items"]))
+            for _ in range(3):
+                self.track("peer", "seed", "view")
+                self.track("peer", "popular", "view")
+            self.assertEqual(self.store.collaborative_scores("buyer")["popular"], 1)
+            self.assertEqual(client.get(path, headers=self.bearer("buyer")).json()["items"][0]["id"], "match")
+            keys = list(self.store.cache.scan_iter(self.namespace + ":" + self.store.user_cache_prefix("buyer") + "*"))
+            self.assertTrue(keys)
+            for key in keys:
+                self.assertLessEqual(self.store.cache.ttl(key), 60)
+                self.store.cache.expire(key, 0)
+            self.assertEqual(client.get(path, headers=self.bearer("buyer")).json()["items"][0]["id"], "popular")
+            self.assertEqual(client.get(path, headers=self.bearer("new-buyer")).json()["items"][0]["id"], "popular")
+            forged = client.get(path, headers={"X-User-Id": "buyer"}).json()
+            self.assertEqual(forged["user_id"], "")
+            self.assertEqual(client.get(path + "&user_id=buyer").status_code, 400)
+            with self.store.pool.connection() as conn:
+                rows = conn.execute("SELECT action, occurred_at_ms FROM user_event WHERE user_id = 'buyer'").fetchall()
+            self.assertEqual({row[0] for row in rows}, {"view", "add_to_cart", "purchase"})
+            self.assertEqual(len(rows), 3)
+            self.assertTrue(all(row[1] > 0 for row in rows))
+
+    def test_purchase_rechecks_stale_cache_redis_failure_and_category_isolation(self):
+        seed(self.store)
+        self.start_consumer()
+        with TestClient(create_app(self.settings, self.store, run_consumer=False)) as client:
+            path = BASE + "/for-you"
+            before = client.get(path, headers=self.bearer("buyer")).json()["items"]
+            self.assertEqual([p["id"] for p in before], ["p2", "p1"])
+            client.get(path, headers=self.bearer("other"))
+            with patch.object(self.store.cache, "scan", side_effect=redis.ConnectionError()) as scan:
+                self.track("buyer", "p2", "purchase")
+                await_true(lambda: scan.called)
+            self.store.cache_retry_at = 0
+            self.assertTrue(self.store.cache.get(next(k.removeprefix(self.namespace + ":") for k in self.store.cache.scan_iter(
+                self.namespace + ":" + self.store.user_cache_prefix("buyer") + "*"))))
+            self.assertEqual([p["id"] for p in client.get(path, headers=self.bearer("buyer")).json()["items"]], ["p1"])
+            self.assertEqual([p["id"] for p in client.get(path, headers=self.bearer("other")).json()["items"]], ["p2", "p1"])
+            self.assertEqual(client.get(path + "?category_id=missing", headers=self.bearer("buyer")).json()["items"], [])
+            self.track("buyer", "p1", "view")
+            await_true(lambda: not list(self.store.cache.scan_iter(self.namespace + ":" + self.store.user_cache_prefix("buyer") + "*")))
+            with patch.object(self.store.cache, "get", side_effect=redis.ConnectionError()):
+                self.assertEqual(client.get(path, headers=self.bearer("buyer")).status_code, 200)
+
+    def test_behavior_rollback_cleanup_retention_and_invalid_dlq(self):
+        event_id = str(uuid.uuid4())
+        with self.assertRaises(psycopg.errors.CheckViolation):
+            self.store.apply(event_id=event_id, behavior={"userId": "buyer", "productId": "unknown", "action": "invalid"}, occurred_at=1)
+        self.assertFalse(self.store.seen(event_id))
+        self.start_consumer()
+        self.track("buyer", "unknown", "view", event_id)
+        with self.store.pool.connection() as conn:
+            conn.execute("UPDATE processed_event SET processed_at = CURRENT_TIMESTAMP - INTERVAL '31 days' WHERE event_id = %s", (event_id,))
+        self.assertEqual(self.store.prune_receipts(), 0)
+        self.track("buyer", "unknown", "view", event_id)
+        self.track("buyer", "other", "add_to_cart")
+        self.assertEqual(self.store.user_history("buyer"), {"unknown": False, "other": False})
+        bad = str(uuid.uuid4())
+        self.publish("UserBehaviorTracked", {"userId": "buyer", "productId": "unknown", "action": "purchase_cancelled"}, bad)
+        connection = pika.BlockingConnection(connection_parameters(self.settings))
+        try:
+            channel = connection.channel()
+            await_true(lambda: channel.queue_declare(queue=self.settings.queue + ".dead", passive=True).method.message_count == 1)
+            self.assertFalse(self.store.seen(bad))
+        finally:
+            connection.close()

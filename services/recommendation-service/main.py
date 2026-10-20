@@ -104,7 +104,7 @@ def create_app(settings=None, store=None, run_consumer=True):
     def for_you(request: Request):
         user_id = authenticated_user(request, settings.jwt_secret)
         limit, category = parameters(request, category=True)
-        return {"user_id": user_id, "items": recommend(category=category, limit=limit)}
+        return {"user_id": user_id, "items": recommend(category=category, limit=limit, user_id=user_id)}
 
     @app.get(BASE + "/similar/{product_id}")
     def similar_products(product_id: str, request: Request):
