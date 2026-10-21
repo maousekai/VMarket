@@ -1,17 +1,21 @@
 # PR-2 validation
 
-Date: 2026-10-20 (Asia/Bangkok). Branch: PBL6-24-FR-REC-01-03.
+Updated: 2026-10-21 (Asia/Bangkok). Branch: PBL6-24-FR-REC-01-03.
 Base: origin/dev at d985504, including merged PR #33 (merge 31ab115, 2026-10-14) and PR #34.
 
 | Check | Result |
 | --- | --- |
-| Python unit tests | 21 passed, including PR-1 regressions |
-| PostgreSQL/Redis/RabbitMQ integration tests | 10 passed, including PR-1 regressions |
+| Python unit tests | 22 passed after PR #35 review fixes, including PR-1 regressions |
+| PostgreSQL/Redis/RabbitMQ integration tests | 11 passed after PR #35 review fixes, including PR-1 regressions |
 | Flyway upgrade | Isolated vmarket_recommendation_review_test upgraded V2 to V3 |
 | Fresh Flyway migration | Isolated vmarket_recommendation_pr2_test migrated V1, V2 and V3 |
 | Docker repository-root build | Passed; vmarket-recommendation:pr2 |
 | Runtime dependency audit | No known vulnerabilities found; requirements unchanged |
 | Whitespace | git diff --check passed |
+
+The 2026-10-21 review fixes remove repeated work without changing scoring or the API contract. Peer discovery first deduplicates the caller's product IDs. On PostgreSQL 17.11, a 3,002-event fixture (1,000 repeated caller views, 1,000 repeated peer views, another peer and an unrelated user) still returns two votes per shared/recommended product. EXPLAIN ANALYZE of the actual Store query reduced total join output rows (Actual Rows times Actual Loops across join nodes) from 1,002,502 to 2,503; measured execution time was 113.81 ms before and 1.48 ms after. The regression checks both scores and a join-work bound, without a fragile timing assertion.
+
+Personalized ranking now tokenizes each eligible candidate once and reuses its terms across all seeds. A fixture with 200 products, 20 seeds and 5,000-character descriptions fell from 4,020 to 220 tokenizations. Three local runs before/after gave median pure ranking times of 3,024.5/110.0 ms and cold ASGI times of 4,260.6/115.7 ms; the top ten results were identical. This API benchmark used in-memory PostgreSQL/Redis doubles with the real ASGI app, not live dependencies. The unit regression asserts tokenization work and ordering; existing hybrid/content-only/popularity regressions still pass. Local timings vary with machine load and do not establish production capacity. No HTTP dependency path changed; the infrastructure suite reuses its existing Product fixture server rather than adding Postman workspace or mock setup. Packaging/dependency checks in the table were completed for the initial PR-2 implementation; review changes are covered again by GitHub CI.
 
 The new integration fixtures publish real RabbitMQ UserBehaviorTracked messages for view, add_to_cart and purchase. They verify history before catalog arrival, catalog synchronization from ProductCreated fixture messages, consumer restart/replay deduplication, one vote per peer despite repeated views, authenticated content-to-hybrid ranking changes, cold-start/category fallback, JWT/guest isolation and no query/header identity overrides. Product snapshot HTTP responses are served by the existing fixture server, not a running Product service.
 

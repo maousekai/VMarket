@@ -1,18 +1,34 @@
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import psycopg
 import redis
 
 from event_consumer import Consumer, validate_event
-from ranking import personalized
+from ranking import personalized, tokens
 from store import Store
 from tests.fixtures import settings, snapshot
 from tests.unit.test_ranking_events import event
 
 
 class PersonalizationTest(unittest.TestCase):
+    def test_multi_seed_ranking_tokenizes_each_candidate_once(self):
+        description = ("Áo thun cotton đẹp thoáng mát cho mùa hè. " * 150)[:5000]
+        products = [snapshot(f"p{i:03}", name=f"Áo {i % 4}", description=description,
+                             soldCount=i, categoryId=f"category-{i % 4}") for i in range(200)]
+        seeds = products[:20]
+        collaborative = {p["id"]: i % 7 for i, p in enumerate(products)}
+        with patch("ranking.tokens", wraps=tokens) as tokenize:
+            ranked = personalized(seeds, iter(products), collaborative, set())
+            self.assertEqual(ranked[:10], ["p195", "p188", "p181", "p174", "p167",
+                                          "p160", "p153", "p146", "p139", "p132"])
+            self.assertEqual(len(ranked), 50)
+            self.assertEqual(tokenize.call_count, len(seeds) + len(products))
+        with patch("ranking.tokens", wraps=tokens) as tokenize:
+            personalized([], iter(products), {}, set())
+            tokenize.assert_not_called()
+
     def test_normalized_hybrid_content_only_and_popular_fill(self):
         seed = snapshot("seen", name="red cotton", description="", soldCount=0)
         products = [seed, snapshot("content", name="red cotton", description="", soldCount=1),

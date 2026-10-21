@@ -154,6 +154,32 @@ class InfrastructureTest(unittest.TestCase):
         return {"Authorization": "Bearer " + jwt.encode({"iss": "auth-service", "sub": user_id,
             "exp": int(time.time()) + 600}, self.settings.jwt_secret, algorithm="HS256")}
 
+    def test_repeated_views_do_not_multiply_peer_join_work(self):
+        with self.store.pool.connection() as conn:
+            conn.execute("""INSERT INTO user_event (event_id, user_id, product_id, action, occurred_at_ms)
+                SELECT gen_random_uuid(), user_id, product_id, 'view', 1000
+                FROM (VALUES ('buyer', 'shared', 1000), ('peer', 'shared', 1000),
+                    ('peer', 'recommended', 500), ('peer2', 'shared', 1),
+                    ('peer2', 'recommended', 1), ('outsider', 'unrelated', 500))
+                    AS fixture(user_id, product_id, repeats)
+                CROSS JOIN LATERAL generate_series(1, repeats)""")
+            conn.execute("ANALYZE user_event")
+        with self.store.pool.connection() as conn:
+            traced = Mock(wraps=conn)
+            with patch.object(self.store.pool, "connection") as connection:
+                connection.return_value.__enter__.return_value = traced
+                self.assertEqual(self.store.collaborative_scores("buyer"), {"shared": 2, "recommended": 2})
+            query, args = traced.execute.call_args.args
+            result = conn.execute("EXPLAIN (ANALYZE, FORMAT JSON) " + query, args).fetchone()[0][0]
+        nodes, joined_rows = [result["Plan"]], 0
+        while nodes:
+            node = nodes.pop()
+            if "Join" in node["Node Type"] or node["Node Type"] == "Nested Loop":
+                joined_rows += node["Actual Rows"] * node["Actual Loops"]
+            nodes.extend(node.get("Plans", []))
+        print(f"Peer query: {joined_rows} joined rows, {result['Execution Time']:.2f} ms (3,002 events)")
+        self.assertLess(joined_rows, 30020)
+
     def test_catalog_events_duplicates_tombstones_and_dead_letters(self):
         self.start_consumer()
         event_id = str(uuid.uuid4())

@@ -134,10 +134,12 @@ class Store:
 
     def collaborative_scores(self, user_id):
         with self.pool.connection() as conn:
-            return dict(conn.execute("""WITH peers AS (
-                SELECT DISTINCT other.user_id FROM user_event mine
+            return dict(conn.execute("""WITH mine AS (
+                SELECT DISTINCT product_id FROM user_event WHERE user_id = %s
+                ), peers AS (
+                SELECT DISTINCT other.user_id FROM mine
                 JOIN user_event other ON other.product_id = mine.product_id
-                WHERE mine.user_id = %s AND other.user_id <> %s)
+                WHERE other.user_id <> %s)
                 SELECT candidate.product_id, count(DISTINCT candidate.user_id)
                 FROM user_event candidate JOIN peers ON peers.user_id = candidate.user_id
                 GROUP BY candidate.product_id""", (user_id, user_id)).fetchall())

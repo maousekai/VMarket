@@ -10,9 +10,9 @@ def tokens(product):
     return set(re.findall(r"[^\W_]+", text, re.UNICODE))
 
 
-def content_score(seed, candidate, seed_tokens=None):
+def content_score(seed, candidate, seed_tokens=None, candidate_tokens=None):
     left = tokens(seed) if seed_tokens is None else seed_tokens
-    right = tokens(candidate)
+    right = tokens(candidate) if candidate_tokens is None else candidate_tokens
     overlap = len(left & right) / len(left | right) if left | right else 0
     left_path, right_path = set(seed.get("categoryPath") or []), set(candidate.get("categoryPath") or [])
     category = len(left_path & right_path) / len(left_path | right_path) if left_path | right_path else 0
@@ -40,7 +40,9 @@ def personalized(seeds, products, collaborative, purchased):
     for product in products:
         if product["id"] in purchased:
             continue
-        content = sum(content_score(seed, product, terms) for seed, terms in zip(seeds, seed_tokens)) / len(seeds) if seeds else 0
+        candidate_tokens = tokens(product) if seeds else None
+        content = sum(content_score(seed, product, terms, candidate_tokens)
+                      for seed, terms in zip(seeds, seed_tokens)) / len(seeds) if seeds else 0
         scores.append((product["id"], product["soldCount"], product["ratingAverage"], content,
                        collaborative.get(product["id"], 0)))
     content_max = max((row[3] for row in scores), default=0)
