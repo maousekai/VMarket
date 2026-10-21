@@ -22,15 +22,74 @@ export const validateLogin = ({ email, password }) =>
     password: password?.trim() ? undefined : 'Vui lòng nhập mật khẩu.',
   })
 
-export function validateProfile({ fullName, phone }) {
+const genders = ['MALE', 'FEMALE', 'OTHER', 'UNDISCLOSED']
+
+function dateOfBirthError(value, today) {
+  if (!value) return undefined
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  const date = match && new Date(Date.UTC(+match[1], +match[2] - 1, +match[3]))
+  if (!date || date.toISOString().slice(0, 10) !== value) return 'Ngày sinh không hợp lệ.'
+  const pad = (number) => String(number).padStart(2, '0')
+  const todayText = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+  if (value >= todayText) return 'Ngày sinh phải ở quá khứ.'
+}
+
+export function validateProfile({ fullName, phone, dateOfBirth, gender }, today = new Date()) {
   return compact({
     fullName: fullName?.trim().length > 100 ? 'Họ tên tối đa 100 ký tự.' : undefined,
     phone:
       phone?.trim() && !phonePattern.test(phone.trim())
         ? 'Số điện thoại phải là số di động Việt Nam hợp lệ.'
         : undefined,
+    dateOfBirth: dateOfBirthError(dateOfBirth, today),
+    gender: gender && !genders.includes(gender) ? 'Giới tính không hợp lệ.' : undefined,
   })
 }
+
+function required(value, label, max) {
+  const text = value?.trim() || ''
+  if (!text) return `Vui lòng nhập ${label}.`
+  if (text.length > max) {
+    return `${label[0].toLocaleUpperCase('vi')}${label.slice(1)} tối đa ${max} ký tự.`
+  }
+}
+
+export function validateAddress(values) {
+  const phone = values.phone?.trim() || ''
+  return compact({
+    recipientName: required(values.recipientName, 'tên người nhận', 100),
+    phone: !phone
+      ? 'Vui lòng nhập số điện thoại.'
+      : phonePattern.test(phone)
+        ? undefined
+        : 'Số điện thoại phải là số di động Việt Nam hợp lệ.',
+    province: required(values.province, 'tỉnh/thành phố', 100),
+    district: required(values.district, 'quận/huyện', 100),
+    ward: required(values.ward, 'phường/xã', 100),
+    streetAddress: required(values.streetAddress, 'địa chỉ chi tiết', 255),
+    note: values.note?.trim().length > 255 ? 'Ghi chú tối đa 255 ký tự.' : undefined,
+  })
+}
+
+export function validateChangePassword({ currentPassword, newPassword, confirmPassword }) {
+  return compact({
+    currentPassword: !currentPassword?.trim()
+      ? 'Vui lòng nhập mật khẩu hiện tại.'
+      : currentPassword.length > 72
+        ? 'Mật khẩu hiện tại không hợp lệ.'
+        : undefined,
+    newPassword:
+      passwordError(newPassword) ||
+      (newPassword === currentPassword ? 'Mật khẩu mới phải khác mật khẩu hiện tại.' : undefined),
+    confirmPassword: confirmPassword !== newPassword ? 'Mật khẩu xác nhận không khớp.' : undefined,
+  })
+}
+
+export const validateUserSearch = ({ q }) =>
+  compact({ q: q?.trim().length > 100 ? 'Từ khoá tối đa 100 ký tự.' : undefined })
+
+export const validateLockReason = ({ reason }) =>
+  compact({ reason: required(reason, 'lý do khoá', 500) })
 
 export function validateRegistration(values) {
   return compact({
