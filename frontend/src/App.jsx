@@ -11,6 +11,8 @@ import VerifyEmailPage from './pages/VerifyEmailPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import ProfilePage from './pages/ProfilePage'
+import AddressBookPage from './pages/AddressBookPage'
+import ChangePasswordPage from './pages/ChangePasswordPage'
 import SellerPage from './pages/SellerPage'
 import SellerIntroPage from './pages/SellerIntroPage'
 import RoleAreaPage from './pages/RoleAreaPage'
@@ -38,6 +40,8 @@ export default function App() {
           <Route path="/about" element={<AboutPage />} />
           <Route element={<RouteGuard />}>
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/profile/addresses" element={<AddressBookPage />} />
+            <Route path="/profile/password" element={<ChangePasswordPage />} />
             <Route path="/seller" element={<SellerPage />} />
             <Route path="/seller/register" element={<SellerIntroPage />} />
           </Route>

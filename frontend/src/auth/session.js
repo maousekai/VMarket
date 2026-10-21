@@ -398,7 +398,13 @@ export function createSessionManager({
     if (saveFlight?.userId === session.userId && saveFlight.generation === generation)
       return saveFlight.promise
     const expected = generation
-    const signature = JSON.stringify({ fullName: changes.fullName, phone: changes.phone })
+    const signature = JSON.stringify({
+      fullName: changes.fullName,
+      phone: changes.phone,
+      avatarUrl: changes.avatarUrl,
+      dateOfBirth: changes.dateOfBirth,
+      gender: changes.gender,
+    })
     const promise = (async () => {
       try {
         if (pendingSave?.userId !== session.userId || pendingSave.signature !== signature) {

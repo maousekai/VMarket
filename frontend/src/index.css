@@ -427,3 +427,14 @@ p {
     margin: auto;
   }
 }
+
+/* Hide the browsers' own reveal/clear buttons so only our show/hide toggle is visible. */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+input::-webkit-credentials-auto-fill-button {
+  display: none !important;
+  visibility: hidden;
+  pointer-events: none;
+}

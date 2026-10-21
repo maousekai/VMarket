@@ -626,3 +626,123 @@ describe('profile persistence', () => {
     expect(manager.getSnapshot().userProfile).toBeNull()
   })
 })
+
+describe('birth date and gender editing', () => {
+  const current = {
+    userId: 'user-1',
+    fullName: 'Old',
+    phone: '0912345678',
+    avatarUrl: 'https://example.com/an.png',
+    dateOfBirth: '2000-01-01',
+    gender: 'OTHER',
+  }
+
+  async function loggedIn(options = {}) {
+    const context = setup({
+      ...options,
+      profiles: { getMyProfile: vi.fn().mockResolvedValue(current) },
+    })
+    await context.manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    return context
+  }
+
+  it('sends the edited birth date and gender and keeps the avatar', async () => {
+    const { manager, profiles } = await loggedIn()
+    await manager.saveProfile({
+      fullName: 'An',
+      phone: '',
+      dateOfBirth: '2001-02-03',
+      gender: 'FEMALE',
+    })
+    expect(profiles.updateMyProfile.mock.calls[0][0]).toEqual({
+      fullName: 'An',
+      phone: null,
+      avatarUrl: current.avatarUrl,
+      dateOfBirth: '2001-02-03',
+      gender: 'FEMALE',
+    })
+  })
+
+  it('clears the birth date and gender when they are emptied', async () => {
+    const { manager, profiles } = await loggedIn()
+    await manager.saveProfile({ fullName: 'An', phone: '', dateOfBirth: '', gender: '' })
+    expect(profiles.updateMyProfile.mock.calls[0][0]).toMatchObject({
+      dateOfBirth: null,
+      gender: null,
+    })
+  })
+
+  it('starts a new request with a new key when only the birth date changes after a failure', async () => {
+    const makeKey = vi.fn().mockReturnValueOnce('key-1').mockReturnValueOnce('key-2')
+    const { manager, profiles } = await loggedIn({ makeKey })
+    profiles.updateMyProfile.mockRejectedValueOnce(new Error('timeout'))
+    const first = { fullName: 'An', phone: '', dateOfBirth: '2001-02-03' }
+    await expect(manager.saveProfile(first)).rejects.toThrow('timeout')
+    await manager.saveProfile({ ...first, dateOfBirth: '2001-02-04' })
+    const [attempt, retry] = profiles.updateMyProfile.mock.calls
+    expect(attempt[1]).toBe('key-1')
+    expect(retry[1]).toBe('key-2')
+    expect(retry[0].dateOfBirth).toBe('2001-02-04')
+  })
+})
+
+describe('avatar URL editing', () => {
+  const current = {
+    userId: 'user-1',
+    fullName: 'Old',
+    phone: '0912345678',
+    avatarUrl: 'https://example.com/old.png',
+    dateOfBirth: '2000-01-01',
+    gender: 'OTHER',
+  }
+
+  async function loggedIn(options = {}) {
+    const context = setup({
+      ...options,
+      profiles: { getMyProfile: vi.fn().mockResolvedValue(current) },
+    })
+    await context.manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    return context
+  }
+
+  it('sends the edited avatar URL and keeps the other stored fields', async () => {
+    const { manager, profiles } = await loggedIn()
+    await manager.saveProfile({
+      fullName: 'An',
+      phone: '0912345678',
+      avatarUrl: 'https://example.com/new.png',
+    })
+    expect(profiles.updateMyProfile.mock.calls[0][0]).toEqual({
+      fullName: 'An',
+      phone: '0912345678',
+      avatarUrl: 'https://example.com/new.png',
+      dateOfBirth: current.dateOfBirth,
+      gender: current.gender,
+    })
+  })
+
+  it('removes the avatar when the field is emptied', async () => {
+    const { manager, profiles } = await loggedIn()
+    await manager.saveProfile({ fullName: 'An', phone: '', avatarUrl: '' })
+    expect(profiles.updateMyProfile.mock.calls[0][0].avatarUrl).toBeNull()
+  })
+
+  it('keeps the avatar when a save does not mention it', async () => {
+    const { manager, profiles } = await loggedIn()
+    await manager.saveProfile({ fullName: 'An', phone: '' })
+    expect(profiles.updateMyProfile.mock.calls[0][0].avatarUrl).toBe(current.avatarUrl)
+  })
+
+  it('uses a new idempotency key when only the avatar changes after a failure', async () => {
+    const makeKey = vi.fn().mockReturnValueOnce('key-1').mockReturnValueOnce('key-2')
+    const { manager, profiles } = await loggedIn({ makeKey })
+    profiles.updateMyProfile.mockRejectedValueOnce(new Error('timeout'))
+    const first = { fullName: 'An', phone: '', avatarUrl: 'https://example.com/a.png' }
+    await expect(manager.saveProfile(first)).rejects.toThrow('timeout')
+    await manager.saveProfile({ ...first, avatarUrl: 'https://example.com/b.png' })
+    const [attempt, retry] = profiles.updateMyProfile.mock.calls
+    expect(attempt[1]).toBe('key-1')
+    expect(retry[1]).toBe('key-2')
+    expect(retry[0].avatarUrl).toBe('https://example.com/b.png')
+  })
+})

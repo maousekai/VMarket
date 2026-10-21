@@ -10,6 +10,7 @@ import {
   listUserActivities,
   lockUser,
   newIdempotencyKey,
+  profileUpdateBody,
   searchUsers,
   setDefaultAddress,
   unlockUser,
@@ -156,5 +157,43 @@ describe('newIdempotencyKey', () => {
     const keys = new Set(Array.from({ length: 20 }, newIdempotencyKey))
     expect(keys.size).toBe(20)
     expect([...keys].every((key) => key.length > 0 && key.length <= 128)).toBe(true)
+  })
+})
+
+describe('profileUpdateBody', () => {
+  const current = {
+    avatarUrl: 'https://example.com/an.png',
+    dateOfBirth: '2000-01-01',
+    gender: 'OTHER',
+  }
+
+  it('keeps the stored birth date and gender when the caller does not edit them', () => {
+    expect(profileUpdateBody(current, { fullName: ' An ', phone: ' 0912345678 ' })).toEqual({
+      fullName: 'An',
+      phone: '0912345678',
+      avatarUrl: current.avatarUrl,
+      dateOfBirth: '2000-01-01',
+      gender: 'OTHER',
+    })
+  })
+
+  it('replaces them when edited and clears them when emptied, never touching the avatar', () => {
+    expect(
+      profileUpdateBody(current, {
+        fullName: 'An',
+        phone: '',
+        dateOfBirth: '2001-02-03',
+        gender: 'MALE',
+      }),
+    ).toEqual({
+      fullName: 'An',
+      phone: null,
+      avatarUrl: current.avatarUrl,
+      dateOfBirth: '2001-02-03',
+      gender: 'MALE',
+    })
+    expect(
+      profileUpdateBody(current, { fullName: 'An', dateOfBirth: '', gender: '' }),
+    ).toMatchObject({ dateOfBirth: null, gender: null, avatarUrl: current.avatarUrl })
   })
 })

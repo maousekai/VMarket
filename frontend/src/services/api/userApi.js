@@ -14,9 +14,12 @@ export function profileUpdateBody(current, changes) {
   return {
     fullName: changes.fullName?.trim() || null,
     phone: changes.phone?.trim() || null,
-    avatarUrl: current.avatarUrl ?? null,
-    dateOfBirth: current.dateOfBirth ?? null,
-    gender: current.gender ?? null,
+    avatarUrl:
+      'avatarUrl' in changes ? changes.avatarUrl?.trim() || null : (current.avatarUrl ?? null),
+    // Only fields present in `changes` are edited, so registration keeps the stored values.
+    dateOfBirth:
+      'dateOfBirth' in changes ? changes.dateOfBirth || null : (current.dateOfBirth ?? null),
+    gender: 'gender' in changes ? changes.gender || null : (current.gender ?? null),
   }
 }
 

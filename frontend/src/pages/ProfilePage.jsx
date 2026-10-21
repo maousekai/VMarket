@@ -1,15 +1,26 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { validateProfile } from '../auth/validation'
 import { getApiError } from '../services/api/apiClient'
-import { AccountAvatar } from '../components/AppHeader'
+import AccountField from '../components/AccountField'
+import AccountLayout from '../components/AccountLayout'
 import '../components/account.css'
+
+const genderOptions = [
+  ['', 'Chưa chọn'],
+  ['MALE', 'Nam'],
+  ['FEMALE', 'Nữ'],
+  ['OTHER', 'Khác'],
+  ['UNDISCLOSED', 'Không muốn cung cấp'],
+]
 
 function ProfileForm({ profile, session, saveProfile }) {
   const [values, setValues] = useState({
     fullName: profile.fullName || '',
     phone: profile.phone || '',
+    dateOfBirth: profile.dateOfBirth || '',
+    gender: profile.gender || '',
   })
   const [fieldErrors, setFieldErrors] = useState({})
   const [error, setError] = useState('')
@@ -99,6 +110,31 @@ function ProfileForm({ profile, session, saveProfile }) {
             </p>
           )}
         </div>
+        <AccountField
+          label="Ngày sinh"
+          name="dateOfBirth"
+          type="date"
+          value={values.dateOfBirth}
+          onChange={onChange}
+          autoComplete="bday"
+          disabled={saving}
+          error={fieldErrors.dateOfBirth}
+        />
+        <AccountField
+          as="select"
+          label="Giới tính"
+          name="gender"
+          value={values.gender}
+          onChange={onChange}
+          disabled={saving}
+          error={fieldErrors.gender}
+        >
+          {genderOptions.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </AccountField>
         {error && (
           <p className="account-notice account-notice--error" role="alert">
             {error} Bạn có thể thử lưu lại.
@@ -123,61 +159,33 @@ function ProfileForm({ profile, session, saveProfile }) {
 }
 
 export default function ProfilePage() {
-  const location = useLocation()
   const { session, userProfile, profileState, profileError, loadProfile, saveProfile } = useAuth()
-  const name = userProfile?.fullName || session.username
   return (
-    <main className="account-page">
-      <nav className="account-breadcrumb" aria-label="Đường dẫn">
-        <Link to="/">Trang chủ</Link>
-        <span aria-hidden="true">›</span>
-        <span>Hồ sơ cá nhân</span>
-      </nav>
-      {location.state?.message && (
-        <p className="account-notice account-notice--warning" role="status">
-          {location.state.message}
-        </p>
+    <AccountLayout title="Hồ sơ cá nhân" current="/profile" canChangeAvatar>
+      {profileState === 'error' && !userProfile ? (
+        <section className="account-card account-state">
+          <h1>Chưa thể tải hồ sơ</h1>
+          <p role="alert">{getApiError(profileError).message}</p>
+          <button
+            className="account-button"
+            type="button"
+            onClick={() => loadProfile().catch(() => {})}
+          >
+            Thử lại
+          </button>
+        </section>
+      ) : !userProfile ? (
+        <section className="account-card account-state">
+          <p role="status">Đang tải hồ sơ…</p>
+        </section>
+      ) : (
+        <ProfileForm
+          key={session.userId}
+          profile={userProfile}
+          session={session}
+          saveProfile={saveProfile}
+        />
       )}
-      <div className="account-layout">
-        <aside className="account-sidebar">
-          <section className="account-card account-summary">
-            <AccountAvatar name={name} avatarUrl={userProfile?.avatarUrl} large />
-            <strong>{name}</strong>
-            <span>{session.email}</span>
-            <span className="account-badge">Email đã xác thực</span>
-          </section>
-          <nav className="account-card account-side-nav" aria-label="Tài khoản">
-            <Link to="/profile" aria-current="page">
-              Hồ sơ cá nhân
-            </Link>
-            <Link to="/seller">Kênh người bán</Link>
-          </nav>
-        </aside>
-        {profileState === 'error' && !userProfile ? (
-          <section className="account-card account-state">
-            <h1>Chưa thể tải hồ sơ</h1>
-            <p role="alert">{getApiError(profileError).message}</p>
-            <button
-              className="account-button"
-              type="button"
-              onClick={() => loadProfile().catch(() => {})}
-            >
-              Thử lại
-            </button>
-          </section>
-        ) : !userProfile ? (
-          <section className="account-card account-state">
-            <p role="status">Đang tải hồ sơ…</p>
-          </section>
-        ) : (
-          <ProfileForm
-            key={session.userId}
-            profile={userProfile}
-            session={session}
-            saveProfile={saveProfile}
-          />
-        )}
-      </div>
-    </main>
+    </AccountLayout>
   )
 }
