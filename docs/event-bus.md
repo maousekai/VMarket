@@ -209,6 +209,15 @@ tracking endpoint. Các message trong integration test là fixture, không chứ
 đã có luồng tracking thực tế. Việc publish phải qua thành phần tin cậy có quyền
 truy cập broker; không cấp broker credentials cho browser.
 
+Kiểm tra source ngày 2026-10-22: mới có tên event trong shared-events; chưa có
+publisher cho view/add_to_cart/purchase trong Gateway, frontend, Cart, Order hoặc
+Payment. Phạm vi PR-2 chỉ gồm consumer. Checklist producer và
+kiểm thử business HTTP → broker → history → recommendation nằm trong
+[README Recommendation](../services/recommendation-service/README.md#producer-verification-gaps-pr-35-follow-up).
+Order hiện tạo PENDING rồi xóa item đã checkout khỏi giỏ sau commit; đây chưa phải
+thời điểm mua thành công. Cần thống nhất nghiệp vụ purchase/COD/cancel/refund trước
+khi triển khai producer; không đổi owner Gateway/Clients trong SRS bằng suy đoán.
+
 ```json
 {
   "eventId": "e4a8ec14-5b55-42be-95df-28c2c2a22ad0",

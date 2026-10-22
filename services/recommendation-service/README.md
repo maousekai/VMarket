@@ -54,16 +54,38 @@ Personalized IDs use a separate hashed-user/category/limit namespace and a 60-se
 
 Ranking uses SQL for grouped interactions and peer counts, plus ordinary Python scoring. It issues no per-candidate database calls and retains compact scalar scores rather than full candidate descriptions. Exact content work still scales with eligible candidates and content seeds; indexed candidates/precomputed tokens remain a measured scaling follow-up. No trained model or periodic retraining is implemented.
 
+### Producer verification gaps (PR #35 follow-up)
+
+Source audit on 2026-10-22 found a shared `USER_BEHAVIOR_TRACKED` event-name constant, but no publishing call for it in Gateway, frontend, Cart, Order or Payment. Consumer fixtures verify receipt handling and ranking only. FR-REC-03 remains partial; approved PR-2 scope is consumer-only.
+
+| Action | Current business path | Missing release evidence |
+| --- | --- | --- |
+| view | ProductController.detail delegates to ProductService.detail; frontend App.jsx has no product-detail route or tracking call; Gateway has no behavior publisher | An authenticated real product view emits the correct user/product and original occurrence time; missing/failed views and forged user headers do not create attributed behavior |
+| add_to_cart | CartController.addItem passes the authenticated principal and validated request to CartService.addItem, which saves Redis state without publishing behavior | A successful cart write emits one event; rejected/failed writes emit none; payload identity comes from verified auth and the actual product, with a defined retry/delivery policy |
+| purchase | OrderService.placeOrder persists PENDING orders and clears checkout items after commit; Payment has no implemented successful-purchase producer | Business owners first define the successful purchase transition, including COD, cancellation and refund handling; order creation alone must not become purchase |
+
+For the producer follow-up, agree the trusted publishing component with the SRS Gateway/Clients ownership before coding. Run real business HTTP operations through Gateway and the relevant services, then assert the RabbitMQ envelope/payload, PostgreSQL history/receipt and authenticated recommendation result. Preserve eventId and timestamp across retries and verify redelivery adds no duplicate history. Include failure paths and cancellation/refund cases. Browser clients must never receive broker credentials. These tests cannot be completed by replacing absent producers with fixture publishers; none are claimed as passing here.
+
 ## Deployment checklist
 
 - [ ] Apply Flyway migrations through V4 before starting the service and adding the UserBehaviorTracked binding. Review the 90-day policy and permanent account suppression with the deployment owner before enabling cleanup.
 - [ ] Stop all PR-1 consumers before starting PR-2: older consumers cannot process UserBehaviorTracked on the shared queue. For rollback, stop behavior publishers, drain pending messages with PR-2, remove only the UserBehaviorTracked binding, then restart PR-1. Keep the queue, DLQ and database rows; do not run mixed consumer versions.
 - [ ] Assign an operations owner and register python manage.py cleanup once daily with the service's database environment and working directory. Record the scheduler/job definition and owner in the deployment record; cleanup is not automatic until this is done.
 - [ ] Run cleanup once in staging, record its successful exit and removed-history/receipt counts, and alert on subsequent failures or missed daily executions. Verify the 90-day history limit plus daily scheduling interval and retained-history receipt protection. Exercise the controlled erasure/restore procedure with a staging account.
-- [ ] Before raising traffic, run `python -m tests.benchmark_personalization` with a dedicated migrated DB_NAME ending in _benchmark_test, record PostgreSQL/history/peer/fetch and ranking times and 503 rate. The fixture uses 10,000 products, 1,000 interactions per user and four concurrent cold requests; it is a capacity warning, not a production load certification. Use measured limits to scope indexed candidate retrieval/precomputed features separately.
+- [ ] Before raising traffic, repeat the HTTP/resource benchmark below and the producer follow-up on the intended staging topology. Use measured limits to scope indexed candidate retrieval/precomputed features separately.
 - [ ] Keep FR-REC-03 marked consumer-only. Track real view, add-to-cart and successful-purchase producers plus live client/Gateway/Cart/Order tests separately; confirm cancellation/refund rules before adding any new action or interpreting order messages as purchases.
 - [ ] Configure alerts for a nonzero rabbitmqDeadLetters count or recommendation_dead_letters_pending warning and document who fixes/replays the DLQ.
 - [ ] Verify DOWN/503 when PostgreSQL is unavailable and successful probes while recommendation workers are busy. Catalog statistics may lag 30 seconds; PostgreSQL readiness is checked every probe.
+
+## HTTP/resource benchmark
+
+Build from the repository root: `docker build -f services/recommendation-service/Dockerfile -t vmarket-recommendation:benchmark .`. On Docker Desktop, start local PostgreSQL/Redis, provision a dedicated empty database whose name ends in `_benchmark_test`, set DB_NAME to it and run `python manage.py migrate`. From the service directory run `python -m tests.benchmark_personalization`. Host DB_HOST/REDIS_HOST must be localhost or 127.0.0.1; the container connects through host.docker.internal using those configured host ports. Credentials pass through the child environment, not CLI values or benchmark output. Do not point this at production.
+
+The harness seeds 10,000 products and 1,000 distinct interactions for each of four users, launches the current image with one Uvicorn worker, 2 CPUs and 512 MiB, then uses real HTTP and real PostgreSQL/Redis. It preserves the service's dependency/cache timeout settings, uses Redis DB 15 and disables only the unrelated broker consumer. Five waves of four requests clear only these users' caches before each wave (20 cold requests). After warming the four users, 100 more requests run at concurrency four; warm results are separate so cache hits cannot hide cold costs. The harness removes its own container, fixture rows and cache keys in a finally block.
+
+Output records nearest-rank p95/p99 for all attempts and successful responses separately, 503 rate, transport-error counts, image ID, Docker VM CPU/RAM and service limits. Docker stats samples the recommendation container approximately every 2–3 seconds: CPU 100% means one core, and maximum sampled memory is a container working-set estimate derived from its 512 MiB limit, not an exact peak RSS. Resource samples include cold, warmup and warm phases. History/peer query timings come from EXPLAIN ANALYZE of the actual Store SQL before load; they are server execution samples, not concurrent DB latency percentiles. All attempts include client-observed elapsed time. Small sample p95/p99 values describe this run only, especially the 20-request cold sample; they do not establish a stable tail or production capacity.
+
+This uses the deployable image and real HTTP with explicit resource limits, but remains a local Docker Desktop benchmark. It excludes Gateway/TLS, live catalog/behavior producers, broker traffic, shared production workloads, replica coordination and production network latency. Repeat longer runs on staging with its actual replica/resource/data profile before claiming near-production or production readiness. See VERIFICATION.md for measured results and the previous ASGI baseline.
 
 ## APIs
 

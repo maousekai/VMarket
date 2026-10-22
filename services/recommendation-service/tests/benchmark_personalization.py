@@ -1,33 +1,51 @@
-"""Opt-in cold ASGI benchmark: 10,000 products, 1,000 interactions/user, four users.
+"""Opt-in Docker HTTP benchmark: 10,000 products, 1,000 interactions/user.
 
-Run python -m tests.benchmark_personalization against a freshly migrated
-DB_NAME ending in _benchmark_test. Uses real PostgreSQL and isolated Redis DB 15.
+Build vmarket-recommendation:benchmark from the current Dockerfile, migrate a
+local DB_NAME ending in _benchmark_test, then python -m tests.benchmark_personalization.
+Uses Docker Desktop host networking, Redis DB 15, one worker, 2 CPUs and 512 MiB.
 """
 import json
-import statistics
+import math
+import os
+import subprocess
+import sys
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import httpx
 import jwt
-import redis
-from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-import store as store_module
-from main import BASE, create_app
+from main import BASE
 from settings import Settings
 from store import Store
 from tests.fixtures import snapshot
 
 
+def percentile(values, fraction):
+    return round(sorted(values)[math.ceil(len(values) * fraction) - 1], 1) if values else None
+
+
+def summarize(requests):
+    successful = [r["ms"] for r in requests if r["status"] == 200]
+    return {"requests": len(requests), "successes": len(successful),
+            "503_rate": sum(r["status"] == 503 for r in requests) / len(requests),
+            "transport_errors": sum(r["status"] == 0 for r in requests),
+            "all_p95_ms": percentile([r["ms"] for r in requests], 0.95),
+            "all_p99_ms": percentile([r["ms"] for r in requests], 0.99),
+            "success_p95_ms": percentile(successful, 0.95), "success_p99_ms": percentile(successful, 0.99)}
+
+
 def main():
     settings = Settings.load()
-    if not settings.db_name.endswith("_benchmark_test"):
-        raise RuntimeError("Use a dedicated migrated database ending in _benchmark_test")
+    if (not settings.db_name.endswith("_benchmark_test")
+            or settings.db_host not in {"localhost", "127.0.0.1"}
+            or settings.redis_host not in {"localhost", "127.0.0.1"}):
+        raise RuntimeError("Use local dependencies and a dedicated migrated database ending in _benchmark_test")
     settings = replace(settings, jwt_secret="test-only-secret-012345678901234567890123456789",
                        internal_key="test-internal-key")
     namespace = "benchmark-" + uuid.uuid4().hex
@@ -35,79 +53,123 @@ def main():
     products = [snapshot(f"{namespace}-p{i}", name=f"Cotton shirt {i % 20}",
                          description="Cotton summer clothing", soldCount=i) for i in range(10000)]
     store = Store(settings)
-    store.cache.close()
-    store.cache = redis.Redis(host=settings.redis_host, port=settings.redis_port,
-        password=settings.redis_password or None, db=15, decode_responses=True)
-    samples = {"history_sql_ms": [], "peer_sql_ms": [], "seed_sql_ms": [],
-               "candidate_fetch_ms": [], "ranking_ms": []}
+    store.cache.connection_pool.connection_kwargs["db"] = 15
+    stop, resources, sampling_errors = threading.Event(), [], []
+    sampler = None
 
-    def timed(name, method):
-        def call(*args, **kwargs):
-            started = time.perf_counter()
+    def docker(*args, **kwargs):
+        return subprocess.run(["docker", *args], check=True, capture_output=True, text=True,
+                              timeout=30, **kwargs).stdout.strip()
+
+    def sample_resources():
+        while not stop.is_set():
             try:
-                return method(*args, **kwargs)
-            finally:
-                samples[name].append((time.perf_counter() - started) * 1000)
-        return call
+                row = json.loads(docker("stats", "--no-stream", "--format", "{{json .}}", namespace))
+                resources.append({"cpu_percent": float(row["CPUPerc"].rstrip("%")),
+                                  "memory_mib": float(row["MemPerc"].rstrip("%")) * 512 / 100})
+            except (subprocess.SubprocessError, ValueError, KeyError) as error:
+                sampling_errors.append(type(error).__name__)
+                return
+            stop.wait(1)
 
-    original_candidates = store.ranking_products
-    def candidates(*args, **kwargs):
-        with closing(original_candidates(*args, **kwargs)) as rows:
-            while True:
-                started = time.perf_counter()
-                try:
-                    row = next(rows)
-                except StopIteration:
-                    return
-                finally:
-                    samples["candidate_fetch_ms"].append((time.perf_counter() - started) * 1000)
-                yield row
+    def clear_cache():
+        for user in users:
+            keys = list(store.cache.scan_iter(store.user_cache_prefix(user) + "*"))
+            if keys:
+                store.cache.delete(*keys)
 
     try:
         store.start()
-        with store.pool.connection() as conn, conn.cursor() as cursor:
-            cursor.executemany("INSERT INTO item_feature(product_id, product_version, snapshot) VALUES (%s, 1, %s)",
-                               [(p["id"], Jsonb(p)) for p in products])
-            cursor.executemany("INSERT INTO user_event VALUES (%s, %s, %s, 'view', %s)",
-                [(uuid.uuid4(), user, products[i]["id"], int(time.time() * 1000)) for user in users for i in range(1000)])
+        with store.pool.connection() as conn:
+            if conn.execute("SELECT EXISTS (SELECT 1 FROM item_feature) OR EXISTS (SELECT 1 FROM user_event)").fetchone()[0]:
+                raise RuntimeError("Benchmark database must be empty for comparable results")
+            with conn.cursor() as cursor:
+                cursor.executemany("INSERT INTO item_feature(product_id, product_version, snapshot) VALUES (%s, 1, %s)",
+                                   [(p["id"], Jsonb(p)) for p in products])
+                cursor.executemany("INSERT INTO user_event VALUES (%s, %s, %s, 'view', %s)",
+                    [(uuid.uuid4(), user, products[i]["id"], int(time.time() * 1000)) for user in users for i in range(1000)])
             conn.execute("ANALYZE item_feature")
             conn.execute("ANALYZE user_event")
-        with TestClient(create_app(settings, store, run_consumer=False)) as client, \
-                patch.object(store, "user_history", timed("history_sql_ms", store.user_history)), \
-                patch.object(store, "collaborative_scores", timed("peer_sql_ms", store.collaborative_scores)), \
-                patch.object(store, "products", timed("seed_sql_ms", store.products)), \
-                patch.object(store, "ranking_products", candidates), \
-                patch.object(store_module, "personalized", timed("ranking_ms", store_module.personalized)):
+        sql_ms = {}
+        for label, method in (("history", store.user_history), ("peers", store.collaborative_scores)):
+            with store.pool.connection() as conn:
+                traced = Mock(wraps=conn)
+                with patch.object(store.pool, "connection") as connection:
+                    connection.return_value.__enter__.return_value = traced
+                    method(users[0])
+                query, args = traced.execute.call_args.args
+                sql_ms[label] = conn.execute("EXPLAIN (ANALYZE, FORMAT JSON) " + query, args).fetchone()[0][0]["Execution Time"]
+        environment = {**os.environ, "APP_ENV": "dev", "DB_HOST": "host.docker.internal",
+            "DB_PORT": str(settings.db_port), "DB_NAME": settings.db_name, "DB_USERNAME": settings.db_user,
+            "DB_PASSWORD": settings.db_password, "REDIS_HOST": "host.docker.internal",
+            "REDIS_PORT": str(settings.redis_port), "REDIS_PASSWORD": settings.redis_password,
+            "AUTH_JWT_SECRET": settings.jwt_secret, "INTERNAL_API_KEY": settings.internal_key,
+            "RECOMMENDATION_DEPENDENCY_TIMEOUT_SECONDS": str(settings.timeout)}
+        names = ["APP_ENV", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USERNAME", "DB_PASSWORD", "REDIS_HOST",
+                 "REDIS_PORT", "REDIS_PASSWORD", "AUTH_JWT_SECRET", "INTERNAL_API_KEY", "RECOMMENDATION_DEPENDENCY_TIMEOUT_SECONDS"]
+        command = ("import uvicorn; from main import create_app; from settings import Settings; from store import Store; "
+                   "s=Settings.load(); store=Store(s); store.cache.connection_pool.connection_kwargs['db']=15; "
+                   "uvicorn.run(create_app(s,store,run_consumer=False),host='0.0.0.0',port=8101,access_log=False)")
+        docker("run", "-d", "--rm", "--name", namespace, "--cpus=2", "--memory=512m",
+               "-p", "127.0.0.1::8101", *[arg for name in names for arg in ("-e", name)],
+               "vmarket-recommendation:benchmark", "python", "-c", command, env=environment)
+        address = "http://" + docker("port", namespace, "8101/tcp")
+        with httpx.Client(base_url=address, timeout=180, trust_env=False) as client:
+            deadline = time.monotonic() + 30
+            while True:
+                try:
+                    if client.get(BASE + "/health", timeout=2).status_code == 200:
+                        break
+                except httpx.TransportError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Benchmark container did not become ready")
+                time.sleep(0.1)
+            tokens = {user: jwt.encode({"iss": "auth-service", "sub": user, "exp": int(time.time()) + 1800},
+                      settings.jwt_secret, algorithm="HS256") for user in users}
             def request(user):
-                token = jwt.encode({"iss": "auth-service", "sub": user, "exp": int(time.time()) + 600},
-                                   settings.jwt_secret, algorithm="HS256")
                 started = time.perf_counter()
-                response = client.get(BASE + "/for-you", headers={"Authorization": "Bearer " + token})
+                try:
+                    response = client.get(BASE + "/for-you", headers={"Authorization": "Bearer " + tokens[user]})
+                except httpx.TransportError:
+                    return {"status": 0, "ms": (time.perf_counter() - started) * 1000}
                 assert response.status_code in (200, 503), response.text
                 if response.status_code == 200:
                     assert len(response.json()["items"]) == 12
-                return {"status": response.status_code, "ms": round((time.perf_counter() - started) * 1000, 1)}
+                return {"status": response.status_code, "ms": (time.perf_counter() - started) * 1000}
+            sampler = threading.Thread(target=sample_resources)
+            sampler.start()
+            cold = []
             with ThreadPoolExecutor(max_workers=4) as executor:
-                requests = list(executor.map(request, users))
+                for wave in range(5):
+                    clear_cache()
+                    cold.extend(executor.map(request, users))
+                    print(f"Cold wave {wave + 1}/5 complete", file=sys.stderr, flush=True)
+                for user in users:
+                    assert request(user)["status"] == 200, "Warmup failed"
+                warm = list(executor.map(request, users * 25))
+        stop.set()
+        sampler.join()
+        assert resources and not sampling_errors, f"Missing resource evidence: {sampling_errors}"
         print(json.dumps({"catalog": 10000, "history_per_user": 1000, "concurrency": 4,
-            "requests": requests, "503_rate": sum(r["status"] == 503 for r in requests) / 4,
-            "stages": {name: {"total_ms": round(sum(values), 1),
-                               "median_ms": round(statistics.median(values), 1) if values else None}
-                       for name, values in samples.items()}}, indent=2))
+            "image": docker("inspect", namespace, "--format", "{{.Image}}"),
+            "limits": {"cpus": 2, "memory_mib": 512, "workers": 1},
+            "docker_host": json.loads(docker("info", "--format", '{"cpus":{{.NCPU}},"memory_bytes":{{.MemTotal}}}')),
+            "sql_explain_execution_ms_before_load": sql_ms, "cold": summarize(cold), "warm": summarize(warm),
+            "resource_samples": len(resources), "cpu_percent_p95": percentile([r["cpu_percent"] for r in resources], 0.95),
+            "cpu_percent_max": max(r["cpu_percent"] for r in resources),
+            "sampled_memory_mib_max": round(max(r["memory_mib"] for r in resources), 1)}, indent=2))
     finally:
-        # TestClient closes the Store; reopen only to remove this run's fixtures.
-        cleanup = Store(settings)
+        stop.set()
+        if sampler:
+            sampler.join()
+        subprocess.run(["docker", "rm", "-f", namespace], capture_output=True, timeout=30)
         try:
-            cleanup.start()
-            with cleanup.pool.connection() as conn:
+            with store.pool.connection() as conn:
                 conn.execute("DELETE FROM user_event WHERE user_id = ANY(%s)", (users,))
                 conn.execute("DELETE FROM item_feature WHERE product_id = ANY(%s)", ([p["id"] for p in products],))
-            for user in users:
-                keys = list(store.cache.scan_iter(store.user_cache_prefix(user) + "*"))
-                if keys:
-                    store.cache.delete(*keys)
+            clear_cache()
         finally:
-            cleanup.close()
             store.close()
 
 
