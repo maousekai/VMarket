@@ -14,12 +14,13 @@ from redis.retry import Retry
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from ranking import popular, similar
-from schemas import PUBLIC_FIELDS, RecommendationError, Snapshot
+from ranking import personalized, popular, similar
+from schemas import PUBLIC_FIELDS, RecommendationError, Snapshot, valid_id
 
 VISIBLE = "snapshot->>'catalogVisible' = 'true' AND snapshot->>'deleted' = 'false'"
 ELIGIBLE = VISIBLE + " AND (snapshot->>'availableStock')::bigint > 0"
 RANK_FIELDS = ("id", "name", "description", "categoryPath", "minPrice", "soldCount", "ratingAverage")
+HISTORY_CUTOFF = "(extract(epoch FROM CURRENT_TIMESTAMP - INTERVAL '90 days') * 1000)::bigint"
 
 
 class Store:
@@ -50,6 +51,8 @@ class Store:
             with self.pool.connection() as conn:
                 conn.execute("SELECT product_id, product_version, snapshot FROM item_feature LIMIT 0")
                 conn.execute("SELECT event_id FROM processed_event LIMIT 0")
+                conn.execute("SELECT event_id, user_id, product_id, action, occurred_at_ms FROM user_event LIMIT 0")
+                conn.execute("SELECT user_hash FROM erased_behavior_user LIMIT 0")
         except Exception:
             raise RuntimeError("Recommendation schema unavailable; run manage.py migrate first") from None
 
@@ -70,8 +73,18 @@ class Store:
             raise ValueError("Snapshot product ID mismatch")
         return snapshot
 
-    def apply(self, snapshot=None, event_id=None):
+    def apply(self, snapshot=None, event_id=None, *, behavior=None, occurred_at=None):
         with self.pool.connection() as conn:
+            if behavior is not None:
+                user_hash = hashlib.sha256(behavior["userId"].encode()).hexdigest()
+                # Serialize ingestion with erasure, including users with no existing history.
+                conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (user_hash,))
+                cutoff, now = conn.execute(f"SELECT {HISTORY_CUTOFF}, (extract(epoch FROM CURRENT_TIMESTAMP) * 1000)::bigint").fetchone()
+                if occurred_at > now + 30000:
+                    raise ValueError("Behavior timestamp exceeds 30-second future allowance")
+                if occurred_at < cutoff or conn.execute(
+                        "SELECT 1 FROM erased_behavior_user WHERE user_hash = %s", (user_hash,)).fetchone():
+                    return False
             if event_id is not None:
                 receipt = conn.execute("""INSERT INTO processed_event(event_id) VALUES (%s)
                     ON CONFLICT DO NOTHING RETURNING event_id""", (event_id,)).fetchone()
@@ -84,9 +97,15 @@ class Store:
                         refreshed_at = CURRENT_TIMESTAMP
                     WHERE item_feature.product_version < EXCLUDED.product_version""",
                     (snapshot.id, snapshot.productVersion, Jsonb(snapshot.model_dump())))
+            if behavior is not None:
+                conn.execute("""INSERT INTO user_event(event_id, user_id, product_id, action, occurred_at_ms)
+                    VALUES (%s, %s, %s, %s, %s)""",
+                    (event_id, behavior["userId"], behavior["productId"], behavior["action"], occurred_at))
+        if behavior is not None:
+            self.invalidate_user(behavior["userId"])
         return True
 
-    def products(self, category=None, ids=None, *, in_stock=True):
+    def products(self, category=None, ids=None, *, in_stock=True, exclude_user=None):
         query = "SELECT snapshot FROM item_feature WHERE " + (ELIGIBLE if in_stock else VISIBLE)
         args = []
         if category is not None:
@@ -95,6 +114,9 @@ class Store:
         if ids is not None:
             query += " AND product_id = ANY(%s)"
             args.append(ids)
+        if exclude_user:
+            query += f" AND NOT EXISTS (SELECT 1 FROM user_event u WHERE u.user_id = %s AND u.product_id = item_feature.product_id AND u.action = 'purchase' AND u.occurred_at_ms >= {HISTORY_CUTOFF})"
+            args.append(exclude_user)
         with self.pool.connection() as conn:
             return [row[0] for row in conn.execute(query, args).fetchall()]
 
@@ -114,7 +136,66 @@ class Store:
 
     def prune_receipts(self):
         with self.pool.connection() as conn:
-            return conn.execute("DELETE FROM processed_event WHERE processed_at < CURRENT_TIMESTAMP - INTERVAL '30 days'").rowcount
+            return conn.execute("""DELETE FROM processed_event p WHERE processed_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+                AND NOT EXISTS (SELECT 1 FROM user_event u WHERE u.event_id = p.event_id)""").rowcount
+
+    def prune_history(self):
+        with self.pool.connection() as conn:
+            return conn.execute(f"DELETE FROM user_event WHERE occurred_at_ms < {HISTORY_CUTOFF}").rowcount
+
+    def user_erased(self, user_id):
+        with self.pool.connection() as conn:
+            return conn.execute("SELECT 1 FROM erased_behavior_user WHERE user_hash = %s",
+                (hashlib.sha256(user_id.encode()).hexdigest(),)).fetchone() is not None
+
+    def erase_user(self, user_id):
+        if not valid_id(user_id):
+            raise ValueError("Invalid user ID")
+        user_hash = hashlib.sha256(user_id.encode()).hexdigest()
+        with self.pool.connection() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (user_hash,))
+            conn.execute("INSERT INTO erased_behavior_user(user_hash) VALUES (%s) ON CONFLICT DO NOTHING", (user_hash,))
+            conn.execute("DELETE FROM processed_event p USING user_event u WHERE p.event_id = u.event_id AND u.user_id = %s", (user_id,))
+            removed = conn.execute("DELETE FROM user_event WHERE user_id = %s", (user_id,)).rowcount
+        self.invalidate_user(user_id)
+        return removed
+
+    def user_history(self, user_id):
+        with self.pool.connection() as conn:
+            return dict(conn.execute(f"""SELECT product_id, bool_or(action = 'purchase') FROM user_event
+                WHERE user_id = %s AND occurred_at_ms >= {HISTORY_CUTOFF} GROUP BY product_id""", (user_id,)).fetchall())
+
+    def collaborative_scores(self, user_id):
+        with self.pool.connection() as conn:
+            return dict(conn.execute(f"""WITH mine AS (
+                SELECT DISTINCT product_id FROM user_event WHERE user_id = %s AND occurred_at_ms >= {HISTORY_CUTOFF}
+                ), peers AS (
+                SELECT DISTINCT other.user_id FROM mine
+                JOIN user_event other ON other.product_id = mine.product_id
+                WHERE other.user_id <> %s AND other.occurred_at_ms >= {HISTORY_CUTOFF})
+                SELECT candidate.product_id, count(DISTINCT candidate.user_id)
+                FROM user_event candidate JOIN peers ON peers.user_id = candidate.user_id
+                WHERE candidate.occurred_at_ms >= {HISTORY_CUTOFF}
+                GROUP BY candidate.product_id""", (user_id, user_id)).fetchall())
+
+    def user_cache_prefix(self, user_id):
+        return "recommendation:personal:v1:" + hashlib.sha256(user_id.encode()).hexdigest() + ":"
+
+    def invalidate_user(self, user_id):
+        cursor, deadline = 0, time.monotonic() + self.settings.timeout
+        try:
+            for _ in range(20):
+                cursor, keys = self.cache.scan(cursor=cursor, match=self.user_cache_prefix(user_id) + "*", count=100)
+                if keys:
+                    self.cache.delete(*keys)
+                if cursor == 0:
+                    return
+                if time.monotonic() >= deadline:
+                    break
+            logging.warning("recommendation_user_cache_invalidation_incomplete")
+        except redis.RedisError:
+            self.cache_retry_at = time.monotonic() + 5
+            logging.warning("recommendation_user_cache_invalidation_failed")
 
     def cached_ids(self, key, seed_id):
         try:
@@ -133,15 +214,18 @@ class Store:
             logging.warning("recommendation_cache_invalid")
         return None
 
-    def recommendations(self, *, category=None, seed_id=None, limit=12):
+    def recommendations(self, *, category=None, seed_id=None, limit=12, user_id=""):
+        if user_id and self.user_erased(user_id):
+            return self.recommendations(category=category, seed_id=seed_id, limit=limit)
         seed = None
         if seed_id is not None:
             seeds = self.products(ids=[seed_id], in_stock=False)
             if not seeds:
                 raise RecommendationError(404, "PRODUCT_NOT_FOUND", "Product does not exist")
             seed = seeds[0]
-        digest = hashlib.sha256(json.dumps([category, seed_id], ensure_ascii=False).encode()).hexdigest()
-        key = "recommendation:v2:" + digest
+        options = [user_id, category, limit] if user_id else [category, seed_id]
+        digest = hashlib.sha256(json.dumps(options, ensure_ascii=False).encode()).hexdigest()
+        key = (self.user_cache_prefix(user_id) if user_id else "recommendation:v2:") + digest
         ids = self.cached_ids(key, seed_id)
         if ids is None:
             lock = self.rank_locks[int(digest[:2], 16) % len(self.rank_locks)]
@@ -150,10 +234,16 @@ class Store:
             try:
                 ids = self.cached_ids(key, seed_id)
                 if ids is None:
-                    with closing(self.ranking_products(category, popularity=seed is None)) as products:
+                    history = self.user_history(user_id) if user_id else {}
+                    with closing(self.ranking_products(category, popularity=seed is None and not history)) as products:
                         # shortcut: exact similarity scans ranking fields; add indexed candidates when catalog size requires it.
-                        ranked = similar(seed, products) if seed is not None else popular(products)
-                    ids = [item["id"] for item in ranked]
+                        if history:
+                            seeds = self.products(ids=list(history))
+                            collaborative = self.collaborative_scores(user_id)
+                            ids = personalized(seeds, products, collaborative, {p for p, bought in history.items() if bought})
+                        else:
+                            ranked = similar(seed, products) if seed is not None else popular(products)
+                            ids = [item["id"] for item in ranked]
                     if time.monotonic() >= self.cache_retry_at:
                         try:
                             self.cache.setex(key, 60, json.dumps(ids))
@@ -164,7 +254,7 @@ class Store:
                 lock.release()
         ids = ids[:limit]
         # Cache never decides visibility or response fields.
-        current = {item["id"]: item for item in self.products(category, ids)}
+        current = {item["id"]: item for item in self.products(category, ids, exclude_user=user_id)}
         return [{field: current[i].get(field) for field in PUBLIC_FIELDS} for i in ids if i in current]
 
     def health(self):

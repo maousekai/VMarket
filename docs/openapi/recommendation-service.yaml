@@ -2,19 +2,19 @@ openapi: 3.1.0
 info:
   title: VMarket Recommendation Service
   version: 1.0.0
-  description: PR-1 implements content similarity and popular/category fallback for guests and authenticated users.
+  description: Content similarity and guest/cold-start fallback, plus authenticated hybrid ranking from consumed behavior. Behavior producers and periodic training are outside this implementation.
 servers: [{url: 'http://localhost:8080'}]
 paths:
   /api/ai/recommendations/for-you:
     get:
-      description: Optional bearer auth with 30 seconds of clock skew. Invalid supplied tokens return 401; clients should refresh or omit them for guest access. category_id matches the leaf and ancestor categories in categoryPath. Unknown query parameters are ignored; identity overrides and repeated supported parameters return 400.
+      description: Optional bearer auth with 30 seconds of clock skew. Guests, users without usable history and users suppressed by operator erasure receive popular/category fallback. Other users receive normalized content/collaborative ranking from the last 90 days; purchases within that window are excluded. Ranked caches can lag behavior expiry by at most 60 seconds. Invalid supplied tokens return 401; clients should refresh or omit them for guest access. category_id matches categoryPath including ancestors. Unknown query parameters are ignored; identity overrides and repeated supported parameters return 400.
       security: [{Bearer: []}, {}]
       parameters:
         - {name: category_id, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
         - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
-          description: Popular eligible products; PR-1 does not personalize.
+          description: Eligible products, personalized for verified users with usable history, otherwise popular fallback. Only the requesting user's ID and public product fields are returned.
           content:
             application/json:
               schema:

@@ -2,10 +2,10 @@ name: recommendation-service
 on:
   push:
     branches: [dev, release, product]
-    paths: ['services/recommendation-service/**', 'docs/openapi/recommendation-service.yaml', '.github/workflows/recommendation-service.yml', '.dockerignore', 'services/pom.xml', 'services/mvnw', 'services/.mvn/**']
+    paths: ['services/recommendation-service/**', 'docs/openapi/recommendation-service.yaml', 'docs/event-bus.md', '.github/workflows/recommendation-service.yml', '.dockerignore', 'services/pom.xml', 'services/mvnw', 'services/.mvn/**']
   pull_request:
     branches: [dev, release, product]
-    paths: ['services/recommendation-service/**', 'docs/openapi/recommendation-service.yaml', '.github/workflows/recommendation-service.yml', '.dockerignore', 'services/pom.xml', 'services/mvnw', 'services/.mvn/**']
+    paths: ['services/recommendation-service/**', 'docs/openapi/recommendation-service.yaml', 'docs/event-bus.md', '.github/workflows/recommendation-service.yml', '.dockerignore', 'services/pom.xml', 'services/mvnw', 'services/.mvn/**']
   workflow_dispatch:
 permissions:
   contents: read

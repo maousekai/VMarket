@@ -10,11 +10,11 @@ import pika
 import psycopg
 from psycopg_pool import PoolTimeout
 
-from schemas import valid_id
+from schemas import Behavior, valid_id
 
 PRODUCT_EVENTS = ("ProductCreated", "ProductUpdated", "ProductDeleted")
 ORDER_EVENTS = ("OrderPlaced", "OrderStatusChanged")
-EVENT_TYPES = PRODUCT_EVENTS + ORDER_EVENTS
+EVENT_TYPES = PRODUCT_EVENTS + ORDER_EVENTS + ("UserBehaviorTracked",)
 
 
 def connection_parameters(settings):
@@ -48,9 +48,11 @@ def validate_event(body, key):
     payload = data["payload"]
     if not isinstance(payload, dict):
         raise ValueError("Invalid payload")
-    if key not in PRODUCT_EVENTS or not valid_id(payload.get("productId")):
+    if key == "UserBehaviorTracked":
+        payload = Behavior.model_validate(payload).model_dump()
+    elif key not in PRODUCT_EVENTS or not valid_id(payload.get("productId")):
         raise ValueError("Invalid product event")
-    return event_id, payload
+    return event_id, payload, data["timestamp"]
 
 
 def transient(error):
@@ -71,18 +73,21 @@ class Consumer:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="recommendation-metadata")
 
     def handle(self, body, key):
-        # Preserve documented bindings; order behavior is outside PR-1 and needs no receipt or validation.
+        # Order events lack behavior identity and must not be interpreted as purchases.
         if key in ORDER_EVENTS:
             return
-        event_id, payload = validate_event(body, key)
+        event_id, payload, timestamp = validate_event(body, key)
         for attempt in range(3):
             if self.stop.is_set():
                 raise InterruptedError("Stopping")
             try:
                 if self.store.seen(event_id):
                     return
-                snapshot = self.store.fetch_snapshot(payload["productId"])
-                self.store.apply(snapshot, event_id)
+                if key == "UserBehaviorTracked":
+                    self.store.apply(event_id=event_id, behavior=payload, occurred_at=timestamp)
+                else:
+                    snapshot = self.store.fetch_snapshot(payload["productId"])
+                    self.store.apply(snapshot, event_id)
                 return
             except Exception as error:
                 if not transient(error) or attempt == 2:

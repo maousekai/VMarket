@@ -42,10 +42,16 @@ class MemoryStore(Store):
     def health(self):
         return {"postgres": "ready", "redis": "ready", "catalog": {"items": len(self.rows), "lastRefreshAt": None}}
 
-    def products(self, category=None, ids=None, *, in_stock=True):
+    def products(self, category=None, ids=None, *, in_stock=True, exclude_user=None):
         return [row for row in self.rows.values() if row["catalogVisible"] and not row["deleted"]
                 and (not in_stock or row["availableStock"] > 0) and (category is None or category in row["categoryPath"])
                 and (ids is None or row["id"] in ids)]
+
+    def user_history(self, user_id):
+        return {}
+
+    def user_erased(self, user_id):
+        return False
 
     def ranking_products(self, category=None, *, popularity=False):
         return ({field: row[field] for field in RANK_FIELDS} for row in self.products(category))

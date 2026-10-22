@@ -1,4 +1,58 @@
-# PR-1 validation
+# PR-2 validation
+
+Updated: 2026-10-22 (Asia/Bangkok). Branch: PBL6-24-FR-REC-01-03.
+Base: origin/dev at d985504, including merged PR #33 (merge 31ab115, 2026-10-14) and PR #34.
+
+| Check | Result |
+| --- | --- |
+| Python unit tests | 25 passed, including percentile/error accounting, CLI target/confirmation and cleanup-order checks |
+| PostgreSQL/Redis/RabbitMQ integration tests | 15 passed, including retention, erasure, concurrency and rollback regressions |
+| Flyway upgrade | Isolated vmarket_recommendation_pr2_test upgraded V3 to V4 on PostgreSQL 17.11 |
+| Fresh Flyway migration | Isolated vmarket_recommendation_scale_benchmark_test migrated V1 through V4 |
+| Docker repository-root build | Passed; vmarket-recommendation:benchmark for the HTTP/resource run |
+| Runtime dependency audit | No known vulnerabilities found; requirements unchanged |
+| Whitespace | git diff --check passed |
+
+The 2026-10-22 feedback adds a fixed 90-day event-time history policy. Reads filter expiry even before maintenance; cleanup removes expired history before unreferenced receipts older than 30 days. Receipts linked to active history remain protected. Ingestion discards expired events without recreating a receipt/history, and rejects timestamps more than 30 seconds in the future. Tests cover expired caller/peer/candidate history, purchase expiry, receipt protection and replay after cleanup. The policy changes purchase exclusion from lifetime to 90 days and is documented in OpenAPI and the event contract. Deployment owners must review the policy before enabling cleanup; migration itself is additive and deletes nothing.
+
+The operator-only erase-user command requires a valid target and explicit confirmation, atomically removes history and linked receipts, and retains only a permanent hashed suppression marker. PostgreSQL transaction locks serialize erasure and ingestion. Real-infrastructure regressions cover a waiting in-flight delivery, rollback after an injected mid-erasure failure, repeat erasure, replay with the original or a new event ID, isolation from another user's history/receipts and fallback despite failed Redis invalidation. The first new test run exposed a test-client lifetime issue (assertions ran after its pool closed); the fixture now leaves Store teardown to the test. No real account data was erased. The README describes the strict cutover, pseudonymous marker, cross-service/queue/log/backup limits and restore procedure; no account-deletion automation or new HTTP route was added.
+
+The earlier ASGI benchmark at commit 8b23ea5 used local PostgreSQL 17.11 and Redis DB 15, with 10,000 fixture products, 1,000 distinct product interactions per user and four concurrent cold users. One run returned three HTTP 200 responses in 48,920.6/49,491.6/50,516.9 ms and one HTTP 503 in 2,208.6 ms (25% of four requests). Across the three successful computations, history SQL calls totaled 24.9 ms (median 8.7), peer SQL 471.9 ms (median 171.9), product/seed SQL 671.1 ms (median 56.7), candidate iteration/fetch wall time 30,717.3 ms, and inclusive ranking wall time 147,584.8 ms (median 49,109.5). Timers measure client wall time, include local scheduling/contention, and overlap: inclusive ranking includes candidate fetching; they are not additive or PostgreSQL server-only execution times. A first benchmark attempt failed before HTTP startup because test auth settings were absent; explicit test-only credentials fixed the harness, and its fixture cleanup ran. The successful run removed its own rows/cache keys. The revised harness now uses the deployable image over real HTTP with resource limits and explicit percentiles; see the current README for reproduction.
+
+The second 2026-10-22 comment requested producer verification, lifecycle coverage and a more realistic benchmark. The user explicitly confirmed keeping PR-2 consumer-only. Source checks found only the shared event-name constant: frontend App.jsx has no product-detail/tracking route, Gateway has no behavior publisher, CartService.addItem saves Redis without publishing, and OrderService.placeOrder creates PENDING orders without emitting purchase behavior. Payment has no successful-purchase flow. The README and event contract record these gaps plus the required real business-to-consumer tests and identity/timing/cancellation cases. No fixture test is presented as end-to-end evidence. The lifecycle implementation and 15 infrastructure regressions at 8b23ea5 already cover retention, erasure, replay and rollback; they were preserved, not reimplemented.
+
+The revised harness completed real HTTP requests against image sha256:6d38c0d930362f4d56ef498752af89280ea656107862952dc509d5b706d3ec69, built from the current service Dockerfile. It used one Uvicorn worker limited to 2 CPUs/512 MiB, PostgreSQL 17.11, Redis DB 15, 10,000 products and 1,000 distinct interactions per user at concurrency four. Docker Desktop reported 16 VM CPUs and 8,128,204,800 bytes RAM. Five waves cleared the four users' cache entries before each wave, then warmup preceded 100 further requests. No production database or real account data was used.
+
+| HTTP/resource measurement | Result |
+| --- | --- |
+| Cold attempts | 20; 15 HTTP 200, 5 HTTP 503 (25%), no transport errors |
+| Cold all-attempt p95 / p99 | 61,078.4 / 61,081.2 ms |
+| Cold successful-only p95 / p99 | 61,081.2 / 61,081.2 ms |
+| Post-warmup attempts | 100; all HTTP 200, no 503/transport errors |
+| Post-warmup p95 / p99 | 25.3 / 30.0 ms |
+| Recommendation container CPU | 133 Docker stats samples; p95 101.6%, maximum 102.69% (100% is one core) |
+| Maximum sampled container working set | 80.9 MiB, estimated from Docker memory percentage and the 512 MiB limit |
+| PostgreSQL EXPLAIN ANALYZE execution before load | Actual history SQL 2.078 ms; peer SQL 17.411 ms |
+
+Percentiles use nearest rank and describe these small samples only; 20 cold attempts cannot establish a stable p99. CPU/RAM sampling includes cold, warmup and warm phases, approximately every 2–3 seconds; sampled working set is not exact peak RSS. SQL figures are server execution samples before load, not concurrent latency distributions. Unlike the prior ASGI baseline, this run uses a separate Linux service container and real HTTP. It still excludes Gateway/TLS, live producers, broker processing, staging network/shared workloads and replica coordination. Repeat longer tests on the actual staging topology before claiming near-production readiness. Fixture rows/cache keys and the temporary service container were removed successfully; PostgreSQL/Redis were restored to their prior stopped state. Docker Desktop was already running before this run and is left running.
+
+This workload clearly fails the 500 ms cold read target. Do not raise catalog/history/traffic limits or claim production capacity from warm results or the earlier small fixture. Bounded indexed candidate retrieval or precomputed content features require a separately scoped ranking design/quality review; silently limiting seeds/candidates here would change the approved exact ranking contract. Real view/add-to-cart/purchase producers and live client-to-consumer testing remain deferred; cancellation/refund semantics must be defined before adding any order-to-purchase mapping.
+
+The 2026-10-21 review fixes remove repeated work without changing scoring or the API contract. Peer discovery first deduplicates the caller's product IDs. On PostgreSQL 17.11, a 3,002-event fixture (1,000 repeated caller views, 1,000 repeated peer views, another peer and an unrelated user) still returns two votes per shared/recommended product. EXPLAIN ANALYZE of the actual Store query reduced total join output rows (Actual Rows times Actual Loops across join nodes) from 1,002,502 to 2,503; measured execution time was 113.81 ms before and 1.48 ms after. The regression checks both scores and a join-work bound, without a fragile timing assertion.
+
+Personalized ranking now tokenizes each eligible candidate once and reuses its terms across all seeds. A fixture with 200 products, 20 seeds and 5,000-character descriptions fell from 4,020 to 220 tokenizations. Three local runs before/after gave median pure ranking times of 3,024.5/110.0 ms and cold ASGI times of 4,260.6/115.7 ms; the top ten results were identical. This API benchmark used in-memory PostgreSQL/Redis doubles with the real ASGI app, not live dependencies. The unit regression asserts tokenization work and ordering; existing hybrid/content-only/popularity regressions still pass. Local timings vary with machine load and do not establish production capacity. No HTTP dependency path changed; the infrastructure suite reuses its existing Product fixture server rather than adding Postman workspace or mock setup. Packaging/dependency checks in the table were completed for the initial PR-2 implementation; review changes are covered again by GitHub CI.
+
+The new integration fixtures publish real RabbitMQ UserBehaviorTracked messages for view, add_to_cart and purchase. They verify history before catalog arrival, catalog synchronization from ProductCreated fixture messages, consumer restart/replay deduplication, one vote per peer despite repeated views, authenticated content-to-hybrid ranking changes, cold-start/category fallback, JWT/guest isolation and no query/header identity overrides. Product snapshot HTTP responses are served by the existing fixture server, not a running Product service.
+
+Redis checks cover user-scoped invalidation, a bounded scan, current purchase exclusion despite stale cached IDs after Redis invalidation fails, Redis read failure, and collaboration propagating after simulated cache expiry (Redis EXPIRE 0 on isolated test keys). SQL checks verify transaction rollback removes the receipt when history insertion fails and the maintenance cleanup preserves old behavior receipts. A pure ranking fixture verifies normalization and the equal hybrid blend, content-only ranking, all-zero fallback, purchase exclusion and popularity fill.
+
+The initial integration fixture incorrectly expected a limit=1 entry to stay warm after a purchase invalidated that user's entries. The fixture now warms the same limit after invalidation before checking cross-user TTL staleness; the complete rerun passed. Latest guest-path demo p95 was 10.2 ms over 30 sequential ASGI requests and two fixture products with local PostgreSQL/Redis. This is not a personalized load test or a 200-user capacity claim.
+
+Scope is FR-REC-01 ranking logic plus FR-REC-03 consumer behavior. FR-REC-02/04 remain regression-verified. Real behavior producers, frontend tracking and FR-REC-05 training/model versions remain absent. Behavior uses the 90-day policy and operator erasure described above. Exact personalization scans candidate ranking fields and compares them with eligible history seeds; the larger local benchmark establishes a scaling failure at that fixture size, not production readiness.
+
+No dependencies, gateway, frontend, Cart/Order producers, shared order schemas or infrastructure definitions changed. Existing recommendation CI discovers the added tests and runs all migrations; event-bus.md now triggers this workflow too. No local gateway/frontend suite, live Product/Gateway end-to-end, production migration or deployment was performed for PR-2. Infrastructure started for verification is restored to its prior stopped state. Publication, CI and review status are tracked in the GitHub pull request; local plans retain the task's requirement limits.
+
+# PR-1 validation (historical)
 
 Updated: 2026-10-14 (Asia/Bangkok).
 Branch: PBL6-24-FR-REC-01-02-04.

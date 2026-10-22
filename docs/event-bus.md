@@ -201,6 +201,61 @@ có sự kiện "ma" cho thay đổi bị rollback; đổi lại là tối đa m
 Thời điểm duyệt / đình chỉ = `timestamp` của envelope. Từ chối hồ sơ và gửi lại hồ sơ
 **không** phát sự kiện (SRS §8.1 không định nghĩa).
 
+### 5.2. `UserBehaviorTracked` (PBL6-24, consumer contract)
+
+Producer theo SRS vẫn là **Gateway / Clients**; Recommendation chỉ nhận sự kiện.
+PR-2 định nghĩa payload và triển khai consumer, không bổ sung producer hay public
+tracking endpoint. Các message trong integration test là fixture, không chứng minh
+đã có luồng tracking thực tế. Việc publish phải qua thành phần tin cậy có quyền
+truy cập broker; không cấp broker credentials cho browser.
+
+Kiểm tra source ngày 2026-10-22: mới có tên event trong shared-events; chưa có
+publisher cho view/add_to_cart/purchase trong Gateway, frontend, Cart, Order hoặc
+Payment. Phạm vi PR-2 chỉ gồm consumer. Checklist producer và
+kiểm thử business HTTP → broker → history → recommendation nằm trong
+[README Recommendation](../services/recommendation-service/README.md#producer-verification-gaps-pr-35-follow-up).
+Order hiện tạo PENDING rồi xóa item đã checkout khỏi giỏ sau commit; đây chưa phải
+thời điểm mua thành công. Cần thống nhất nghiệp vụ purchase/COD/cancel/refund trước
+khi triển khai producer; không đổi owner Gateway/Clients trong SRS bằng suy đoán.
+
+```json
+{
+  "eventId": "e4a8ec14-5b55-42be-95df-28c2c2a22ad0",
+  "eventType": "UserBehaviorTracked",
+  "timestamp": 1791878400000,
+  "payload": {
+    "userId": "buyer-1",
+    "productId": "product-1",
+    "action": "view"
+  }
+}
+```
+
+- Routing key phải là `UserBehaviorTracked`; eventId là UUID; timestamp là epoch
+  millis nguyên không âm trong miền BIGINT có dấu. Payload chỉ gồm ba trường trên.
+- userId/productId là chuỗi 1–128 ký tự, không rỗng, không có khoảng trắng đầu/cuối,
+  control characters hoặc `/`, `\\`, `?`, `#`; `.` và `..` không hợp lệ.
+- action chỉ nhận `view`, `add_to_cart`, `purchase`. Không nhận cancellation action
+  và không suy diễn `OrderPlaced`/`OrderStatusChanged` thành purchase.
+- Consumer giữ nguyên queue `recommendation.events`, DLX/DLQ arguments và binding
+  cũ; thêm binding này sau khi Flyway V3 đã chạy. Ghi `processed_event` và `user_event`
+  trong cùng transaction rồi ACK. Event trùng không tạo thêm history; giữ history
+  ngay cả khi product projection chưa tới. Retry hai lần cho lỗi tạm thời, sau đó DLQ.
+- Từng event hợp lệ được giữ để làm dữ liệu lịch sử; ranking chỉ tính một tương tác
+  cho mỗi cặp user/product và một vote cho mỗi peer, không nhân điểm theo số view.
+- Flyway V4 bổ sung index tuổi history và bảng suppression cho xóa tài khoản.
+  History dùng cửa sổ 90 ngày theo timestamp gốc và đồng hồ PostgreSQL; event cũ hơn
+  được ACK/bỏ qua, không tạo receipt/history. Timestamp vượt quá 30 giây trong tương
+  lai vào DLQ. Replay phải giữ nguyên timestamp/eventId, không đổi timestamp thành hiện tại.
+- `manage.py cleanup` chạy hằng ngày: xóa history hết 90 ngày trước, rồi receipt quá
+  30 ngày không còn history tham chiếu. Receipt của history còn hiệu lực luôn được giữ.
+  Query history/peer/purchase cũng lọc 90 ngày kể cả khi cleanup bị trễ; cache có thể trễ 60 giây.
+- Operator có quyền DB dùng `manage.py erase-user --user-id <id> --confirm-erasure`
+  theo runbook README: xóa history/receipt cùng transaction và giữ hash suppression
+  để replay không khôi phục dữ liệu. Account ID bị suppression vĩnh viễn, không tái sử dụng.
+  Đây không phải public API hay luồng tự động xóa tài khoản liên service. Batch training,
+  producer view/add-to-cart/purchase thực tế và kiểm thử client-to-consumer vẫn ngoài phạm vi.
+
 ## 6. Kiểm thử end-to-end
 
 Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.

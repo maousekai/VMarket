@@ -68,7 +68,7 @@ class RankingAndEventTest(unittest.TestCase):
         call = channel.queue_declare.call_args_list[0].kwargs
         self.assertEqual(call["queue"], "recommendation.events")
         self.assertEqual(call["arguments"]["x-dead-letter-routing-key"], "recommendation.events.dead")
-        self.assertEqual(channel.queue_bind.call_count, 6)
+        self.assertEqual(channel.queue_bind.call_count, 7)
 
     def test_retries_duplicate_noop_and_order_noop(self):
         store = Mock(settings=settings())
