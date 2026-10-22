@@ -7,7 +7,7 @@ servers: [{url: 'http://localhost:8080'}]
 paths:
   /api/ai/recommendations/for-you:
     get:
-      description: Optional bearer auth with 30 seconds of clock skew. Guests and users without usable history receive popular/category fallback. Other users receive normalized content/collaborative ranking; purchased products are excluded. Invalid supplied tokens return 401; clients should refresh or omit them for guest access. category_id matches categoryPath including ancestors. Unknown query parameters are ignored; identity overrides and repeated supported parameters return 400.
+      description: Optional bearer auth with 30 seconds of clock skew. Guests, users without usable history and users suppressed by operator erasure receive popular/category fallback. Other users receive normalized content/collaborative ranking from the last 90 days; purchases within that window are excluded. Ranked caches can lag behavior expiry by at most 60 seconds. Invalid supplied tokens return 401; clients should refresh or omit them for guest access. category_id matches categoryPath including ancestors. Unknown query parameters are ignored; identity overrides and repeated supported parameters return 400.
       security: [{Bearer: []}, {}]
       parameters:
         - {name: category_id, in: query, schema: {type: string, minLength: 1, maxLength: 128}}

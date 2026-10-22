@@ -234,8 +234,18 @@ truy cập broker; không cấp broker credentials cho browser.
   ngay cả khi product projection chưa tới. Retry hai lần cho lỗi tạm thời, sau đó DLQ.
 - Từng event hợp lệ được giữ để làm dữ liệu lịch sử; ranking chỉ tính một tương tác
   cho mỗi cặp user/product và một vote cho mỗi peer, không nhân điểm theo số view.
-- Cleanup 30 ngày chỉ xóa receipt catalog; behavior receipts/history được giữ để
-  replay cũ không tạo lại tương tác. Chưa áp dụng retention hoặc batch training.
+- Flyway V4 bổ sung index tuổi history và bảng suppression cho xóa tài khoản.
+  History dùng cửa sổ 90 ngày theo timestamp gốc và đồng hồ PostgreSQL; event cũ hơn
+  được ACK/bỏ qua, không tạo receipt/history. Timestamp vượt quá 30 giây trong tương
+  lai vào DLQ. Replay phải giữ nguyên timestamp/eventId, không đổi timestamp thành hiện tại.
+- `manage.py cleanup` chạy hằng ngày: xóa history hết 90 ngày trước, rồi receipt quá
+  30 ngày không còn history tham chiếu. Receipt của history còn hiệu lực luôn được giữ.
+  Query history/peer/purchase cũng lọc 90 ngày kể cả khi cleanup bị trễ; cache có thể trễ 60 giây.
+- Operator có quyền DB dùng `manage.py erase-user --user-id <id> --confirm-erasure`
+  theo runbook README: xóa history/receipt cùng transaction và giữ hash suppression
+  để replay không khôi phục dữ liệu. Account ID bị suppression vĩnh viễn, không tái sử dụng.
+  Đây không phải public API hay luồng tự động xóa tài khoản liên service. Batch training,
+  producer view/add-to-cart/purchase thực tế và kiểm thử client-to-consumer vẫn ngoài phạm vi.
 
 ## 6. Kiểm thử end-to-end
 

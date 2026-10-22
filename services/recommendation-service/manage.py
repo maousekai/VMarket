@@ -1,4 +1,4 @@
-"""Run Flyway, prune 30-day catalog receipts, or seed snapshots while Product writers are paused."""
+"""Run Flyway, enforce behavior retention/erasure, or seed snapshots with Product writers paused."""
 import argparse
 import os
 import subprocess
@@ -6,7 +6,7 @@ import subprocess
 import pika
 
 from event_consumer import connection_parameters, declare_topology
-from schemas import Snapshot
+from schemas import Snapshot, valid_id
 from settings import ROOT, Settings
 from store import Store
 
@@ -37,9 +37,13 @@ def seed(store):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["migrate", "seed", "cleanup"])
+    parser.add_argument("command", choices=["migrate", "seed", "cleanup", "erase-user"])
     parser.add_argument("--writers-paused", action="store_true")
+    parser.add_argument("--user-id")
+    parser.add_argument("--confirm-erasure", action="store_true")
     args = parser.parse_args()
+    if args.command == "erase-user" and (not valid_id(args.user_id) or not args.confirm_erasure):
+        parser.error("erase-user requires a valid --user-id and --confirm-erasure; suppression is permanent")
     settings = Settings.load()
     if args.command == "migrate":
         env = {**os.environ, "FLYWAY_URL": f"jdbc:postgresql://{settings.db_host}:{settings.db_port}/{settings.db_name}",
@@ -56,7 +60,10 @@ def main():
         try:
             store.start()
             if args.command == "cleanup":
-                print(f"Removed {store.prune_receipts()} catalog receipts older than 30 days; behavior history/receipts retained.")
+                print(f"Removed {store.prune_history()} behavior rows older than 90 days and "
+                      f"{store.prune_receipts()} unreferenced receipts older than 30 days.")
+            elif args.command == "erase-user":
+                print(f"Erased {store.erase_user(args.user_id)} behavior rows and linked receipts; future behavior suppressed.")
             else:
                 print(f"Seeded {seed(store)} snapshots; keep the consumer running to drain queued catalog events.")
         finally:

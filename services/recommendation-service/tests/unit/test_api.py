@@ -50,6 +50,9 @@ class MemoryStore(Store):
     def user_history(self, user_id):
         return {}
 
+    def user_erased(self, user_id):
+        return False
+
     def ranking_products(self, category=None, *, popularity=False):
         return ({field: row[field] for field in RANK_FIELDS} for row in self.products(category))
 

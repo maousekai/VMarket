@@ -9,6 +9,8 @@ import threading
 import time
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import Mock, patch
@@ -93,7 +95,7 @@ class InfrastructureTest(unittest.TestCase):
         self.store = Store(self.settings)
         self.store.start()
         with self.store.pool.connection() as conn:
-            conn.execute("TRUNCATE user_event, item_feature, processed_event")
+            conn.execute("TRUNCATE user_event, item_feature, processed_event, erased_behavior_user")
         self.store.cache.close()
         self.store.cache = redis.Redis(host=base.redis_host, port=base.redis_port,
                                        password=base.redis_password or None, db=15, decode_responses=True)
@@ -157,7 +159,7 @@ class InfrastructureTest(unittest.TestCase):
     def test_repeated_views_do_not_multiply_peer_join_work(self):
         with self.store.pool.connection() as conn:
             conn.execute("""INSERT INTO user_event (event_id, user_id, product_id, action, occurred_at_ms)
-                SELECT gen_random_uuid(), user_id, product_id, 'view', 1000
+                SELECT gen_random_uuid(), user_id, product_id, 'view', (extract(epoch FROM CURRENT_TIMESTAMP) * 1000)::bigint
                 FROM (VALUES ('buyer', 'shared', 1000), ('peer', 'shared', 1000),
                     ('peer', 'recommended', 500), ('peer2', 'shared', 1),
                     ('peer2', 'recommended', 1), ('outsider', 'unrelated', 500))
@@ -394,7 +396,7 @@ class InfrastructureTest(unittest.TestCase):
     def test_behavior_rollback_cleanup_retention_and_invalid_dlq(self):
         event_id = str(uuid.uuid4())
         with self.assertRaises(psycopg.errors.CheckViolation):
-            self.store.apply(event_id=event_id, behavior={"userId": "buyer", "productId": "unknown", "action": "invalid"}, occurred_at=1)
+            self.store.apply(event_id=event_id, behavior={"userId": "buyer", "productId": "unknown", "action": "invalid"}, occurred_at=int(time.time() * 1000))
         self.assertFalse(self.store.seen(event_id))
         self.start_consumer()
         self.track("buyer", "unknown", "view", event_id)
@@ -413,3 +415,105 @@ class InfrastructureTest(unittest.TestCase):
             self.assertFalse(self.store.seen(bad))
         finally:
             connection.close()
+
+    def test_history_expiry_read_filters_cleanup_and_replay(self):
+        seed(self.store)
+        now = int(time.time() * 1000)
+        recent, old = str(uuid.uuid4()), str(uuid.uuid4())
+        behavior = {"userId": "buyer", "productId": "p2", "action": "purchase"}
+        self.assertTrue(self.store.apply(event_id=recent, behavior=behavior, occurred_at=now))
+        self.assertTrue(self.store.apply(event_id=old, behavior=behavior, occurred_at=now))
+        with self.store.pool.connection() as conn:
+            conn.execute("UPDATE user_event SET occurred_at_ms = %s WHERE event_id = %s", (now - 91 * 86400000, old))
+            conn.execute("UPDATE processed_event SET processed_at = CURRENT_TIMESTAMP - INTERVAL '91 days' WHERE event_id = %s", (old,))
+            # Expired caller, shared-peer and candidate events must not affect reads before cleanup.
+            conn.execute("""INSERT INTO user_event VALUES
+                (gen_random_uuid(), 'expired', 'p2', 'purchase', %s),
+                (gen_random_uuid(), 'old-peer', 'p2', 'view', %s),
+                (gen_random_uuid(), 'old-peer', 'p1', 'view', %s),
+                (gen_random_uuid(), 'peer', 'p2', 'view', %s),
+                (gen_random_uuid(), 'peer', 'p1', 'view', %s)""",
+                (now - 91 * 86400000, now - 91 * 86400000, now, now, now - 91 * 86400000))
+        self.assertEqual(self.store.user_history("expired"), {})
+        self.assertEqual(self.store.collaborative_scores("expired"), {})
+        self.assertEqual(self.store.collaborative_scores("buyer"), {"p2": 1})
+        self.assertEqual({p["id"] for p in self.store.products(exclude_user="expired")}, {"p1", "p2"})
+        self.assertEqual({p["id"] for p in self.store.products(exclude_user="buyer")}, {"p1"})
+        self.assertEqual(self.store.prune_history(), 4)
+        self.assertEqual(self.store.prune_receipts(), 1)
+        self.assertFalse(self.store.seen(old))
+        self.assertTrue(self.store.seen(recent))
+        self.assertFalse(self.store.apply(event_id=old, behavior=behavior, occurred_at=now - 91 * 86400000))
+        self.assertFalse(self.store.seen(old))
+        future = str(uuid.uuid4())
+        with self.assertRaises(ValueError):
+            self.store.apply(event_id=future, behavior=behavior, occurred_at=now + 600000)
+        self.assertFalse(self.store.seen(future))
+        self.assertEqual(self.store.user_history("buyer"), {"p2": True})
+
+    def test_erasure_removes_history_receipts_and_bypasses_stale_cache(self):
+        seed(self.store)
+        now = int(time.time() * 1000)
+        event_id, other = str(uuid.uuid4()), str(uuid.uuid4())
+        behavior = {"userId": "buyer", "productId": "p2", "action": "purchase"}
+        self.store.apply(event_id=event_id, behavior=behavior, occurred_at=now)
+        self.store.apply(event_id=other, behavior={**behavior, "userId": "other"}, occurred_at=now)
+        with patch.object(self.store, "close"), TestClient(create_app(self.settings, self.store, run_consumer=False)) as client:
+            path = BASE + "/for-you"
+            self.assertEqual([p["id"] for p in client.get(path, headers=self.bearer("buyer")).json()["items"]], ["p1"])
+            with patch.object(self.store.cache, "scan", side_effect=redis.ConnectionError()):
+                self.assertEqual(self.store.erase_user("buyer"), 1)
+            self.store.cache_retry_at = 0
+            self.assertEqual([p["id"] for p in client.get(path, headers=self.bearer("buyer")).json()["items"]], ["p2", "p1"])
+            self.assertEqual([p["id"] for p in client.get(path, headers=self.bearer("other")).json()["items"]], ["p1"])
+        self.assertEqual(self.store.user_history("buyer"), {})
+        self.assertFalse(self.store.seen(event_id))
+        self.assertTrue(self.store.seen(other))
+        self.assertFalse(self.store.apply(event_id=event_id, behavior=behavior, occurred_at=now))
+        self.assertFalse(self.store.apply(event_id=str(uuid.uuid4()), behavior=behavior, occurred_at=now))
+        self.assertEqual(self.store.erase_user("buyer"), 0)
+        with self.store.pool.connection() as conn:
+            hashes = conn.execute("SELECT user_hash FROM erased_behavior_user").fetchall()
+        self.assertEqual(len(hashes), 1)
+        self.assertEqual(len(hashes[0][0]), 64)
+        self.assertNotIn("buyer", hashes[0][0])
+        with self.assertRaises(ValueError):
+            self.store.erase_user("../")
+
+    def test_erasure_serializes_with_inflight_ingestion(self):
+        user_id = "racing-buyer"
+        user_hash = self.store.user_cache_prefix(user_id).split(":")[-2]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            with self.store.pool.connection() as conn:
+                conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (user_hash,))
+                erased = executor.submit(self.store.erase_user, user_id)
+                def waiters():
+                    with self.store.pool.connection() as observer:
+                        return observer.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted").fetchone()[0]
+                await_true(lambda: waiters() == 1)
+                applied = executor.submit(self.store.apply, event_id=str(uuid.uuid4()),
+                    behavior={"userId": user_id, "productId": "p1", "action": "view"}, occurred_at=int(time.time() * 1000))
+                await_true(lambda: waiters() == 2)
+            self.assertEqual(erased.result(), 0)
+            self.assertFalse(applied.result())
+        self.assertEqual(self.store.user_history(user_id), {})
+
+    def test_erasure_failure_rolls_back_suppression_history_and_receipt(self):
+        event_id = str(uuid.uuid4())
+        self.store.apply(event_id=event_id, behavior={"userId": "buyer", "productId": "p1", "action": "view"},
+                         occurred_at=int(time.time() * 1000))
+        original_connection = self.store.pool.connection
+        @contextmanager
+        def failing_connection():
+            with original_connection() as conn:
+                def execute(query, args):
+                    if query.startswith("DELETE FROM user_event"):
+                        raise RuntimeError("interrupted erasure")
+                    return conn.execute(query, args)
+                yield Mock(execute=execute)
+        with patch.object(self.store.pool, "connection", failing_connection):
+            with self.assertRaises(RuntimeError):
+                self.store.erase_user("buyer")
+        self.assertFalse(self.store.user_erased("buyer"))
+        self.assertTrue(self.store.seen(event_id))
+        self.assertEqual(self.store.user_history("buyer"), {"p1": False})

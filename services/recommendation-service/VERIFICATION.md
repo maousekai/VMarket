@@ -1,17 +1,25 @@
 # PR-2 validation
 
-Updated: 2026-10-21 (Asia/Bangkok). Branch: PBL6-24-FR-REC-01-03.
+Updated: 2026-10-22 (Asia/Bangkok). Branch: PBL6-24-FR-REC-01-03.
 Base: origin/dev at d985504, including merged PR #33 (merge 31ab115, 2026-10-14) and PR #34.
 
 | Check | Result |
 | --- | --- |
-| Python unit tests | 22 passed after PR #35 review fixes, including PR-1 regressions |
-| PostgreSQL/Redis/RabbitMQ integration tests | 11 passed after PR #35 review fixes, including PR-1 regressions |
-| Flyway upgrade | Isolated vmarket_recommendation_review_test upgraded V2 to V3 |
-| Fresh Flyway migration | Isolated vmarket_recommendation_pr2_test migrated V1, V2 and V3 |
+| Python unit tests | 24 passed, including CLI target/confirmation and cleanup-order checks |
+| PostgreSQL/Redis/RabbitMQ integration tests | 15 passed, including retention, erasure, concurrency and rollback regressions |
+| Flyway upgrade | Isolated vmarket_recommendation_pr2_test upgraded V3 to V4 on PostgreSQL 17.11 |
+| Fresh Flyway migration | Isolated vmarket_recommendation_scale_benchmark_test migrated V1 through V4 |
 | Docker repository-root build | Passed; vmarket-recommendation:pr2 |
 | Runtime dependency audit | No known vulnerabilities found; requirements unchanged |
 | Whitespace | git diff --check passed |
+
+The 2026-10-22 feedback adds a fixed 90-day event-time history policy. Reads filter expiry even before maintenance; cleanup removes expired history before unreferenced receipts older than 30 days. Receipts linked to active history remain protected. Ingestion discards expired events without recreating a receipt/history, and rejects timestamps more than 30 seconds in the future. Tests cover expired caller/peer/candidate history, purchase expiry, receipt protection and replay after cleanup. The policy changes purchase exclusion from lifetime to 90 days and is documented in OpenAPI and the event contract. Deployment owners must review the policy before enabling cleanup; migration itself is additive and deletes nothing.
+
+The operator-only erase-user command requires a valid target and explicit confirmation, atomically removes history and linked receipts, and retains only a permanent hashed suppression marker. PostgreSQL transaction locks serialize erasure and ingestion. Real-infrastructure regressions cover a waiting in-flight delivery, rollback after an injected mid-erasure failure, repeat erasure, replay with the original or a new event ID, isolation from another user's history/receipts and fallback despite failed Redis invalidation. The first new test run exposed a test-client lifetime issue (assertions ran after its pool closed); the fixture now leaves Store teardown to the test. No real account data was erased. The README describes the strict cutover, pseudonymous marker, cross-service/queue/log/backup limits and restore procedure; no account-deletion automation or new HTTP route was added.
+
+The reproducible opt-in benchmark `python -m tests.benchmark_personalization` uses the real ASGI app, local PostgreSQL 17.11 and Redis DB 15, with 10,000 fixture products, 1,000 distinct product interactions per user and four concurrent cold users. One run returned three HTTP 200 responses in 48,920.6/49,491.6/50,516.9 ms and one HTTP 503 in 2,208.6 ms (25% of four requests). Across the three successful computations, history SQL calls totaled 24.9 ms (median 8.7), peer SQL 471.9 ms (median 171.9), product/seed SQL 671.1 ms (median 56.7), candidate iteration/fetch wall time 30,717.3 ms, and inclusive ranking wall time 147,584.8 ms (median 49,109.5). Timers measure client wall time, include local scheduling/contention, and overlap: inclusive ranking includes candidate fetching; they are not additive or PostgreSQL server-only execution times. A first benchmark attempt failed before HTTP startup because test auth settings were absent; explicit test-only credentials fixed the harness, and its fixture cleanup ran. The successful run removed its own rows/cache keys.
+
+This workload clearly fails the 500 ms read target. Do not raise catalog/history/traffic limits or claim production capacity from the earlier small fixture. Bounded indexed candidate retrieval or precomputed content features require a separately scoped ranking design/quality review; silently limiting seeds/candidates here would change the approved exact ranking contract. The benchmark is a four-request warning, not a sustained load test or capacity envelope. Real view/add-to-cart/purchase producers and live client-to-consumer testing remain deferred; cancellation/refund semantics must be defined before adding any order-to-purchase mapping.
 
 The 2026-10-21 review fixes remove repeated work without changing scoring or the API contract. Peer discovery first deduplicates the caller's product IDs. On PostgreSQL 17.11, a 3,002-event fixture (1,000 repeated caller views, 1,000 repeated peer views, another peer and an unrelated user) still returns two votes per shared/recommended product. EXPLAIN ANALYZE of the actual Store query reduced total join output rows (Actual Rows times Actual Loops across join nodes) from 1,002,502 to 2,503; measured execution time was 113.81 ms before and 1.48 ms after. The regression checks both scores and a join-work bound, without a fragile timing assertion.
 
@@ -23,7 +31,7 @@ Redis checks cover user-scoped invalidation, a bounded scan, current purchase ex
 
 The initial integration fixture incorrectly expected a limit=1 entry to stay warm after a purchase invalidated that user's entries. The fixture now warms the same limit after invalidation before checking cross-user TTL staleness; the complete rerun passed. Latest guest-path demo p95 was 10.2 ms over 30 sequential ASGI requests and two fixture products with local PostgreSQL/Redis. This is not a personalized load test or a 200-user capacity claim.
 
-Scope is FR-REC-01 ranking logic plus FR-REC-03 consumer behavior. FR-REC-02/04 remain regression-verified. Real behavior producers, frontend tracking and FR-REC-05 training/model versions remain absent. Behavior history/receipts are intentionally retained indefinitely pending a coordinated retention policy. Exact personalization scans candidate ranking fields and compares them with eligible history seeds; large-catalog/history scaling remains unverified.
+Scope is FR-REC-01 ranking logic plus FR-REC-03 consumer behavior. FR-REC-02/04 remain regression-verified. Real behavior producers, frontend tracking and FR-REC-05 training/model versions remain absent. Behavior uses the 90-day policy and operator erasure described above. Exact personalization scans candidate ranking fields and compares them with eligible history seeds; the larger local benchmark establishes a scaling failure at that fixture size, not production readiness.
 
 No dependencies, gateway, frontend, Cart/Order producers, shared order schemas or infrastructure definitions changed. Existing recommendation CI discovers the added tests and runs all migrations; event-bus.md now triggers this workflow too. No local gateway/frontend suite, live Product/Gateway end-to-end, production migration or deployment was performed for PR-2. Infrastructure started for verification is restored to its prior stopped state. Publication, CI and review status are tracked in the GitHub pull request; local plans retain the task's requirement limits.
 
