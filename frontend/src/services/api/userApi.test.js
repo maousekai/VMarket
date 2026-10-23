@@ -76,27 +76,26 @@ describe('address book API contract', () => {
     expect(sent().url).toBe('/api/users/me/addresses/a%2Fb')
   })
 
-  it('builds a trimmed request body without the default flag', () => {
-    expect(
-      addressRequestBody({
-        recipientName: ' Nguyễn Minh Tuấn ',
-        phone: ' 0905123456 ',
-        province: 'Đà Nẵng',
-        district: 'Hải Châu',
-        ward: 'Thạch Thang',
-        streetAddress: ' 54 Nguyễn Lương Bằng ',
-        note: '   ',
-        isDefault: true,
-      }),
-    ).toEqual({
+  it('builds a trimmed request body without the default flag or the district', () => {
+    const body = addressRequestBody({
+      recipientName: ' Nguyễn Minh Tuấn ',
+      phone: ' 0905123456 ',
+      province: 'Thành phố Đà Nẵng',
+      district: 'Hải Châu',
+      ward: ' Phường Hải Châu ',
+      streetAddress: ' 54 Nguyễn Lương Bằng ',
+      note: '   ',
+      isDefault: true,
+    })
+    expect(body).toEqual({
       recipientName: 'Nguyễn Minh Tuấn',
       phone: '0905123456',
-      province: 'Đà Nẵng',
-      district: 'Hải Châu',
-      ward: 'Thạch Thang',
+      province: 'Thành phố Đà Nẵng',
+      ward: 'Phường Hải Châu',
       streetAddress: '54 Nguyễn Lương Bằng',
       note: null,
     })
+    expect(body).not.toHaveProperty('district')
   })
 })
 

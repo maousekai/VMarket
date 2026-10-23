@@ -3,6 +3,7 @@ import { validateAddress } from '../auth/validation'
 import AccountField from '../components/AccountField'
 import AccountLayout from '../components/AccountLayout'
 import Modal from '../components/Modal'
+import { DA_NANG_PROVINCE, DA_NANG_WARD_GROUPS } from '../data/daNangAddress'
 import { getApiError } from '../services/api/apiClient'
 import {
   addressRequestBody,
@@ -19,24 +20,20 @@ const emptyValues = {
   phone: '',
   streetAddress: '',
   ward: '',
-  district: '',
-  province: '',
+  province: DA_NANG_PROVINCE,
   note: '',
   makeDefault: 'no',
 }
 
 const addressLine = (address) =>
-  [address.streetAddress, address.ward, address.district, address.province]
-    .filter(Boolean)
-    .join(', ')
+  [address.streetAddress, address.ward, address.province].filter(Boolean).join(', ')
 
 const valuesFrom = (address) => ({
   recipientName: address.recipientName || '',
   phone: address.phone || '',
   streetAddress: address.streetAddress || '',
   ward: address.ward || '',
-  district: address.district || '',
-  province: address.province || '',
+  province: DA_NANG_PROVINCE,
   note: address.note || '',
   makeDefault: address.isDefault ? 'yes' : 'no',
 })
@@ -123,9 +120,29 @@ function AddressForm({ address, isFirst, onCancel, onSaved }) {
           maxLength={255}
           {...field('streetAddress')}
         />
-        <AccountField label="Phường / xã" required maxLength={100} {...field('ward')} />
-        <AccountField label="Quận / huyện" required maxLength={100} {...field('district')} />
-        <AccountField label="Tỉnh / thành" required maxLength={100} {...field('province')} />
+        <AccountField as="select" label="Phường / xã" required {...field('ward')}>
+          <option value="">Chọn phường / xã</option>
+          {DA_NANG_WARD_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.wards.map((ward) => (
+                <option key={ward} value={ward}>
+                  {ward}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </AccountField>
+        <AccountField
+          as="select"
+          label="Tỉnh / thành"
+          required
+          hint="Hiện chỉ giao hàng trong Thành phố Đà Nẵng (khu vực Đà Nẵng cũ)."
+          name="province"
+          value={DA_NANG_PROVINCE}
+          disabled
+        >
+          <option value={DA_NANG_PROVINCE}>{DA_NANG_PROVINCE}</option>
+        </AccountField>
         <AccountField label="Ghi chú" maxLength={255} {...field('note')} />
         <AccountField
           as="select"

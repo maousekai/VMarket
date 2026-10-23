@@ -44,9 +44,9 @@ const home = {
   id: 'a1',
   recipientName: 'Nguyễn Minh Tuấn',
   phone: '0905123456',
-  province: 'Đà Nẵng',
-  district: 'Hải Châu',
-  ward: 'Thạch Thang',
+  province: 'Thành phố Đà Nẵng',
+  district: null,
+  ward: 'Phường Hải Châu',
   streetAddress: '120 Hoàng Diệu',
   note: null,
   isDefault: true,
@@ -55,9 +55,9 @@ const office = {
   id: 'a2',
   recipientName: 'Trần Thu Hà',
   phone: '0912345678',
-  province: 'Đà Nẵng',
-  district: 'Hải Châu',
-  ward: 'Hòa Cường',
+  province: 'Thành phố Đà Nẵng',
+  district: null,
+  ward: 'Phường Hòa Cường',
   streetAddress: 'Tầng 5 Software Park',
   note: 'Gọi trước khi giao',
   isDefault: false,
@@ -166,25 +166,20 @@ describe('Address book', () => {
       recipient: 'Nguyễn Minh Tuấn',
       phone: '0905123456',
       street: '120 Hoàng Diệu',
-      ward: 'Thạch Thang',
-      district: 'Hải Châu',
-      province: 'Đà Nẵng',
+      ward: 'Phường Hải Châu',
       ...values,
     }
     fill(/Người nhận/, data.recipient)
     fill(/Số điện thoại/, data.phone)
     fill(/Số nhà, tên đường/, data.street)
     fill(/Phường \/ xã/, data.ward)
-    fill(/Quận \/ huyện/, data.district)
-    fill(/Tỉnh \/ thành/, data.province)
   }
   const newBody = {
     recipientName: 'Nguyễn Minh Tuấn',
     phone: '0905123456',
     streetAddress: '120 Hoàng Diệu',
-    ward: 'Thạch Thang',
-    district: 'Hải Châu',
-    province: 'Đà Nẵng',
+    ward: 'Phường Hải Châu',
+    province: 'Thành phố Đà Nẵng',
     note: null,
   }
   const card = async (name) => screen.findByRole('listitem', { name: `Địa chỉ của ${name}` })
@@ -194,7 +189,7 @@ describe('Address book', () => {
     view(<AddressBookPage />)
     const first = within(await card('Nguyễn Minh Tuấn'))
     expect(first.getByText('Mặc định')).toBeTruthy()
-    expect(first.getByText('120 Hoàng Diệu, Thạch Thang, Hải Châu, Đà Nẵng')).toBeTruthy()
+    expect(first.getByText('120 Hoàng Diệu, Phường Hải Châu, Thành phố Đà Nẵng')).toBeTruthy()
     expect(first.queryByRole('button', { name: 'Thiết lập mặc định' })).toBeNull()
     const second = within(await card('Trần Thu Hà'))
     expect(second.queryByText('Mặc định')).toBeNull()
@@ -233,6 +228,59 @@ describe('Address book', () => {
     expect(screen.getByLabelText(/Người nhận/).getAttribute('aria-invalid')).toBe('true')
     expect(screen.getByLabelText(/Số điện thoại/).getAttribute('aria-invalid')).toBe('true')
     expect(screen.getByLabelText(/Tỉnh \/ thành/).getAttribute('aria-invalid')).toBeNull()
+  })
+
+  it('offers only the wards of the former Da Nang in a grouped dropdown', async () => {
+    view(<AddressBookPage />)
+    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await screen.findByRole('dialog')
+    const ward = screen.getByLabelText(/Phường \/ xã/)
+    expect(ward.tagName).toBe('SELECT')
+    expect(ward.value).toBe('')
+    const options = within(ward).getAllByRole('option')
+    expect(options).toHaveLength(16)
+    expect(options[0].textContent).toBe('Chọn phường / xã')
+    const groups = within(ward).getAllByRole('group')
+    expect(groups.map((group) => group.getAttribute('label'))).toEqual(['Phường', 'Xã'])
+    expect(within(groups[0]).getAllByRole('option')).toHaveLength(12)
+    expect(
+      within(groups[1])
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Xã Bà Nà', 'Xã Hòa Tiến', 'Xã Hòa Vang'])
+    expect(within(ward).queryByRole('option', { name: 'Phường Tam Kỳ' })).toBeNull()
+    expect(within(ward).queryByRole('option', { name: 'Phường Hội An' })).toBeNull()
+  })
+
+  it('fixes the province and has no district field', async () => {
+    view(<AddressBookPage />)
+    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await screen.findByRole('dialog')
+    const province = screen.getByLabelText(/Tỉnh \/ thành/)
+    expect(province.tagName).toBe('SELECT')
+    expect(province.value).toBe('Thành phố Đà Nẵng')
+    expect(province.disabled).toBe(true)
+    expect(screen.queryByLabelText(/Quận/)).toBeNull()
+  })
+
+  it('requires choosing a ward and never sends a district', async () => {
+    createAddress.mockResolvedValue(home)
+    view(<AddressBookPage />)
+    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await screen.findByRole('dialog')
+    fillAddress({ ward: '' })
+    click('Lưu địa chỉ')
+    expect(createAddress).not.toHaveBeenCalled()
+    expect(screen.getByLabelText(/Phường \/ xã/).getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByText('Vui lòng chọn phường/xã.')).toBeTruthy()
+    fill(/Phường \/ xã/, 'Xã Hòa Vang')
+    click('Lưu địa chỉ')
+    await waitFor(() => expect(createAddress).toHaveBeenCalledTimes(1))
+    expect(createAddress.mock.calls[0][0]).toMatchObject({
+      ward: 'Xã Hòa Vang',
+      province: 'Thành phố Đà Nẵng',
+    })
+    expect(createAddress.mock.calls[0][0]).not.toHaveProperty('district')
   })
 
   it('sets a new address as the default through the dedicated endpoint', async () => {

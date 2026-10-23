@@ -55,13 +55,13 @@ export const deleteAddress = async (addressId, idempotencyKey) => {
 export const setDefaultAddress = async (addressId, idempotencyKey) =>
   (await apiClient.put(`${addressUrl(addressId)}/default`, undefined, keyed(idempotencyKey))).data
 
-// The default flag is not part of the body: it is set through a separate endpoint.
+// The default flag is not part of the body (separate endpoint) and neither is the district,
+// which no longer exists in Da Nang since 01/07/2025.
 export function addressRequestBody(values) {
   return {
     recipientName: values.recipientName?.trim() || '',
     phone: values.phone?.trim() || '',
     province: values.province?.trim() || '',
-    district: values.district?.trim() || '',
     ward: values.ward?.trim() || '',
     streetAddress: values.streetAddress?.trim() || '',
     note: values.note?.trim() || null,

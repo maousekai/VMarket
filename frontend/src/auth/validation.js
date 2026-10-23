@@ -63,9 +63,8 @@ export function validateAddress(values) {
       : phonePattern.test(phone)
         ? undefined
         : 'Số điện thoại phải là số di động Việt Nam hợp lệ.',
-    province: required(values.province, 'tỉnh/thành phố', 100),
-    district: required(values.district, 'quận/huyện', 100),
-    ward: required(values.ward, 'phường/xã', 100),
+    province: values.province?.trim() ? undefined : 'Vui lòng chọn tỉnh/thành phố.',
+    ward: values.ward?.trim() ? undefined : 'Vui lòng chọn phường/xã.',
     streetAddress: required(values.streetAddress, 'địa chỉ chi tiết', 255),
     note: values.note?.trim().length > 255 ? 'Ghi chú tối đa 255 ký tự.' : undefined,
   })

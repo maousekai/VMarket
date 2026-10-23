@@ -257,4 +257,96 @@ class AddressApiTest {
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.error.code").value("ADDRESS_NOT_FOUND"));
 	}
+
+	// ---- Quận/huyện không bắt buộc (Đà Nẵng bỏ cấp quận/huyện từ 01/07/2025) ----
+
+	/** Địa chỉ theo mô hình hai cấp: chỉ tỉnh/thành và phường/xã, không có quận/huyện. */
+	private static String bodyWithoutDistrict(String recipient) {
+		return """
+				{"recipientName":"%s","phone":"0912345678","province":"Thành phố Đà Nẵng",
+				 "ward":"Phường Hải Châu","streetAddress":"54 Nguyễn Lương Bằng"}
+				""".formatted(recipient);
+	}
+
+	@Test
+	void themDiaChi_khongCoQuanHuyen_tao201_vaLuuNull() throws Exception {
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON).content(bodyWithoutDistrict("An")))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.ward").value("Phường Hải Châu"))
+				.andExpect(jsonPath("$.isDefault").value(true));
+
+		assertThat(addressRepository.findAll()).singleElement()
+				.satisfies(saved -> assertThat(saved.getDistrict()).isNull());
+	}
+
+	@Test
+	void themDiaChi_quanHuyenChiToanKhoangTrang_luuNull() throws Exception {
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Thành phố Đà Nẵng",
+						 "district":"   ","ward":"Phường Hải Châu","streetAddress":"54 Nguyễn Lương Bằng"}
+						"""))
+				.andExpect(status().isCreated());
+
+		assertThat(addressRepository.findAll()).singleElement()
+				.satisfies(saved -> assertThat(saved.getDistrict()).isNull());
+	}
+
+	@Test
+	void themDiaChi_coQuanHuyen_vanDuocLuuDaCatKhoangTrang() throws Exception {
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Đà Nẵng",
+						 "district":"  Hải Châu  ","ward":"Thạch Thang","streetAddress":"54 Nguyễn Lương Bằng"}
+						"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.district").value("Hải Châu"));
+	}
+
+	@Test
+	void themDiaChi_quanHuyenQua100KyTu_tra400() throws Exception {
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Đà Nẵng",
+						 "district":"%s","ward":"Thạch Thang","streetAddress":"54 Nguyễn Lương Bằng"}
+						""".formatted("a".repeat(101))))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void themDiaChi_thieuPhuongXa_vanTra400_duKhongCanQuanHuyen() throws Exception {
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Thành phố Đà Nẵng",
+						 "streetAddress":"54 Nguyễn Lương Bằng"}
+						"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void suaDiaChi_boQuanHuyen_xoaGiaTriCu() throws Exception {
+		String id = createAddress(USER_A, "An");
+		assertThat(addressRepository.findAll()).singleElement()
+				.satisfies(saved -> assertThat(saved.getDistrict()).isEqualTo("Hải Châu"));
+
+		mockMvc.perform(put("/api/users/me/addresses/{id}", id)
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON).content(bodyWithoutDistrict("An")))
+				.andExpect(status().isOk());
+
+		assertThat(addressRepository.findAll()).singleElement()
+				.satisfies(saved -> assertThat(saved.getDistrict()).isNull());
+	}
 }

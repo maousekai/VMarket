@@ -37,8 +37,9 @@ public record AddressRequest(
 		@Size(max = 100, message = "Tỉnh/thành phố tối đa 100 ký tự")
 		String province,
 
-		@Schema(example = "Hải Châu")
-		@NotBlank(message = "Quận/huyện không được để trống")
+		@Schema(example = "Hải Châu", description = "Không bắt buộc: từ 01/07/2025 Đà Nẵng đã bỏ cấp "
+				+ "quận/huyện nên địa chỉ mới chỉ cần tỉnh/thành và phường/xã. Giữ lại để tương thích "
+				+ "với địa chỉ cũ; để trống hoặc bỏ qua thì lưu null.")
 		@Size(max = 100, message = "Quận/huyện tối đa 100 ký tự")
 		String district,
 

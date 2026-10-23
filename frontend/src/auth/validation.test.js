@@ -87,9 +87,8 @@ describe('address validation against AddressRequest', () => {
   const valid = {
     recipientName: 'Nguyễn Minh Tuấn',
     phone: '0905123456',
-    province: 'Đà Nẵng',
-    district: 'Hải Châu',
-    ward: 'Thạch Thang',
+    province: 'Thành phố Đà Nẵng',
+    ward: 'Phường Hải Châu',
     streetAddress: '54 Nguyễn Lương Bằng',
     note: '',
   }
@@ -104,7 +103,6 @@ describe('address validation against AddressRequest', () => {
   it('requires every field except the note, treating blanks as missing', () => {
     const errors = validateAddress({ recipientName: '  ', phone: '' })
     expect(Object.keys(errors).sort()).toEqual([
-      'district',
       'phone',
       'province',
       'recipientName',
@@ -127,6 +125,15 @@ describe('address validation against AddressRequest', () => {
     )
     expect(validateAddress({ ...valid, streetAddress: 'a'.repeat(255) })).toEqual({})
     expect(validateAddress({ ...valid, note: 'a'.repeat(256) })).toHaveProperty('note')
+  })
+
+  it('no longer needs a district since Da Nang dropped that level', () => {
+    expect(validateAddress(valid)).toEqual({})
+    expect(validateAddress({ ...valid, district: '' })).toEqual({})
+    expect(validateAddress({ ...valid, ward: '' })).toEqual({ ward: 'Vui lòng chọn phường/xã.' })
+    expect(validateAddress({ ...valid, province: '  ' })).toEqual({
+      province: 'Vui lòng chọn tỉnh/thành phố.',
+    })
   })
 })
 
