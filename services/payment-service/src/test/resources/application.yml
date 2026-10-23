@@ -1,4 +1,3 @@
-# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL that
 spring:
   application:
     name: payment-service
@@ -9,4 +8,15 @@ spring:
     password: ""
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
+    open-in-view: false
+auth:
+  jwt:
+    secret: test-only-secret-0123456789-0123456789-0123456789
+app:
+  jobs:
+    enabled: false
+  payos:
+    checksum-key: test-checksum-key
+  events:
+    listen: false

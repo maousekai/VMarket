@@ -42,6 +42,7 @@ public final class EventType {
 
 	/** Delivery Service phát khi phân công shipper. */
 	public static final String DELIVERY_ASSIGNED = "DeliveryAssigned";
+	public static final String COD_COLLECTED = "CodCollected";
 
 	/** Review Service phát khi có đánh giá mới. */
 	public static final String REVIEW_CREATED = "ReviewCreated";
