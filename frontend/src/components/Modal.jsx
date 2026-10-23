@@ -3,7 +3,9 @@ import { useEffect, useId, useRef } from 'react'
 const focusable = 'a[href], button, input, select, textarea'
 
 // Accessible modal dialog: focuses its first control, traps Tab, closes on Escape or backdrop.
-export default function Modal({ title, description, onClose, children }) {
+// `variant="drawer"` slides the panel in from the right edge instead of centring it.
+export default function Modal({ title, description, onClose, variant = 'dialog', children }) {
+  const drawer = variant === 'drawer'
   const titleId = useId()
   const dialog = useRef(null)
 
@@ -35,13 +37,13 @@ export default function Modal({ title, description, onClose, children }) {
 
   return (
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop${drawer ? ' modal-backdrop--drawer' : ''}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
     >
       <div
-        className="modal"
+        className={`modal${drawer ? ' modal--drawer' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
