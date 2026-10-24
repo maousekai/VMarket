@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.vmarket.product.config.OpenApiConfig;
 import com.vmarket.product.dto.ModerationRequest;
 import com.vmarket.product.dto.PageResponse;
 import com.vmarket.product.dto.ProductDetailResponse;
@@ -25,6 +26,7 @@ import com.vmarket.product.dto.ProductResponse;
 import com.vmarket.product.security.RequestIdentity;
 import com.vmarket.product.service.ProductCatalogService;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -62,61 +64,56 @@ public class ProductController {
 		return service.detail(id);
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PostMapping
 	public ResponseEntity<ProductResponse> create(
-			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
 			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ProductRequest request) {
-		return ResponseEntity.status(HttpStatus.CREATED).body(service.create(identity.requireSeller(userId, roles), idempotencyKey, request));
+		return ResponseEntity.status(HttpStatus.CREATED).body(service.create(identity.requireSeller(), idempotencyKey, request));
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PutMapping("/{id}")
 	public ProductResponse update(@PathVariable String id,
-			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
 			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ProductRequest request) {
-		return service.update(id, identity.requireSeller(userId, roles), idempotencyKey, request);
+		return service.update(id, identity.requireSeller(), idempotencyKey, request);
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@DeleteMapping("/{id}")
 	public ResponseEntity<Void> delete(@PathVariable String id,
-			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
 			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey) {
-		service.delete(id, identity.requireSeller(userId, roles));
+		service.delete(id, identity.requireSeller());
 		return ResponseEntity.noContent().build();
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PostMapping("/seller/query")
-	public List<ProductResponse> sellerProducts(
-			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
-		return service.sellerProducts(identity.requireSeller(userId, roles));
+	public List<ProductResponse> sellerProducts() {
+		return service.sellerProducts(identity.requireSeller());
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PostMapping("/admin/query")
-	public List<ProductResponse> adminProducts(
-			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
-		identity.requireAdmin(roles);
+	public List<ProductResponse> adminProducts() {
+		identity.requireAdmin();
 		return service.adminProducts();
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PatchMapping("/{id}/moderation")
 	public ProductResponse moderate(@PathVariable String id,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
 			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey,
 			@Valid @RequestBody ModerationRequest request) {
-		identity.requireAdmin(roles);
+		identity.requireAdmin();
 		return service.moderate(id, request.removed(), request.reason());
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PostMapping("/{id}/moderation/resubmit")
 	public ProductResponse resubmitModeration(@PathVariable String id,
-			@RequestHeader(value = "X-User-Id", required = false) String userId,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
 			@RequestHeader("Idempotency-Key") @NotBlank @Size(max = 128) String idempotencyKey) {
-		return service.resubmitModeration(id, identity.requireSeller(userId, roles));
+		return service.resubmitModeration(id, identity.requireSeller());
 	}
 }
