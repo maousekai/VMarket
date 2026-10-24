@@ -1,8 +1,0 @@
-# Cau hinh chi cho profile 'dev' (local). Khong dung o prod.
-# Gia tri gia ro rang de chay 'mvnw spring-boot:run' khong can set bien moi truong.
-
-auth:
-  jwt:
-    # PHAI trung voi gia tri dev cua auth-service, neu khong token do auth-service
-    # phat ra se bi product-service coi nhu chua dang nhap (401).
-    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}

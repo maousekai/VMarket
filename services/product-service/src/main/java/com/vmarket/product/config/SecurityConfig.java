@@ -1,5 +1,8 @@
 package com.vmarket.product.config;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -14,9 +17,14 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.firewall.RequestRejectedHandler;
+import org.springframework.security.web.header.writers.CacheControlHeadersWriter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 import com.vmarket.product.security.JwtAuthenticationFilter;
-import com.vmarket.product.security.RequestIdentity;
 import com.vmarket.product.security.SecurityErrorWriter;
 
 import tools.jackson.databind.ObjectMapper;
@@ -27,17 +35,39 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>Hai tầng kiểm tra:
  * <ul>
- *   <li><b>Chuỗi filter</b> — mọi request ghi (POST/PUT/PATCH/DELETE) phải có token
- *       hợp lệ, trả 401 trước khi binding/validation chạy. Ngoại lệ: API nội bộ
- *       xác thực bằng {@code X-Internal-Api-Key} (tồn kho, {@code /internal/**}).
- *       GET/HEAD công khai (xem danh mục, sản phẩm, health, swagger).</li>
- *   <li><b>{@link RequestIdentity}</b> trong controller — kiểm tra vai trò
- *       SELLER/ADMIN (403) và lấy userId từ token.</li>
+ *   <li><b>Chuỗi filter</b> — chỉ các đường dẫn đọc liệt kê trong
+ *       {@link #PUBLIC_READ_PATHS} (GET/HEAD) là công khai; mọi request khác phải có
+ *       token hợp lệ, trả 401 trước khi binding/validation chạy. Ngoại lệ: API nội bộ
+ *       xác thực bằng {@code X-Internal-Api-Key} ({@link #INTERNAL_PATHS}).</li>
+ *   <li><b>{@link com.vmarket.product.security.RequestIdentity}</b> trong controller —
+ *       kiểm tra vai trò SELLER/ADMIN (403) và lấy userId từ token.</li>
  * </ul>
+ *
+ * <p>Giới hạn đã biết: token chỉ được verify chữ ký + hạn (stateless), nên đăng
+ * xuất / khoá tài khoản ở auth-service chỉ có hiệu lực ở đây khi access token hết hạn.
  */
 @Configuration
 @EnableConfigurationProperties(ProductJwtProperties.class)
 public class SecurityConfig {
+
+	/**
+	 * Đường dẫn đọc công khai (GET/HEAD). Liệt kê cụ thể thay vì mở {@code GET /**}
+	 * để endpoint GET thêm sau này mặc định phải đăng nhập. {@code /api/products/*}
+	 * gồm chi tiết sản phẩm, {@code /health}, {@code /categories}, {@code /brands}.
+	 * {@code /actuator/prometheus} mở cho Prometheus scrape (không gửi token).
+	 */
+	private static final String[] PUBLIC_READ_PATHS = {
+			"/api/products",
+			"/api/products/*",
+			"/actuator/health",
+			"/actuator/health/**",
+			"/actuator/info",
+			"/actuator/prometheus",
+			"/v3/api-docs",
+			"/v3/api-docs/**",
+			"/swagger-ui.html",
+			"/swagger-ui/**",
+	};
 
 	/** API nội bộ service-to-service: tự kiểm tra khoá bằng {@code InternalApiKeyGuard}. */
 	private static final String[] INTERNAL_PATHS = {
@@ -49,6 +79,7 @@ public class SecurityConfig {
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
 			ObjectMapper objectMapper) throws Exception {
+		RequestMatcher publicReads = publicReads();
 		http
 				.cors(Customizer.withDefaults())
 				.csrf(csrf -> csrf.disable())
@@ -56,12 +87,14 @@ public class SecurityConfig {
 				.httpBasic(basic -> basic.disable())
 				.formLogin(form -> form.disable())
 				.logout(logout -> logout.disable())
-				// Danh mục / chi tiết sản phẩm là dữ liệu công khai, cho phép cache như
-				// trước khi có Spring Security (mặc định của nó là no-store mọi response).
-				.headers(headers -> headers.cacheControl(cache -> cache.disable()))
+				// Dữ liệu đọc công khai được cache như trước khi có Spring Security; mọi
+				// response còn lại (có xác thực, lỗi 401/403) vẫn giữ no-store mặc định.
+				.headers(headers -> headers
+						.cacheControl(cache -> cache.disable())
+						.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+								new NegatedRequestMatcher(publicReads), new CacheControlHeadersWriter())))
 				.authorizeHttpRequests(auth -> auth
-						.requestMatchers(HttpMethod.GET, "/**").permitAll()
-						.requestMatchers(HttpMethod.HEAD, "/**").permitAll()
+						.requestMatchers(publicReads).permitAll()
 						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.requestMatchers(INTERNAL_PATHS).permitAll()
 						// Lỗi trong handler được forward tới /error; không mở thì body lỗi
@@ -79,9 +112,20 @@ public class SecurityConfig {
 		return http.build();
 	}
 
+	private static RequestMatcher publicReads() {
+		PathPatternRequestMatcher.Builder paths = PathPatternRequestMatcher.withDefaults();
+		List<RequestMatcher> matchers = new ArrayList<>();
+		for (String pattern : PUBLIC_READ_PATHS) {
+			matchers.add(paths.matcher(HttpMethod.GET, pattern));
+			matchers.add(paths.matcher(HttpMethod.HEAD, pattern));
+		}
+		return new OrRequestMatcher(matchers);
+	}
+
 	/**
 	 * URL bị firewall của Spring Security từ chối ({@code ;}, {@code %2F}, {@code //}...)
-	 * trả envelope lỗi chuẩn thay vì body mặc định của Spring Boot.
+	 * trả envelope lỗi chuẩn thay vì body mặc định của Spring Boot. Việc từ chối xảy ra
+	 * trước chuỗi security nên response này không có header CORS.
 	 */
 	@Bean
 	RequestRejectedHandler requestRejectedHandler(ObjectMapper objectMapper) {

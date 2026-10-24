@@ -1,10 +1,13 @@
 package com.vmarket.product;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -137,6 +140,42 @@ class ProductSecurityTest {
 				.andExpect(jsonPath("$.path").value("/api/products"));
 
 		verifyNoInteractions(productService);
+	}
+
+	@Test
+	void adminTokenCannotActOnBehalfOfSeller() throws Exception {
+		mockMvc.perform(delete("/api/products/p-1")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("admin-1", "ADMIN"))
+				.header("Idempotency-Key", "k-1"))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+
+		verifyNoInteractions(productService);
+	}
+
+	@Test
+	void getOutsidePublicReadListNeedsToken() throws Exception {
+		mockMvc.perform(get("/actuator/metrics"))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void authenticatedResponseIsNotCacheable() throws Exception {
+		mockMvc.perform(post("/api/products/seller/query")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("seller-1", "SELLER")))
+				.andExpect(status().isOk())
+				.andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")));
+	}
+
+	@Test
+	void preflightForWriteAllowsAuthorizationHeader() throws Exception {
+		mockMvc.perform(options("/api/products")
+				.header(HttpHeaders.ORIGIN, "http://localhost:5173")
+				.header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
+				.header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "authorization,idempotency-key,content-type"))
+				.andExpect(status().isOk())
+				.andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:5173"))
+				.andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, containsString("authorization")));
 	}
 
 	@Test

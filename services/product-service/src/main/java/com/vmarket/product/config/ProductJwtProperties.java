@@ -11,10 +11,9 @@ import jakarta.validation.constraints.Size;
  * do auth-service ký (HS256, khoá đối xứng nên hai bên phải dùng chung một chuỗi).
  *
  * <p>Dùng chung prefix {@code auth.jwt} và biến môi trường {@code AUTH_JWT_SECRET}
- * với auth-service và order-service. Không có giá trị mặc định ở
- * {@code application.yml} nền; giá trị giả cho local nằm ở
- * {@code application-dev.yml}. Với profile {@code prod}, thiếu biến thì service
- * dừng ngay lúc khởi động thay vì chạy với khoá đoán được.
+ * với auth-service và order-service. Không có giá trị mặc định ở bất kỳ profile nào
+ * (kể cả {@code dev}): thiếu biến thì service dừng ngay lúc khởi động thay vì chạy
+ * với khoá công khai. Chạy local thì nạp giá trị dev từ {@code .env.example}.
  */
 @Validated
 @ConfigurationProperties(prefix = "auth.jwt")
