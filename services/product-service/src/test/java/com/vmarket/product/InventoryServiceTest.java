@@ -69,6 +69,17 @@ class InventoryServiceTest {
 		verify(publisher).publishStockReserved(any());
 	}
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=ReservationStatus.class,names={"RELEASED","PENDING_RELEASE"})
+    void latePaymentEventAfterCancellationLeavesInventoryReleased(ReservationStatus status) {
+        var reservation=new InventoryReservation(null,"order-1",List.of(),status,Instant.now(),Instant.now());
+        when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
+        service.confirmOrDefer("order-1");
+        assertThat(reservation.getStatus()).isEqualTo(status);
+        verify(productRepository,never()).saveAll(any());
+        verify(reservationRepository,never()).save(any());
+    }
+
 	@Test
 	void reserveRejectsInsufficientAvailableStockWithoutWriting() {
 		Product product = product(10, 8);

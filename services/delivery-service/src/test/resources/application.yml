@@ -1,4 +1,3 @@
-# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL that
 spring:
   application:
     name: delivery-service
@@ -9,4 +8,18 @@ spring:
     password: ""
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+auth:
+  jwt:
+    secret: test-only-secret-0123456789-0123456789-0123456789
+app:
+  outbox-enabled: false
+  tracking-listener: false
+  delivery:
+    internal-api-key: test-only-internal-api-key-0123456789-0123456789
+  cors:
+    allowed-origins: http://localhost:5173

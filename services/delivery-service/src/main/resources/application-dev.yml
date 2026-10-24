@@ -1,0 +1,7 @@
+
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
+app:
+  delivery:
+    internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
