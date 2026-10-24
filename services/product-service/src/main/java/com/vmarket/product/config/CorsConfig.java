@@ -11,8 +11,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
  * Nguồn cấu hình CORS, được {@link SecurityConfig} dùng qua {@code http.cors(...)}
- * để CORS chạy ĐẦU chuỗi security — kể cả phản hồi 401 / 400 do Spring Security
- * tự ghi cũng mang header CORS, trình duyệt đọc được body lỗi.
+ * để CORS chạy ĐẦU chuỗi security — phản hồi 401 / 403 do Spring Security tự ghi
+ * cũng mang header CORS, trình duyệt đọc được body lỗi. Riêng URL bị firewall từ
+ * chối (400) bị chặn trước chuỗi security nên không có header CORS.
+ *
+ * <p>{@code allowedHeaders = *} bao gồm {@code Authorization} và {@code Idempotency-Key}
+ * cho preflight của request ghi.
  */
 @Configuration
 public class CorsConfig {
