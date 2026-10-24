@@ -52,11 +52,14 @@
 }
 .admin-users__search {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 360px;
+  flex-wrap: nowrap;
   gap: 8px;
+  max-width: 480px;
 }
 .admin-users__search input {
-  width: min(320px, 100%);
+  flex: 1 1 auto;
+  min-width: 0;
   height: 44px;
   padding: 0 14px;
   box-sizing: border-box;
@@ -71,8 +74,10 @@
   border-color: #dc2626;
 }
 .admin-users__search .account-button {
+  flex: none;
   min-height: 44px;
   padding: 8px 18px;
+  white-space: nowrap;
 }
 .admin-users__table-wrap {
   overflow-x: auto;
@@ -173,6 +178,15 @@
   padding: 40px 16px;
   text-align: center;
   color: var(--color-muted);
+}
+@media (max-width: 560px) {
+  .admin-users__search {
+    flex-wrap: wrap;
+    max-width: none;
+  }
+  .admin-users__search input {
+    flex-basis: 100%;
+  }
 }
 .modal-backdrop--drawer {
   place-items: stretch end;

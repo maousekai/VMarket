@@ -124,16 +124,6 @@ export default function AdminLayout() {
             <strong>VMarket Operations Console</strong>
           </div>
           <div className="admin-topbar__right">
-            <label className="admin-topbar__search">
-              <AdminIcon name="search" size={14} />
-              <input
-                type="search"
-                aria-label="Tìm mã đơn"
-                placeholder="Tìm mã đơn…"
-                disabled
-                title="Chưa khả dụng"
-              />
-            </label>
             <button
               className="admin-topbar__bell"
               type="button"

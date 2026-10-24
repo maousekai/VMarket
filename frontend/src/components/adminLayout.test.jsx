@@ -158,9 +158,10 @@ describe('Admin top bar', () => {
     expect(screen.getByRole('button', { name: 'Tài khoản của admin.vmarket' })).toBeTruthy()
   })
 
-  it('keeps the search box and notifications present but unavailable', () => {
+  it('has no order search box and keeps the notification bell unavailable for now', () => {
     view()
-    expect(screen.getByLabelText('Tìm mã đơn').disabled).toBe(true)
+    expect(screen.queryByLabelText('Tìm mã đơn')).toBeNull()
+    expect(screen.queryByRole('searchbox')).toBeNull()
     expect(screen.getByRole('button', { name: 'Thông báo' }).disabled).toBe(true)
   })
 })

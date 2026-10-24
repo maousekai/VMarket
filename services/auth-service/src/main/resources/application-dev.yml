@@ -8,6 +8,11 @@ spring:
     # Trong container: bien DB_HOST=postgres / DB_PORT=5432 se ghi de default nay.
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:vmarket_auth}
 
+  flyway:
+    # Chi dev: nap them tai khoan ADMIN mau (db/dev/R__seed_dev_admin.sql).
+    # KHONG them db/dev vao application.yml / application-prod.yml.
+    locations: classpath:db/migration,classpath:db/dev
+
 auth:
   jwt:
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}

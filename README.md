@@ -185,6 +185,23 @@ Mỗi service đọc cấu hình từ biến môi trường (đã có giá trị
 
 > **Tối ưu khi dev local:** chỉ chạy **API Gateway + các service bạn đang làm**. Không cần bật hết 14 service.
 
+## Tài khoản admin mẫu (chỉ dev)
+
+Khi auth-service chạy với profile `dev` (mặc định của `mvnw spring-boot:run` và của
+docker compose), Flyway nạp thêm `services/auth-service/src/main/resources/db/dev/R__seed_dev_admin.sql`
+để có sẵn một tài khoản quản trị thử giao diện `/admin`:
+
+| Email | Mật khẩu | Username | Vai trò |
+|---|---|---|---|
+| `admin@vmarket.local` | `Admin@12345` | `admin.vmarket` | `ADMIN` |
+
+- Script là *repeatable migration* và idempotent: DB đã có tài khoản này (kể cả tạo tay) thì
+  không thêm, không ghi đè.
+- Thư mục `db/dev` **chỉ** nằm trong `spring.flyway.locations` của `application-dev.yml`;
+  `application.yml` và `application-prod.yml` không nạp nó, nên production không có tài khoản này
+  (`DevAdminSeedTest` kiểm tra điều đó). Đổi mật khẩu mẫu thì phải đổi cả hash BCrypt trong script.
+- Muốn cấp quyền admin cho tài khoản khác khi dev: thêm dòng vào `user_roles` của DB `vmarket_auth`.
+
 ## AI Search — PBL6-21
 
 [README AI Search](services/ai-search-service/README.md) hướng dẫn setup, API,

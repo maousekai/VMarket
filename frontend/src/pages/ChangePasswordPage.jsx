@@ -54,8 +54,11 @@ export default function ChangePasswordPage() {
       setSaving(false)
       return
     }
-    // The server revoked every session, including this one.
+    // The server revoked every session, including this one. RouteGuard sends the user to
+    // /login as soon as the session is gone; navigate afterwards so that its redirect does not
+    // overwrite the notice.
     invalidateSession()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     navigate('/login', { replace: true, state: loginState })
   }
 
