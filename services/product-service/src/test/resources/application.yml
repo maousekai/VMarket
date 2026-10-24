@@ -7,6 +7,11 @@ spring:
     mongodb:
       auto-index-creation: false
 
+auth:
+  jwt:
+    # Du 32 byte cho HS256 (Keys.hmacShaKeyFor tu choi khoa ngan hon).
+    secret: test-only-secret-0123456789-0123456789-0123456789
+
 app:
   internal-api-key: test-internal-key
   events:

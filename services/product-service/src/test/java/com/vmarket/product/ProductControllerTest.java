@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -29,8 +30,7 @@ class ProductControllerTest {
 	@Test
 	void sellerCanSubmitValidProduct() throws Exception {
 		mockMvc.perform(post("/api/products")
-				.header("X-User-Id", "seller-1")
-				.header("X-User-Roles", "ROLE_SELLER")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("seller-1", "SELLER"))
 				.header("Idempotency-Key", "create-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]")))
@@ -42,8 +42,7 @@ class ProductControllerTest {
 	@Test
 	void updatePassesIdempotencyKeyToService() throws Exception {
 		mockMvc.perform(put("/api/products/product-1")
-				.header("X-User-Id", "seller-1")
-				.header("X-User-Roles", "ROLE_SELLER")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("seller-1", "BUYER", "SELLER"))
 				.header("Idempotency-Key", "update-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]")))
@@ -56,8 +55,7 @@ class ProductControllerTest {
 	void productWithMoreThanNineImagesIsRejectedBeforeServiceCall() throws Exception {
 		String images = "[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\",\"10\"]";
 		mockMvc.perform(post("/api/products")
-				.header("X-User-Id", "seller-1")
-				.header("X-User-Roles", "SELLER")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("seller-1", "SELLER"))
 				.header("Idempotency-Key", "create-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody(images)))
@@ -70,8 +68,7 @@ class ProductControllerTest {
 	@Test
 	void missingSellerRoleIsRejected() throws Exception {
 		mockMvc.perform(post("/api/products")
-				.header("X-User-Id", "buyer-1")
-				.header("X-User-Roles", "BUYER")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("buyer-1", "BUYER"))
 				.header("Idempotency-Key", "create-1")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]")))
@@ -82,8 +79,7 @@ class ProductControllerTest {
 	@Test
 	void fractionalVndPriceIsRejected() throws Exception {
 		mockMvc.perform(post("/api/products")
-				.header("X-User-Id", "seller-1")
-				.header("X-User-Roles", "SELLER")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("seller-1", "SELLER"))
 				.header("Idempotency-Key", "create-fractional")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]").replace("100000", "100000.5")))
@@ -94,8 +90,7 @@ class ProductControllerTest {
 	@Test
 	void unsupportedCurrencyIsRejected() throws Exception {
 		mockMvc.perform(post("/api/products")
-				.header("X-User-Id", "seller-1")
-				.header("X-User-Roles", "SELLER")
+				.header(HttpHeaders.AUTHORIZATION, TestTokens.bearer("seller-1", "SELLER"))
 				.header("Idempotency-Key", "create-usd")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(validBody("[\"https://img/1.jpg\"]").replace("\"VND\"", "\"USD\"")))

@@ -22,10 +22,18 @@ docker compose up -d mongo rabbitmq
 MongoDB trong Compose tự khởi tạo replica set `rs0`; cổng host là `27018`.
 Sau đó chạy service:
 
+`AUTH_JWT_SECRET` và `INTERNAL_API_KEY` không có giá trị mặc định ở mọi profile;
+thiếu biến thì service dừng ngay lúc khởi động. Lấy giá trị dev từ `.env.example`
+(nạp bằng IDE, hoặc set tay như dưới):
+
 ```bash
 cd services/product-service
-..\mvnw.cmd spring-boot:run       # Windows
-# ../mvnw spring-boot:run         # macOS/Linux
+# Windows (PowerShell)
+$env:AUTH_JWT_SECRET="dev-only-insecure-secret-change-me-please-0123456789"
+$env:INTERNAL_API_KEY="dev-only-internal-api-key-change-me-0123456789"
+..\mvnw.cmd spring-boot:run
+# macOS/Linux
+# set -a; . ./.env.example; set +a; ../mvnw spring-boot:run
 ```
 
 Service chạy tại `http://localhost:8084`. Profile `dev` được dùng mặc định và
@@ -41,8 +49,8 @@ Swagger UI: <http://localhost:8084/swagger-ui.html> · spec: `/v3/api-docs`
 | GET | `/api/products` | Mọi người | Tìm kiếm, lọc, sắp xếp và phân trang sản phẩm |
 | GET | `/api/products/{id}` | Mọi người | Chi tiết và tối đa 6 sản phẩm tương tự |
 | POST | `/api/products` | SELLER | Tạo sản phẩm; cần `Idempotency-Key` |
-| PUT | `/api/products/{id}` | Chủ sản phẩm | Cập nhật toàn bộ; cần `Idempotency-Key` |
-| DELETE | `/api/products/{id}` | Chủ sản phẩm | Ẩn sản phẩm (xóa mềm); cần `Idempotency-Key` |
+| PUT | `/api/products/{id}` | SELLER sở hữu | Cập nhật toàn bộ; cần `Idempotency-Key` |
+| DELETE | `/api/products/{id}` | SELLER sở hữu | Ẩn sản phẩm (xóa mềm); cần `Idempotency-Key` |
 | POST | `/api/products/seller/query` | SELLER | Sản phẩm của người bán hiện tại |
 | POST | `/api/products/admin/query` | ADMIN | Danh sách sản phẩm chưa xóa |
 | PATCH | `/api/products/{id}/moderation` | ADMIN | Gỡ / khôi phục sản phẩm qua kiểm duyệt; cần `Idempotency-Key` |
@@ -58,6 +66,24 @@ Swagger UI: <http://localhost:8084/swagger-ui.html> · spec: `/v3/api-docs`
 | POST | `/api/products/brands` | ADMIN | Tạo thương hiệu |
 | PUT | `/api/products/brands/{id}` | ADMIN | Cập nhật thương hiệu |
 | DELETE | `/api/products/brands/{id}` | ADMIN | Xóa thương hiệu nếu không còn được dùng |
+
+Mọi endpoint không ghi "Mọi người" cần header `Authorization: Bearer <access token>`
+do auth-service phát hành. Service tự verify token (HS256, `AUTH_JWT_SECRET`) và
+lấy `sub` / `roles` từ token; header `X-User-Id` / `X-User-Roles` không còn được
+dùng. Thiếu hoặc sai token trả 401 `UNAUTHORIZED`; sai vai trò trả 403 `FORBIDDEN`.
+
+Phân quyền:
+
+- Tạo / sửa / xóa / gửi duyệt lại sản phẩm chỉ dành cho vai trò `SELLER`, và
+  `sub` trong token phải là chủ sản phẩm (403 `PRODUCT_NOT_OWNED`) và chủ gian hàng
+  (403 `SHOP_NOT_OWNED`). ADMIN không thao tác thay Seller: token chỉ có `ADMIN`
+  gọi các endpoint này nhận 403.
+- Gian hàng bị đình chỉ (`ShopSuspended`) bị chặn tạo / sửa / gửi duyệt lại
+  (409 `SHOP_SUSPENDED`) ngay khi sự kiện được đồng bộ, không phụ thuộc token.
+- ADMIN chỉ kiểm duyệt sản phẩm và quản lý danh mục / thương hiệu.
+
+Giới hạn đã biết: token được verify stateless (chữ ký + hạn), nên đăng xuất hoặc
+khóa tài khoản ở auth-service chỉ có hiệu lực ở đây khi access token hết hạn.
 
 Các bộ lọc của `GET /api/products`: `q`, `categoryId`, `shopId`, `minPrice`,
 `maxPrice`, `minRating`, `sort`, `page`, `size`. Mặc định sắp xếp `NEWEST`,
@@ -115,7 +141,8 @@ queue versioned `ai-search.events.v2`.
 | `MONGO_DIRECT_CONNECTION` | `true` | Kết nối Mongo local; production mặc định `false` |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ |
 | `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | `guest` / `guest` | Tài khoản RabbitMQ dev |
-| `INTERNAL_API_KEY` | Giá trị dev trong `.env.example` | Khóa gọi API nội bộ; production bắt buộc set |
+| `AUTH_JWT_SECRET` | Không có (bắt buộc ở mọi profile); giá trị dev trong `.env.example` | Khóa HS256 dùng chung với auth-service để verify token |
+| `INTERNAL_API_KEY` | Không có (bắt buộc ở mọi profile); giá trị dev trong `.env.example` | Khóa gọi API nội bộ |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://localhost:3000` | Các origin frontend được phép |
 | `EVENTS_LISTEN` | `true` | Bật consumer RabbitMQ |
 | `EVENTS_QUEUE` | `product.events.v2` | Queue nhận sự kiện |

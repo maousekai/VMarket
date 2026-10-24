@@ -11,15 +11,16 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.vmarket.product.config.OpenApiConfig;
 import com.vmarket.product.dto.CategoryRequest;
 import com.vmarket.product.dto.CategoryResponse;
 import com.vmarket.product.security.RequestIdentity;
 import com.vmarket.product.service.CategoryService;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 @RestController
@@ -38,41 +39,38 @@ public class CategoryController {
 		return service.tree(false);
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PostMapping("/admin/query")
-	public List<CategoryResponse> adminTree(
-			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
-		identity.requireAdmin(roles);
+	public List<CategoryResponse> adminTree() {
+		identity.requireAdmin();
 		return service.tree(true);
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PostMapping
-	public ResponseEntity<CategoryResponse> create(
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
-			@Valid @RequestBody CategoryRequest request) {
-		identity.requireAdmin(roles);
+	public ResponseEntity<CategoryResponse> create(@Valid @RequestBody CategoryRequest request) {
+		identity.requireAdmin();
 		return ResponseEntity.status(HttpStatus.CREATED).body(service.create(request));
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PutMapping("/{id}")
-	public CategoryResponse update(@PathVariable String id,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
-			@Valid @RequestBody CategoryRequest request) {
-		identity.requireAdmin(roles);
+	public CategoryResponse update(@PathVariable String id, @Valid @RequestBody CategoryRequest request) {
+		identity.requireAdmin();
 		return service.update(id, request);
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@PatchMapping("/{id}/visibility")
-	public CategoryResponse visibility(@PathVariable String id,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles,
-			@RequestBody VisibilityRequest request) {
-		identity.requireAdmin(roles);
+	public CategoryResponse visibility(@PathVariable String id, @RequestBody VisibilityRequest request) {
+		identity.requireAdmin();
 		return service.setVisibility(id, request.active());
 	}
 
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	@DeleteMapping("/{id}")
-	public ResponseEntity<Void> delete(@PathVariable String id,
-			@RequestHeader(value = "X-User-Roles", required = false) String roles) {
-		identity.requireAdmin(roles);
+	public ResponseEntity<Void> delete(@PathVariable String id) {
+		identity.requireAdmin();
 		service.delete(id);
 		return ResponseEntity.noContent().build();
 	}
