@@ -26,6 +26,14 @@ management:
         # 'metrics' cần cho alert dựa trên vmarket.outbox.pending / dead.total.
         include: health,info,metrics,prometheus
 
+# JWT (PBL6-49) - product-service chi VERIFY access token do auth-service ky
+# (HS256, khoa doi xung) nen dung chung AUTH_JWT_SECRET. Khong co mac dinh o day;
+# gia tri dev nam o application-dev.yml. Luu y: profile mac dinh dang la 'dev'
+# (dong 5) nen chi profile 'prod' moi fail khi thieu bien - xem PBL6-51.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}

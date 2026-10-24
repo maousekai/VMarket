@@ -29,7 +29,8 @@ cd services/product-service
 ```
 
 Service chạy tại `http://localhost:8084`. Profile `dev` được dùng mặc định và
-đọc cấu hình dev mặc định từ `src/main/resources/application.yml`.
+đọc cấu hình dev mặc định từ `src/main/resources/application.yml` và
+`application-dev.yml`.
 
 ## API
 
@@ -58,6 +59,12 @@ Swagger UI: <http://localhost:8084/swagger-ui.html> · spec: `/v3/api-docs`
 | POST | `/api/products/brands` | ADMIN | Tạo thương hiệu |
 | PUT | `/api/products/brands/{id}` | ADMIN | Cập nhật thương hiệu |
 | DELETE | `/api/products/brands/{id}` | ADMIN | Xóa thương hiệu nếu không còn được dùng |
+
+Các thao tác SELLER / ADMIN / chủ sản phẩm cần header
+`Authorization: Bearer <access token>` do auth-service phát hành. Service tự verify
+token (HS256, `AUTH_JWT_SECRET`) và lấy `sub` / `roles` từ token; header
+`X-User-Id` / `X-User-Roles` không còn được dùng. Thiếu hoặc sai token trả 401
+`UNAUTHORIZED`; sai vai trò trả 403 `FORBIDDEN`.
 
 Các bộ lọc của `GET /api/products`: `q`, `categoryId`, `shopId`, `minPrice`,
 `maxPrice`, `minRating`, `sort`, `page`, `size`. Mặc định sắp xếp `NEWEST`,
@@ -115,6 +122,7 @@ queue versioned `ai-search.events.v2`.
 | `MONGO_DIRECT_CONNECTION` | `true` | Kết nối Mongo local; production mặc định `false` |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` | RabbitMQ |
 | `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | `guest` / `guest` | Tài khoản RabbitMQ dev |
+| `AUTH_JWT_SECRET` | Giá trị dev trong `application-dev.yml` | Khóa HS256 dùng chung với auth-service để verify token; production bắt buộc set |
 | `INTERNAL_API_KEY` | Giá trị dev trong `.env.example` | Khóa gọi API nội bộ; production bắt buộc set |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://localhost:3000` | Các origin frontend được phép |
 | `EVENTS_LISTEN` | `true` | Bật consumer RabbitMQ |
