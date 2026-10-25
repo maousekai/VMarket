@@ -43,6 +43,8 @@ class JwtAuthenticationFilterTest {
 				"/api/auth/sessions",
 				"/api/auth/sessions/**",
 				"/api/auth/health",
+				"/api/ai/chat/messages",
+				"/api/ai/chat/health",
 				"/actuator/**"));
 		security.setPublicGetPaths(List.of("/api/products/**"));
 		security.setInternalDenyPaths(List.of("/api/*/internal/**"));
@@ -77,6 +79,31 @@ class JwtAuthenticationFilterTest {
 		MockHttpServletResponse res = new MockHttpServletResponse();
 		filter.doFilter(request("POST", "/api/auth/login", null), res, new MockFilterChain());
 		assertThat(res.getStatus()).isEqualTo(200);
+	}
+
+	@Test
+	void chatMessageIsPublicForGuestsButHistoryNeedsToken() throws Exception {
+		// Khách hỏi đáp chung không cần token (PBL6-18); token (nếu có) được chuyển
+		// nguyên vẹn để chatbot-service tự verify, còn X-User-* giả mạo vẫn bị strip.
+		MockHttpServletRequest message = request("POST", "/api/ai/chat/messages", "Bearer any-token");
+		message.addHeader("X-User-Id", "spoofed");
+		AtomicReference<String> userId = new AtomicReference<>("not-called");
+		AtomicReference<String> authorization = new AtomicReference<>();
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		filter.doFilter(message, response, (req, res) -> {
+			userId.set(((HttpServletRequest) req).getHeader("X-User-Id"));
+			authorization.set(((HttpServletRequest) req).getHeader(HttpHeaders.AUTHORIZATION));
+		});
+		assertThat(response.getStatus()).isEqualTo(200);
+		assertThat(userId.get()).isNull();
+		assertThat(authorization.get()).isEqualTo("Bearer any-token");
+
+		for (String path : List.of("/api/ai/chat/conversations", "/api/ai/chat/conversations/abc/messages",
+				"/api/ai/chat/tickets")) {
+			MockHttpServletResponse history = new MockHttpServletResponse();
+			filter.doFilter(request("GET", path, null), history, new MockFilterChain());
+			assertThat(history.getStatus()).as(path).isEqualTo(401);
+		}
 	}
 
 	@Test
