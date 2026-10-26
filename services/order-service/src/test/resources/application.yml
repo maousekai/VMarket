@@ -17,6 +17,12 @@ spring:
     enabled: false
 
 app:
+  jobs:
+    enabled: false
+  delivery:
+    internal-api-key: test-only-delivery-api-key-0123456789-0123456789
+  events:
+    listen: false
   cors:
     allowed-origins: http://localhost:5173
   cart-service:

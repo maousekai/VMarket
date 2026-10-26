@@ -1,0 +1,11 @@
+groups:
+  - name: order-outbox
+    rules:
+      - alert: OrderOutboxDead
+        expr: vmarket_order_outbox_dead > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Order outbox has DEAD events on {{ $labels.instance }}"
+          description: "Inspect GET /api/orders/admin/outbox/dead, fix the cause, then replay with an Admin token and a reason. Successors of the same order remain blocked until the predecessor is acknowledged."

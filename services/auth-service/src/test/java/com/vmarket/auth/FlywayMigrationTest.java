@@ -41,9 +41,9 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		// V1..V5 + V6 (PBL6-46) + V7 + V8 (PBL6-13) + V9 (PBL6-47) = 9 migration.
-		assertThat(current.getVersion().getVersion()).isEqualTo("9");
-		assertThat(flyway.info().applied()).hasSize(9);
+		// V10 adds idempotent administrator provisioning of shipper accounts (PBL6-20).
+		assertThat(current.getVersion().getVersion()).isEqualTo("10");
+		assertThat(flyway.info().applied()).hasSize(10);
 	}
 
 	@Test

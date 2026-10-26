@@ -10,23 +10,48 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: true
+      ddl-auto: validate
+    open-in-view: false
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
-
+    publisher-confirm-type: correlated
+    publisher-returns: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      connect-timeout: 2s
+  task:
+    scheduling:
+      pool:
+        size: 4
 server:
   port: ${SERVER_PORT:8088}
-
 management:
   endpoints:
     web:
       exposure:
         include: health,info,prometheus
-
+  endpoint:
+    health:
+      probes:
+        enabled: true
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
 app:
+  events:
+    confirmed-publication: true
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  delivery:
+    internal-api-key: ${INTERNAL_API_KEY}
+    auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    order-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+    shop-url: ${SHOP_SERVICE_URL:http://localhost:8083}
+    web-socket-url: ${DELIVERY_WS_URL:ws://localhost:8088/api/delivery/ws}

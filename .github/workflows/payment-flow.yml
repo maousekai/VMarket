@@ -1,0 +1,45 @@
+name: payment-flow-integration
+
+on:
+  pull_request:
+    branches: [dev, release, product]
+    paths:
+      - 'services/order-service/**'
+      - 'services/payment-service/**'
+      - 'services/product-service/**'
+      - 'services/shared-events/**'
+      - 'services/pom.xml'
+      - 'scripts/test-payment-flow.py'
+      - '.github/workflows/payment-flow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-flow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  race-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build and test actual services with isolated databases and broker
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          chmod +x services/mvnw
+          python3 scripts/test-payment-flow.py --build
+      - name: Preserve service logs and assertions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-flow-evidence
+          path: ${{ runner.temp }}/vmarket-payment-flow-*
