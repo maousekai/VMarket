@@ -24,8 +24,6 @@ jobs:
   race-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -34,6 +32,8 @@ jobs:
           java-version: '17'
           cache: maven
       - name: Build and test actual services with isolated databases and broker
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: |
           chmod +x services/mvnw
           python3 scripts/test-payment-flow.py --build
