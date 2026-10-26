@@ -171,6 +171,14 @@ class Suite:
             payload=json.dumps(envelope), payload_encoding="string"))
         assert result["routed"]
 
+    def drained(self):
+        # Query the broker itself: management HTTP queue statistics can lag several seconds.
+        output = run("docker", "exec", self.rb, "rabbitmqctl", "list_queues", "-q", "name",
+                     "messages_ready", "messages_unacknowledged")
+        rows = [line.split() for line in output.splitlines()]
+        rows = [row for row in rows if len(row) == 3 and row[1].isdigit() and row[2].isdigit()]
+        return len(rows) >= 6 and all(row[1:] == ["0", "0"] for row in rows if row[0] != "flow-audit")
+
     def start_service(self, name, options):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
@@ -281,7 +289,7 @@ class Suite:
             self.publish("PaymentSucceeded", dict(orderId=oid))
             self.publish("OrderStatusChanged", dict(orderId=oid, previousStatus="CANCELLED", status="CANCELLED", paymentMethod="PAYOS"))
         # Observe committed work and ACKs, not a fixed sleep, before checking duplicates.
-        wait_for("event consumers drained", lambda: all(q.get("messages", 0) == 0 for q in self.rabbit("GET", "/queues") if q["name"] != "flow-audit"))
+        wait_for("event consumers drained", self.drained)
         assert self.sql("vmarket_payment", f"select count(*) from refund_requests where payment_id={pid}") == "1"
         assert http("GET", self.order + "/api/orders/" + oid, token=self.token)["status"] == "CANCELLED"
         assert self.mongo(f"db.inventory_reservations.findOne({{orderId:'{oid}'}}).status") == "RELEASED"
