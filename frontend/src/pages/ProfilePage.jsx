@@ -27,14 +27,19 @@ function ProfileForm({ profile, session, saveProfile }) {
   async function onSubmit(event) {
     event.preventDefault()
     if (saving) return
-    const errors = validateProfile(values)
+    const normalized = {
+      ...values,
+      phone: String(values.phone ?? '').replace(/[\s.-]/g, ''),
+    }
+    const errors = validateProfile(normalized)
     setFieldErrors(errors)
     setSaved(false)
     setError('')
     if (Object.keys(errors).length) return
+    setValues(normalized)
     setSaving(true)
     try {
-      await saveProfile(values)
+      await saveProfile(normalized)
       setSaved(true)
     } catch (failure) {
       const apiError = getApiError(failure)
@@ -85,6 +90,7 @@ function ProfileForm({ profile, session, saveProfile }) {
             value={values.phone}
             onChange={onChange}
             autoComplete="tel"
+            maxLength={15}
             disabled={saving}
             placeholder="0905123456"
             aria-invalid={Boolean(fieldErrors.phone)}

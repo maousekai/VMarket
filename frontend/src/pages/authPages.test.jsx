@@ -134,6 +134,7 @@ describe('Login flow', () => {
   it('keeps a single registration entry point in the tabs and shows an email example', () => {
     renderPage(<LoginPage />, '/login')
     expect(screen.getByLabelText('Email').placeholder).toBe('example@gmail.com')
+    expect(screen.getByLabelText('Email').getAttribute('autocomplete')).toBe('username')
     expect(screen.getAllByRole('link', { name: 'Đăng ký tài khoản' })).toHaveLength(1)
     expect(screen.queryByRole('link', { name: 'Đăng ký ngay' })).toBeNull()
   })
@@ -175,13 +176,19 @@ describe('Login flow', () => {
 })
 
 describe('Registration flow', () => {
-  it('asks for username and phone and marks the current tab', () => {
+  it('asks for username and phone with the expected limits and marks the current tab', () => {
     renderPage(<RegisterPage />, '/register')
-    expect(screen.getByLabelText('Tên tài khoản')).toBeTruthy()
+    const username = screen.getByLabelText('Tên tài khoản')
     const phone = screen.getByLabelText('Số điện thoại')
+    const email = screen.getByLabelText('Email')
+    expect(username).toBeTruthy()
+    expect(username.maxLength).toBe(50)
+    expect(username.getAttribute('autocomplete')).toBe('nickname')
     expect(phone.placeholder).toBe('0912345678')
-    expect(phone.placeholder).not.toContain('0905 xxx')
-    expect(screen.getByLabelText('Email').placeholder).toBe('example@gmail.com')
+    expect(phone.maxLength).toBe(15)
+    expect(phone.getAttribute('inputmode')).toBe('tel')
+    expect(email.placeholder).toBe('example@gmail.com')
+    expect(email.getAttribute('autocomplete')).toBe('username')
     expect(
       screen.getByRole('link', { name: 'Đăng ký tài khoản' }).getAttribute('aria-current'),
     ).toBe('page')
@@ -198,16 +205,26 @@ describe('Registration flow', () => {
     expect(destination().path).toBe('/verify-email')
     expect(destination().state.otpError.code).toBe('EMAIL_SEND_FAILED')
     expect(registerAccount).toHaveBeenCalledTimes(1)
-    expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith({
-      email: active.email,
-      fullName: draft.fullName,
-      phone: draft.phone,
-    })
+    expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith(draft)
     expect(flow.auth.clearRegistrationDraft).toHaveBeenCalledOnce()
     expect(registerAccount.mock.calls[0][0]).toEqual({
       email: active.email,
       username: 'buyer.one',
       password: 'StrongPass1!',
+    })
+  })
+
+  it('normalizes a formatted phone before saving the registration draft', async () => {
+    registerAccount.mockResolvedValue({})
+    requestOtp.mockResolvedValue({})
+    const flow = renderPage(<RegisterPage />, '/register')
+    fillRegister()
+    change('Số điện thoại', '+84 912 345 678')
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo tài khoản' }))
+    await screen.findByTestId('destination')
+    expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith({
+      ...draft,
+      phone: '+84912345678',
     })
   })
 

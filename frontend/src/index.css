@@ -14,6 +14,7 @@
   background: #f9fafb;
   font-synthesis: none;
   --color-primary: #0670ce;
+  --color-primary-dark: #04427f;
   --color-text: #111827;
   --color-muted: #4b5563;
   --color-border: #e5e7eb;
@@ -80,7 +81,7 @@ p {
   text-decoration: none;
 }
 .button--primary {
-  background: linear-gradient(165deg, #04427f, #1073ca);
+  background: linear-gradient(165deg, var(--color-primary-dark), #1073ca);
   color: white;
 }
 .button--primary:hover {
@@ -205,7 +206,7 @@ p {
   display: flex;
   gap: 4px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #f3f4f6;
 }
 .auth-tabs a {
@@ -213,7 +214,7 @@ p {
   display: grid;
   place-items: center;
   border: 1px solid var(--color-primary);
-  border-radius: 10px;
+  border-radius: calc(var(--radius-md) - 4px);
   height: 38px;
   font-size: 14px;
   font-weight: 600;
@@ -223,13 +224,12 @@ p {
 }
 .auth-tabs a:hover {
   background: #f0f8ff;
-  text-decoration: none;
 }
 .auth-tabs a.active {
-  background: #04427f;
-  border-color: #04427f;
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
   color: white;
-  box-shadow: 0 2px 6px #04427f2e;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--color-primary-dark) 18%, transparent);
 }
 .auth-form {
   display: flex;
@@ -238,8 +238,14 @@ p {
 }
 .auth-form__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 140px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 1fr);
   gap: 14px;
+}
+/* The two-column auth layout squeezes the card on tablets; stack the row there. */
+@media (min-width: 701px) and (max-width: 900px) {
+  .auth-form__row {
+    grid-template-columns: 1fr;
+  }
 }
 @media (max-width: 480px) {
   .auth-form__row {
