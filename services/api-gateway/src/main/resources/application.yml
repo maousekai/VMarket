@@ -97,6 +97,12 @@ app:
       - /api/auth/login
       - /api/auth/register
       - /api/auth/refresh
+      # Email verification and password recovery must work before sign-in.
+      # Keep each endpoint exact; other auth operations remain protected.
+      - /api/auth/otp/request
+      - /api/auth/otp/verify
+      - /api/auth/password/forgot
+      - /api/auth/password/reset
       # Quan ly phien (PBL6-46) - dinh danh qua cookie refresh_token, KHONG qua
       # Authorization Bearer -> phai public o gateway giong /login,/refresh
       # (auth-service tu xac thuc lai bang chinh cookie nay).
@@ -106,6 +112,12 @@ app:
       - /api/auth/health
       # PayOS authenticates this exact endpoint with its signed webhook body.
       - /api/payments/webhooks/payos
+      # Chatbot (PBL6-18): khach chua dang nhap duoc hoi dap chung (FR-BOT-01) nen
+      # gui tin nhan la public. Gateway KHONG verify token o route nay -> chatbot-service
+      # tu verify Authorization Bearer (cung AUTH_JWT_SECRET) truoc khi tra cuu don
+      # hang / luu lich su. Lich su hoi thoai va phieu ho tro VAN can token o gateway.
+      - /api/ai/chat/messages
+      - /api/ai/chat/health
       - /actuator/**
       - /v3/api-docs/**
       - /v3/api-docs.yaml
@@ -121,6 +133,9 @@ app:
       # END GENERATED SEARCH ROUTES
       - /api/products/**
       - /api/shops/**
+      - /api/ai/recommendations/for-you
+      - /api/ai/recommendations/similar/*
+      - /api/ai/recommendations/health
     # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi
     # nhau trực tiếp qua URL nội bộ (BACKEND_SERVICES_HOST), kèm X-Internal-Api-Key.
     internal-deny-paths:

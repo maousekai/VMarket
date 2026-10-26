@@ -1,0 +1,5 @@
+# Build context = services/chatbot-service (docker build services/chatbot-service)
+*
+!*.py
+!requirements.txt
+!knowledge

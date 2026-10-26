@@ -142,19 +142,47 @@ class RefreshApiTest {
 	}
 
 	@Test
-	void refresh_whenAccountLocked_revokesAllTokens_and423() throws Exception {
+	void refresh_afterFiveBadLogins_preservesOtherDevices_andPasswordLock() throws Exception {
 		String rt1 = loginAndGetRefreshCookie();
+		String rt2 = loginAndGetRefreshCookie();
 
-		// Mô phỏng Admin khoá tài khoản thủ công (không qua luồng login sai mật khẩu).
-		user.setLockedUntil(Instant.now().plus(15, ChronoUnit.MINUTES));
+		for (int attempt = 1; attempt <= 5; attempt++) {
+			ResultActions failure = mockMvc.perform(post("/api/auth/login")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"email\":\"" + EMAIL + "\",\"password\":\"Wrong123@\"}"));
+			failure.andExpect(attempt < 5 ? status().isUnauthorized() : status().isLocked());
+		}
+		Instant lockedUntil = userRepository.findById(user.getId()).orElseThrow().getLockedUntil();
+		assertThat(lockedUntil).isAfter(Instant.now());
+		assertThat(refreshTokenRepository.findAll()).hasSize(2)
+				.allSatisfy(token -> assertThat(token.getRevokedAt()).isNull());
+
+		String rotated1 = newCookieFrom(refresh(rt1).andExpect(status().isOk()));
+		String rotated2 = newCookieFrom(refresh(rt2).andExpect(status().isOk()));
+		assertThat(refreshTokenRepository.findByTokenHash(tokenCodec.hash(rotated1)).orElseThrow().getRevokedAt())
+				.isNull();
+		assertThat(refreshTokenRepository.findByTokenHash(tokenCodec.hash(rotated2)).orElseThrow().getRevokedAt())
+				.isNull();
+		assertThat(userRepository.findById(user.getId()).orElseThrow().getLockedUntil()).isEqualTo(lockedUntil);
+
+		mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"" + EMAIL + "\",\"password\":\"" + PASSWORD + "\"}"))
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
+	}
+
+	@Test
+	void refresh_whenAdministrativelySuspended_revokesAllDevices_and423() throws Exception {
+		String rt1 = loginAndGetRefreshCookie();
+		loginAndGetRefreshCookie();
+		user.setSuspendedAt(Instant.now());
 		userRepository.save(user);
 
 		refresh(rt1).andExpect(status().isLocked())
-				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"))
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"))
 				.andExpect(cookie().maxAge(RefreshTokenCookieService.COOKIE_NAME, 0));
-
-		RefreshToken revoked = refreshTokenRepository.findByTokenHash(tokenCodec.hash(rt1)).orElseThrow();
-		assertThat(revoked.getRevokedAt()).isNotNull();
+		assertThat(refreshTokenRepository.findAll()).hasSize(2)
+				.allSatisfy(token -> assertThat(token.getRevokedAt()).isNotNull());
 	}
 
 	@Test

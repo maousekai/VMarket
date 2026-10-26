@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockCookie;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -121,6 +122,10 @@ class PasswordChangeApiTest {
 
 	@Test
 	void saiNamLan_khoaTam423_nhapDungCungBiChan() throws Exception {
+		String rt1 = login(PASSWORD).andExpect(status().isOk()).andReturn().getResponse()
+				.getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
+		String rt2 = login(PASSWORD).andExpect(status().isOk()).andReturn().getResponse()
+				.getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
 		for (int i = 1; i <= 4; i++) {
 			changePassword(user.getId(), "Wrong123@", NEW_PASSWORD).andExpect(status().isBadRequest());
 		}
@@ -133,6 +138,50 @@ class PasswordChangeApiTest {
 				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
 		// Chính sách khoá dùng chung với đăng nhập: đăng nhập cũng bị chặn.
 		login(PASSWORD).andExpect(status().isLocked());
+		assertThat(refreshTokenRepository.findAll()).hasSize(2)
+				.allSatisfy(token -> assertThat(token.getRevokedAt()).isNull());
+		Instant lockedUntil = userRepository.findById(user.getId()).orElseThrow().getLockedUntil();
+		for (String token : java.util.List.of(rt1, rt2)) {
+			mockMvc.perform(post("/api/auth/refresh")
+					.cookie(new MockCookie(RefreshTokenCookieService.COOKIE_NAME, token)))
+					.andExpect(status().isOk());
+		}
+		assertThat(userRepository.findById(user.getId()).orElseThrow().getLockedUntil()).isEqualTo(lockedUntil);
+	}
+
+	@Test
+	void loginVaDoiMatKhauSai_dungChungBoDem_vaKhoaThaoTacMatKhau() throws Exception {
+		login("Wrong123@").andExpect(status().isUnauthorized());
+		changePassword(user.getId(), "Wrong123@", NEW_PASSWORD).andExpect(status().isBadRequest());
+		login("Wrong123@").andExpect(status().isUnauthorized());
+		changePassword(user.getId(), "Wrong123@", NEW_PASSWORD).andExpect(status().isBadRequest());
+		assertThat(userRepository.findById(user.getId()).orElseThrow().getFailedLoginAttempts()).isEqualTo(4);
+		login("Wrong123@")
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
+		changePassword(user.getId(), PASSWORD, NEW_PASSWORD)
+				.andExpect(status().isLocked())
+				.andExpect(jsonPath("$.error.code").value("ACCOUNT_LOCKED"));
+	}
+
+	@Test
+	void khoaTamHetHan_doiMatKhauThanhCong_vaThuHoiMoiPhienCu() throws Exception {
+		String rt1 = login(PASSWORD).andExpect(status().isOk()).andReturn().getResponse()
+				.getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
+		String rt2 = login(PASSWORD).andExpect(status().isOk()).andReturn().getResponse()
+				.getCookie(RefreshTokenCookieService.COOKIE_NAME).getValue();
+		user.setLockedUntil(Instant.now().minusSeconds(1));
+		user.setFailedLoginAttempts(3);
+		userRepository.save(user);
+
+		changePassword(user.getId(), PASSWORD, NEW_PASSWORD).andExpect(status().isNoContent());
+		User after = userRepository.findById(user.getId()).orElseThrow();
+		assertThat(after.getLockedUntil()).isNull();
+		assertThat(after.getFailedLoginAttempts()).isZero();
+		for (String token : java.util.List.of(rt1, rt2)) {
+			assertThat(refreshTokenRepository.findByTokenHash(tokenCodec.hash(token)).orElseThrow().getRevokedAt())
+					.isNotNull();
+		}
 	}
 
 	@Test
