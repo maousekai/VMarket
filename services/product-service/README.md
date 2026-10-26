@@ -82,8 +82,14 @@ Phân quyền:
   (409 `SHOP_SUSPENDED`) ngay khi sự kiện được đồng bộ, không phụ thuộc token.
 - ADMIN chỉ kiểm duyệt sản phẩm và quản lý danh mục / thương hiệu.
 
-Giới hạn đã biết: token được verify stateless (chữ ký + hạn), nên đăng xuất hoặc
-khóa tài khoản ở auth-service chỉ có hiệu lực ở đây khi access token hết hạn.
+Giới hạn đã biết: token được verify stateless (chữ ký + hạn), không kiểm tra trạng
+thái tài khoản hay danh sách thu hồi. Đăng xuất hoặc khóa tài khoản ở auth-service
+chỉ có hiệu lực ở đây khi access token hết hạn. Khoảng trễ bị giới hạn bởi
+`AUTH_JWT_ACCESS_TTL` (mặc định 15 phút, SRS NFR-SEC-02 yêu cầu tối đa 30 phút):
+đăng xuất, khóa tài khoản và đổi / đặt lại mật khẩu đều thu hồi refresh token nên
+không lấy được access token mới. Cách này áp dụng cho mọi service verify token cục
+bộ; thu hồi tức thời cần cơ chế chung (ví dụ `token_version` trong claim), không
+xử lý riêng ở product-service.
 
 Các bộ lọc của `GET /api/products`: `q`, `categoryId`, `shopId`, `minPrice`,
 `maxPrice`, `minRating`, `sort`, `page`, `size`. Mặc định sắp xếp `NEWEST`,
