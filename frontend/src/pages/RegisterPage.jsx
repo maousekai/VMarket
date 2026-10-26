@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/AuthLayout'
 import FormField from '../components/FormField'
 import FormMessage from '../components/FormMessage'
@@ -78,17 +78,6 @@ export default function RegisterPage() {
       <FormMessage error={error} />
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy}>
         <FormField
-          label="Tên tài khoản"
-          name="username"
-          value={values.username}
-          onChange={change}
-          disabled={busy}
-          autoComplete="username"
-          error={fields.username}
-          hint="3–50 ký tự: chữ, số và . _ -"
-          required
-        />
-        <FormField
           label="Họ và tên"
           name="fullName"
           value={values.fullName}
@@ -98,6 +87,32 @@ export default function RegisterPage() {
           maxLength={100}
           error={fields.fullName}
         />
+        <div className="auth-form__row">
+          <FormField
+            label="Tên tài khoản"
+            name="username"
+            value={values.username}
+            onChange={change}
+            disabled={busy}
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            error={fields.username}
+            hint="3–50 ký tự: chữ, số và . _ -"
+            required
+          />
+          <FormField
+            label="Số điện thoại"
+            name="phone"
+            type="tel"
+            value={values.phone}
+            onChange={change}
+            disabled={busy}
+            autoComplete="tel"
+            placeholder="0912345678"
+            error={fields.phone}
+          />
+        </div>
         <FormField
           label="Email"
           name="email"
@@ -106,19 +121,12 @@ export default function RegisterPage() {
           onChange={change}
           disabled={busy}
           autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="example@gmail.com"
           error={fields.email}
+          maxLength={320}
           required
-        />
-        <FormField
-          label="Số điện thoại"
-          name="phone"
-          type="tel"
-          value={values.phone}
-          onChange={change}
-          disabled={busy}
-          autoComplete="tel"
-          error={fields.phone}
-          placeholder="0905 xxx xxx"
         />
         <FormField
           label="Mật khẩu"
@@ -147,9 +155,6 @@ export default function RegisterPage() {
           {busy ? 'Đang tạo tài khoản…' : 'Tạo tài khoản'}
         </button>
       </form>
-      <p className="auth-footer">
-        Đã có tài khoản? <Link to="/login">Đăng nhập</Link>
-      </p>
     </AuthLayout>
   )
 }

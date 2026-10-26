@@ -131,6 +131,13 @@ describe('Safe post-login navigation', () => {
 })
 
 describe('Login flow', () => {
+  it('keeps a single registration entry point in the tabs and shows an email example', () => {
+    renderPage(<LoginPage />, '/login')
+    expect(screen.getByLabelText('Email').placeholder).toBe('example@gmail.com')
+    expect(screen.getAllByRole('link', { name: 'Đăng ký tài khoản' })).toHaveLength(1)
+    expect(screen.queryByRole('link', { name: 'Đăng ký ngay' })).toBeNull()
+  })
+
   it('rejects username before calling the login API', async () => {
     const login = vi.fn()
     renderPage(<LoginPage />, '/login', { login })
@@ -168,6 +175,19 @@ describe('Login flow', () => {
 })
 
 describe('Registration flow', () => {
+  it('asks for username and phone and marks the current tab', () => {
+    renderPage(<RegisterPage />, '/register')
+    expect(screen.getByLabelText('Tên tài khoản')).toBeTruthy()
+    const phone = screen.getByLabelText('Số điện thoại')
+    expect(phone.placeholder).toBe('0912345678')
+    expect(phone.placeholder).not.toContain('0905 xxx')
+    expect(screen.getByLabelText('Email').placeholder).toBe('example@gmail.com')
+    expect(
+      screen.getByRole('link', { name: 'Đăng ký tài khoản' }).getAttribute('aria-current'),
+    ).toBe('page')
+    expect(screen.getByRole('link', { name: 'Đăng nhập' }).getAttribute('aria-current')).toBeNull()
+  })
+
   it('continues registration after OTP delivery fails without registering twice', async () => {
     registerAccount.mockResolvedValue({})
     requestOtp.mockRejectedValue(failure(503, 'EMAIL_SEND_FAILED', 'Chưa gửi được mã.'))
@@ -178,7 +198,11 @@ describe('Registration flow', () => {
     expect(destination().path).toBe('/verify-email')
     expect(destination().state.otpError.code).toBe('EMAIL_SEND_FAILED')
     expect(registerAccount).toHaveBeenCalledTimes(1)
-    expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith(draft)
+    expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith({
+      email: active.email,
+      fullName: draft.fullName,
+      phone: draft.phone,
+    })
     expect(flow.auth.clearRegistrationDraft).toHaveBeenCalledOnce()
     expect(registerAccount.mock.calls[0][0]).toEqual({
       email: active.email,

@@ -32,16 +32,22 @@ export function validateProfile({ fullName, phone }) {
   })
 }
 
-export function validateRegistration(values) {
+export function validateRegistration({
+  fullName,
+  email,
+  username,
+  phone,
+  password,
+  confirmPassword,
+}) {
   return compact({
-    ...validateProfile(values),
-    email: emailError(values.email),
-    username: !usernamePattern.test(values.username?.trim() || '')
+    ...validateProfile({ fullName, phone }),
+    email: emailError(email),
+    username: !usernamePattern.test(username?.trim() || '')
       ? 'Tên tài khoản 3–50 ký tự, chỉ gồm chữ, số và . _ -.'
       : undefined,
-    password: passwordError(values.password),
-    confirmPassword:
-      values.confirmPassword !== values.password ? 'Mật khẩu xác nhận không khớp.' : undefined,
+    password: passwordError(password),
+    confirmPassword: confirmPassword !== password ? 'Mật khẩu xác nhận không khớp.' : undefined,
   })
 }
 
