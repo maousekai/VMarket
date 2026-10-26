@@ -175,7 +175,7 @@ class DevAdminSeederTest {
 				.locations("classpath:db/migration", filesystem)
 				.load();
 		withLegacySeed.migrate();
-		assertThat(withLegacySeed.info().applied()).hasSize(10);
+		assertThat(withLegacySeed.info().applied()).hasSize(11);
 
 		Files.delete(seed);
 

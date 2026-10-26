@@ -15,7 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V3) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V8) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra —
  * cùng khuôn với {@code FlywayMigrationTest} của auth-service / user-service /
  * shop-service.
@@ -42,8 +42,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("3");
-		assertThat(flyway.info().applied()).hasSize(3);
+		assertThat(current.getVersion().getVersion()).isEqualTo("8");
+		assertThat(flyway.info().applied()).hasSize(8);
 	}
 
 	@Test
@@ -59,7 +59,7 @@ class FlywayMigrationTest {
 				assertThat(columnExists(c, "order_items", column))
 						.as("order_items.%s", column).isTrue();
 			}
-			// V3 - địa chỉ hai cấp: district được phép NULL.
+			// V8 - địa chỉ hai cấp: district được phép NULL.
 			assertThat(columnIsNullable(c, "orders", "district")).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.

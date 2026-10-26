@@ -19,7 +19,8 @@ public class PaymentSucceededInventoryConsumer implements EventConsumer<PaymentS
 		try {
 			inventoryService.confirmOrDefer(payload.orderId());
 		} catch (DuplicateKeyException ex) {
-			if (!inventoryService.isConfirmedOrPending(payload.orderId())) throw ex;
+            if (!inventoryService.isConfirmedOrPending(payload.orderId())
+                    && !inventoryService.isReleasedOrPending(payload.orderId())) throw ex;
 		}
 	}
 }

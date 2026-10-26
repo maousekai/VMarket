@@ -136,7 +136,9 @@ public class InventoryService {
 			defer(orderId, ReservationStatus.PENDING_CONFIRM);
 			return;
 		}
-		if (existing.get().getStatus() == ReservationStatus.PENDING_CONFIRM) return;
+        if (existing.get().getStatus() == ReservationStatus.PENDING_CONFIRM
+                || existing.get().getStatus() == ReservationStatus.PENDING_RELEASE
+                || existing.get().getStatus() == ReservationStatus.RELEASED) return;
 		confirm(orderId);
 	}
 
