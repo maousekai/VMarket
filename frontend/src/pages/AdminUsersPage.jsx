@@ -32,7 +32,18 @@ export default function AdminUsersPage() {
     let current = true
     searchUsers({ q: filters.q, status: filters.status, page: filters.page, size: PAGE_SIZE })
       .then((result) => {
-        if (current) setState({ status: 'ready', result, error: '' })
+        if (!current) return
+        // Trang cuối vừa rỗng sau khi khoá/mở khoá hoặc đổi bộ lọc (bản ghi cuối bị
+        // đẩy sang trang khác): lùi về trang cuối còn dữ liệu thay vì hiện bảng trống.
+        if (result.items.length === 0 && result.page > 0) {
+          const page = Math.max(result.totalPages - 1, 0)
+          if (page !== result.page) {
+            setState((previous) => ({ ...previous, status: 'loading' }))
+            setFilters((previous) => ({ ...previous, page }))
+            return
+          }
+        }
+        setState({ status: 'ready', result, error: '' })
       })
       .catch((failure) => {
         if (current)

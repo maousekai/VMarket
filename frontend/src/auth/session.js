@@ -98,11 +98,7 @@ export function createSessionManager({
   eventTarget = typeof window !== 'undefined' ? window : null,
   documentTarget = typeof document !== 'undefined' ? document : null,
   delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  makeKey = () =>
-    globalThis.crypto.randomUUID?.() ||
-    Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join(''),
+  makeKey = userApi.newIdempotencyKey,
 } = {}) {
   const restoredDraft = restoreDraft(draftStorage, now())
   let snapshot = {
@@ -395,9 +391,6 @@ export function createSessionManager({
 
   function saveProfile(changes) {
     const session = requireActiveSession()
-    if (saveFlight?.userId === session.userId && saveFlight.generation === generation)
-      return saveFlight.promise
-    const expected = generation
     const signature = JSON.stringify({
       fullName: changes.fullName,
       phone: changes.phone,
@@ -405,6 +398,16 @@ export function createSessionManager({
       dateOfBirth: changes.dateOfBirth,
       gender: changes.gender,
     })
+    if (saveFlight?.userId === session.userId && saveFlight.generation === generation) {
+      if (saveFlight.signature === signature) return saveFlight.promise
+      return Promise.reject(
+        clientError(
+          'PROFILE_SAVE_IN_PROGRESS',
+          'Đang lưu một thay đổi khác. Vui lòng đợi hoàn tất rồi thử lại.',
+        ),
+      )
+    }
+    const expected = generation
     const promise = (async () => {
       try {
         if (pendingSave?.userId !== session.userId || pendingSave.signature !== signature) {
@@ -434,7 +437,7 @@ export function createSessionManager({
     })().finally(() => {
       if (saveFlight?.promise === promise) saveFlight = undefined
     })
-    saveFlight = { userId: session.userId, generation: expected, promise }
+    saveFlight = { userId: session.userId, generation: expected, signature, promise }
     return promise
   }
 

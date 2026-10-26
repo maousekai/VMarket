@@ -15,7 +15,6 @@ import AddressBookPage from './pages/AddressBookPage'
 import AdminLayout from './components/AdminLayout'
 import AdminNotFoundPage from './pages/AdminNotFoundPage'
 import AdminPlaceholderPage from './pages/AdminPlaceholderPage'
-import AdminUsersPage from './pages/AdminUsersPage'
 import { adminSections } from './pages/adminSections'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import SellerPage from './pages/SellerPage'
@@ -42,13 +41,8 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route element={<RouteGuard roles={['ADMIN']} />}>
           <Route path="/admin" element={<AdminLayout />}>
-            {adminSections.map((section) => {
-              const element =
-                section.path === 'users' ? (
-                  <AdminUsersPage />
-                ) : (
-                  <AdminPlaceholderPage section={section} />
-                )
+            {adminSections.map(({ Component, ...section }) => {
+              const element = Component ? <Component /> : <AdminPlaceholderPage section={section} />
               return section.path === '' ? (
                 <Route key="overview" index element={element} />
               ) : (

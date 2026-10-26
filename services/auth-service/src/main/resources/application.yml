@@ -15,6 +15,11 @@ spring:
       ddl-auto: validate
     show-sql: true
   flyway:
+    # DB dev tung chay migration R__seed_dev_admin (da xoa khi chuyen sang code
+    # seeder). Chi bo qua dung repeatable migration da mat; migration V* thieu van
+    # bao loi de khong bo sot schema. Ap dung ca prod: DB tung chay dev roi deploy
+    # bang prod van khoi dong duoc.
+    ignore-migration-patterns: "repeatable:missing"
     enabled: true
     locations: classpath:db/migration
     # Cho phep migrate tren DB da co bang (vd vmarket_auth tao san boi container)

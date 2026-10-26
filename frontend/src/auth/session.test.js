@@ -625,6 +625,60 @@ describe('profile persistence', () => {
     await rejected
     expect(manager.getSnapshot().userProfile).toBeNull()
   })
+
+  it('reuses an in-flight profile save only when the changes are identical', async () => {
+    const current = {
+      userId: 'user-1',
+      fullName: 'Old',
+      phone: '0912345678',
+      avatarUrl: null,
+      dateOfBirth: null,
+      gender: null,
+    }
+    const request = deferred()
+    const { manager, profiles } = setup({
+      profiles: {
+        getMyProfile: vi.fn().mockResolvedValue(current),
+        updateMyProfile: vi.fn(() => request.promise),
+      },
+    })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    const changes = { fullName: 'Nguyễn An', phone: '0987654321' }
+    const first = manager.saveProfile(changes)
+    const second = manager.saveProfile({ ...changes })
+    expect(second).toBe(first)
+    request.resolve({ ...current, ...changes })
+    await first
+    expect(profiles.updateMyProfile).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a different save while another profile save is in flight', async () => {
+    const current = {
+      userId: 'user-1',
+      fullName: 'Old',
+      phone: '0912345678',
+      avatarUrl: null,
+      dateOfBirth: null,
+      gender: null,
+    }
+    const request = deferred()
+    const { manager, profiles } = setup({
+      profiles: {
+        getMyProfile: vi.fn().mockResolvedValue(current),
+        updateMyProfile: vi.fn(() => request.promise),
+      },
+    })
+    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+    const first = manager.saveProfile({ fullName: 'Nguyễn An', phone: '' })
+    await expect(manager.saveProfile({ fullName: 'Trần Bình', phone: '' })).rejects.toMatchObject({
+      code: 'PROFILE_SAVE_IN_PROGRESS',
+    })
+    request.resolve({ ...current, fullName: 'Nguyễn An', phone: null })
+    await first
+    // The rejected call must not start a second request or reuse the first one's response.
+    expect(profiles.updateMyProfile).toHaveBeenCalledOnce()
+    expect(manager.getSnapshot().userProfile.fullName).toBe('Nguyễn An')
+  })
 })
 
 describe('birth date and gender editing', () => {

@@ -189,6 +189,21 @@ describe('Admin user list', () => {
     expect(await screen.findByText('Không tìm thấy người dùng phù hợp.')).toBeTruthy()
   })
 
+  it('falls back to the last page when the current page becomes empty', async () => {
+    searchUsers
+      .mockResolvedValueOnce(page([binh], { totalElements: 11, totalPages: 2 }))
+      .mockResolvedValueOnce(page([], { page: 1, totalElements: 10, totalPages: 1 }))
+      .mockResolvedValueOnce(page([binh], { page: 0, totalElements: 10, totalPages: 1 }))
+    view()
+    await nameButton('Nguyễn Văn Bình')
+    click('Sau')
+    await waitFor(() =>
+      expect(searchUsers).toHaveBeenLastCalledWith({ q: '', status: '', page: 0, size: 10 }),
+    )
+    expect(await nameButton('Nguyễn Văn Bình')).toBeTruthy()
+    expect(screen.getByText('Trang 1 / 1')).toBeTruthy()
+  })
+
   it('shows the server message for a too broad search and recovers on retry', async () => {
     searchUsers
       .mockRejectedValueOnce(apiFailure(400, 'SEARCH_TOO_BROAD', 'Từ khoá quá rộng, hãy thu hẹp.'))

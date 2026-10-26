@@ -16,7 +16,7 @@ const accountLinks = [
 // Shared frame of the account pages: breadcrumb, identity summary and section navigation.
 export default function AccountLayout({ title, current, canChangeAvatar = false, children }) {
   const location = useLocation()
-  const { session, userProfile, saveProfile } = useAuth()
+  const { session, userProfile, profileState, saveProfile } = useAuth()
   const [changingAvatar, setChangingAvatar] = useState(false)
   const displayName = userProfile?.fullName || session.username
   return (
@@ -36,7 +36,12 @@ export default function AccountLayout({ title, current, canChangeAvatar = false,
           <section className="account-card account-summary">
             <AccountAvatar name={displayName} avatarUrl={userProfile?.avatarUrl} large />
             {canChangeAvatar && userProfile && (
-              <button className="link-button" type="button" onClick={() => setChangingAvatar(true)}>
+              <button
+                className="link-button"
+                type="button"
+                disabled={profileState === 'loading'}
+                onClick={() => setChangingAvatar(true)}
+              >
                 Đổi ảnh đại diện
               </button>
             )}

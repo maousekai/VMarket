@@ -64,7 +64,8 @@ describe('form validation against backend contracts', () => {
 })
 
 describe('profile date of birth and gender', () => {
-  const today = new Date(2026, 9, 21)
+  // 10:00 ngày 21/10/2026 giờ Việt Nam — mốc cố định để test không phụ thuộc TZ máy chạy.
+  const today = new Date('2026-10-21T03:00:00Z')
 
   it('accepts empty, past dates and every backend gender value', () => {
     expect(validateProfile({ dateOfBirth: '', gender: '' }, today)).toEqual({})
@@ -80,6 +81,21 @@ describe('profile date of birth and gender', () => {
     expect(validateProfile({ dateOfBirth: '2001-02-30' }, today)).toHaveProperty('dateOfBirth')
     expect(validateProfile({ dateOfBirth: '12/08/1998' }, today)).toHaveProperty('dateOfBirth')
     expect(validateProfile({ gender: 'ROBOT' }, today)).toHaveProperty('gender')
+  })
+
+  it('compares the birth date with the calendar day in Vietnam', () => {
+    // 18:00 UTC = 01:00 ngày 22/10 ở Việt Nam: ngày 21 đã là quá khứ.
+    const afterVnMidnight = new Date('2026-10-21T18:00:00Z')
+    expect(validateProfile({ dateOfBirth: '2026-10-21' }, afterVnMidnight)).toEqual({})
+    expect(validateProfile({ dateOfBirth: '2026-10-22' }, afterVnMidnight)).toHaveProperty(
+      'dateOfBirth',
+    )
+
+    // 16:59 UTC = 23:59 ngày 21/10 ở Việt Nam: ngày 21 vẫn là hôm nay.
+    const beforeVnMidnight = new Date('2026-10-21T16:59:00Z')
+    expect(validateProfile({ dateOfBirth: '2026-10-21' }, beforeVnMidnight)).toHaveProperty(
+      'dateOfBirth',
+    )
   })
 })
 

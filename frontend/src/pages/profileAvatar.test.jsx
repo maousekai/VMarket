@@ -63,6 +63,14 @@ describe('Change avatar dialog', () => {
     expect(screen.queryByRole('button', { name: 'Đổi ảnh đại diện' })).toBeNull()
   })
 
+  it('disables avatar changes while the profile is loading', () => {
+    renderPage(<ProfilePage />, { profileState: 'loading' })
+    const button = screen.getByRole('button', { name: 'Đổi ảnh đại diện' })
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('opens a dialog with the current avatar URL', async () => {
     renderPage()
     openDialog()

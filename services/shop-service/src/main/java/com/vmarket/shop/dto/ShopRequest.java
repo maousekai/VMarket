@@ -64,8 +64,8 @@ public record ShopRequest(
 		@Size(max = 100, message = "Tỉnh/thành phố tối đa 100 ký tự")
 		String province,
 
-		@Schema(example = "Hội An")
-		@NotBlank(message = "Quận/huyện không được để trống")
+		@Schema(example = "Hội An",
+				description = "Quận/huyện — không bắt buộc từ 01/07/2025 (Đà Nẵng bỏ cấp này)")
 		@Size(max = 100, message = "Quận/huyện tối đa 100 ký tự")
 		String district,
 

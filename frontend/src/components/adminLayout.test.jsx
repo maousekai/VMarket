@@ -39,13 +39,12 @@ function view(path = '/admin', value = auth()) {
           <Route path="/profile" element={<p>trang hồ sơ</p>} />
           <Route path="/" element={<p>trang chủ</p>} />
           <Route path="/admin" element={<AdminLayout />}>
-            {adminSections.map((section) => {
-              const element =
-                section.path === 'users' ? (
-                  <p>danh sách người dùng</p>
-                ) : (
-                  <AdminPlaceholderPage section={section} />
-                )
+            {adminSections.map(({ Component, ...section }) => {
+              const element = Component ? (
+                <p>trang {section.label}</p>
+              ) : (
+                <AdminPlaceholderPage section={section} />
+              )
               return section.path === '' ? (
                 <Route key="overview" index element={element} />
               ) : (
@@ -121,12 +120,12 @@ describe('Admin sidebar', () => {
     expect(screen.getByRole('heading', { name: 'Giám sát đơn hàng' })).toBeTruthy()
     expect(current()).toEqual(['Giám sát đơn hàng'])
     fireEvent.click(nav().getByRole('link', { name: 'Quản lý người dùng' }))
-    expect(screen.getByText('danh sách người dùng')).toBeTruthy()
+    expect(screen.getByText('trang Quản lý người dùng')).toBeTruthy()
     expect(current()).toEqual(['Quản lý người dùng'])
   })
 
   it('leaves the sections without a design empty', () => {
-    for (const section of adminSections.filter((item) => !item.built)) {
+    for (const section of adminSections.filter((item) => !item.Component)) {
       view(section.to)
       expect(screen.getByRole('heading', { level: 1, name: section.title })).toBeTruthy()
       expect(screen.getByText('Chức năng này đang được phát triển.')).toBeTruthy()

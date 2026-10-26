@@ -8,10 +8,14 @@ spring:
     # Trong container: bien DB_HOST=postgres / DB_PORT=5432 se ghi de default nay.
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:vmarket_auth}
 
-  flyway:
-    # Chi dev: nap them tai khoan ADMIN mau (db/dev/R__seed_dev_admin.sql).
-    # KHONG them db/dev vao application.yml / application-prod.yml.
-    locations: classpath:db/migration,classpath:db/dev
+app:
+  # Tai khoan ADMIN mau cho dev/e2e, tao bang code (DevAdminSeeder) - khong dung
+  # Flyway de DB doi profile dev -> prod khong bi ket trong flyway_schema_history.
+  # Password de trong -> seeder sinh mat khau ngau nhien va ghi ra log mot lan.
+  dev-admin:
+    email: ${DEV_ADMIN_EMAIL:admin@vmarket.local}
+    username: ${DEV_ADMIN_USERNAME:admin.vmarket}
+    password: ${DEV_ADMIN_PASSWORD:}
 
 auth:
   jwt:

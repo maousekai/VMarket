@@ -24,14 +24,30 @@ export const validateLogin = ({ email, password }) =>
 
 const genders = ['MALE', 'FEMALE', 'OTHER', 'UNDISCLOSED']
 
+const vnDate = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Ho_Chi_Minh',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+// The product is Vietnam-only: the birth-date boundary must not move with the browser's timezone.
+function dateInVietnam(date) {
+  const parts = Object.fromEntries(
+    vnDate
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  )
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
 function dateOfBirthError(value, today) {
   if (!value) return undefined
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   const date = match && new Date(Date.UTC(+match[1], +match[2] - 1, +match[3]))
   if (!date || date.toISOString().slice(0, 10) !== value) return 'Ngày sinh không hợp lệ.'
-  const pad = (number) => String(number).padStart(2, '0')
-  const todayText = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
-  if (value >= todayText) return 'Ngày sinh phải ở quá khứ.'
+  if (value >= dateInVietnam(today)) return 'Ngày sinh phải ở quá khứ.'
 }
 
 export function validateProfile({ fullName, phone, dateOfBirth, gender }, today = new Date()) {
