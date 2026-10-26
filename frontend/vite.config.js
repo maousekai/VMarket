@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
+      watch: {
+        ignored: ['**/.cache/**', '**/test-results/**', '**/playwright-report/**'],
+      },
       // Dev server proxy /api -> API Gateway, giong vai tro cua nginx trong
       // container. Nho vay code FE luon goi duong dan tuong doi (/api/...),
       // cung origin ca khi dev lan khi chay docker => khong dinh CORS.

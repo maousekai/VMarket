@@ -1,4 +1,5 @@
 * text=auto
+frontend/** text eol=lf
 
 # Shell scripts phải là LF
 *.sh text eol=lf

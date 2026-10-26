@@ -1,0 +1,77 @@
+name: recommendation-service
+on:
+  push:
+    branches: [dev, release, product]
+    paths: ['services/recommendation-service/**', 'docs/openapi/recommendation-service.yaml', 'docs/event-bus.md', '.github/workflows/recommendation-service.yml', '.dockerignore', 'services/pom.xml', 'services/mvnw', 'services/.mvn/**']
+  pull_request:
+    branches: [dev, release, product]
+    paths: ['services/recommendation-service/**', 'docs/openapi/recommendation-service.yaml', 'docs/event-bus.md', '.github/workflows/recommendation-service.yml', '.dockerignore', 'services/pom.xml', 'services/mvnw', 'services/.mvn/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: recommendation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/recommendation-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/recommendation-service/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests/unit -v
+      - run: pip-audit -r requirements.txt
+  infrastructure:
+    runs-on: ubuntu-latest
+    env:
+      RECOMMENDATION_INTEGRATION: 'true'
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_NAME: vmarket_recommendation_test
+      DB_USERNAME: vmarket
+      DB_PASSWORD: vmarket
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: vmarket_recommendation_test
+          POSTGRES_USER: vmarket
+          POSTGRES_PASSWORD: vmarket
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready -U vmarket" --health-interval=5s --health-timeout=5s --health-retries=15
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=15
+      rabbitmq:
+        image: rabbitmq:4-management-alpine
+        ports: ['5672:5672']
+        options: --health-cmd="rabbitmq-diagnostics -q ping" --health-interval=5s --health-timeout=5s --health-retries=30
+    defaults:
+      run:
+        working-directory: services/recommendation-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - run: pip install -r requirements-dev.txt
+      - run: python manage.py migrate
+      - run: python -m unittest discover -s tests/integration -v
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f services/recommendation-service/Dockerfile -t vmarket-recommendation:test .

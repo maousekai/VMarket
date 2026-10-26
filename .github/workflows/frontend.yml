@@ -1,0 +1,73 @@
+name: frontend
+
+on:
+  push:
+    branches: [dev, release, product]
+    paths: ['frontend/**', '.github/workflows/frontend.yml']
+  pull_request:
+    branches: [dev, release, product]
+    paths:
+      - 'frontend/**'
+      - 'services/api-gateway/**'
+      - 'services/auth-service/**'
+      - 'services/user-service/**'
+      - 'services/shop-service/**'
+      - 'infra/postgres/init/**'
+      - '.github/workflows/frontend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test
+      - run: npm run build
+
+  auth-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Build and start isolated Java 17/PostgreSQL stack
+        run: docker compose -p vmarket-auth-e2e -f frontend/e2e/compose.yml up -d --build --wait --wait-timeout 300
+      - run: npm run test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: auth-e2e-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+      - name: Stop disposable stack
+        if: always()
+        run: docker compose -p vmarket-auth-e2e -f frontend/e2e/compose.yml down -v

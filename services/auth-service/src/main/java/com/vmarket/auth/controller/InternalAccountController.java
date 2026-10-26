@@ -64,7 +64,8 @@ public class InternalAccountController {
 
 	@Operation(summary = "Đổi mật khẩu (FR-USER-03)",
 			description = "Kiểm tra mật khẩu hiện tại rồi đặt mật khẩu mới. Nhập sai tính chung bộ đếm "
-					+ "với đăng nhập sai (5 lần → khoá 15 phút). Thành công → thu hồi mọi refresh token.")
+					+ "với đăng nhập sai (5 lần → khoá thao tác mật khẩu 15 phút, giữ các phiên đang có). "
+					+ "Thành công → thu hồi mọi refresh token.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "204", description = "Đổi thành công"),
 			@ApiResponse(responseCode = "400",

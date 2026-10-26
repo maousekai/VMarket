@@ -1,0 +1,110 @@
+# Isolated, disposable acceptance stack. Never mounts the normal development DB.
+name: vmarket-auth-e2e
+
+x-backend: &backend
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USERNAME: vmarket
+  DB_PASSWORD: e2e-only-password
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+  RABBITMQ_USERNAME: guest
+  RABBITMQ_PASSWORD: guest
+  AUTH_JWT_SECRET: e2e-only-jwt-secret-0123456789-0123456789-0123456789
+  INTERNAL_API_KEY: e2e-only-internal-key-0123456789-0123456789
+  SPRING_PROFILES_ACTIVE: dev
+  CORS_ALLOWED_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+  APP_CORS_ALLOWED_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+  # Dockerfile health checks call /actuator/health/liveness outside Kubernetes.
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  LOGGING_STRUCTURED_FORMAT_CONSOLE: ''
+  JAVA_OPTS: -XX:MaxRAMPercentage=70.0
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vmarket
+      POSTGRES_PASSWORD: e2e-only-password
+      POSTGRES_DB: vmarket_auth
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ../../infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vmarket -d vmarket_auth']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  auth-service:
+    build:
+      context: ../..
+      dockerfile: services/auth-service/Dockerfile
+    environment:
+      <<: *backend
+      DB_NAME: vmarket_auth
+      AUTH_EMAIL_PROVIDER: log
+      AUTH_REFRESH_COOKIE_SECURE: 'false'
+      AUTH_REFRESH_COOKIE_SAMESITE: Lax
+      AUTH_JWT_ACCESS_TTL: ${E2E_ACCESS_TTL:-30s}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  user-service:
+    build:
+      context: ../..
+      dockerfile: services/user-service/Dockerfile
+    environment:
+      <<: *backend
+      DB_NAME: vmarket_user
+      AUTH_SERVICE_URL: http://auth-service:8081
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  shop-service:
+    build:
+      context: ../..
+      dockerfile: services/shop-service/Dockerfile
+    environment:
+      <<: *backend
+      DB_NAME: vmarket_shop
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: ../..
+      dockerfile: services/api-gateway/Dockerfile
+    environment:
+      <<: *backend
+      AUTH_SERVICE_URL: http://auth-service:8081
+      USER_SERVICE_URL: http://user-service:8082
+      SHOP_SERVICE_URL: http://shop-service:8083
+      APP_RATE_LIMIT_ENABLED: 'false'
+    ports:
+      - '127.0.0.1:${E2E_GATEWAY_PORT:-8080}:8080'
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      shop-service:
+        condition: service_healthy
