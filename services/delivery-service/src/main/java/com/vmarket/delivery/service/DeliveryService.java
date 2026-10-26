@@ -585,13 +585,16 @@ order by s.id limit ? offset ?
         throw forbidden();
     }
 
+    private Assignment lookupOrder(String order) {
+        return repo.findOrder(order, false)
+                .orElseThrow(
+                        () ->
+                                ApiException.notFound(
+                                        "DELIVERY_NOT_FOUND", "Đơn chưa có chuyến giao"));
+    }
+
     public Assignment order(String order, String actor, boolean admin) {
-        Assignment a =
-                repo.findOrder(order, false)
-                        .orElseThrow(
-                                () ->
-                                        ApiException.notFound(
-                                                "DELIVERY_NOT_FOUND", "Đơn chưa có chuyến giao"));
+        Assignment a = lookupOrder(order);
         scope(a, actor, admin);
         return a;
     }
@@ -604,7 +607,7 @@ order by s.id limit ? offset ?
     }
 
     public Assignment trackingOrder(String order, String actor, boolean admin) {
-        Assignment a = order(order, actor, admin);
+        Assignment a = lookupOrder(order);
         trackingScope(a, actor, admin);
         return a;
     }

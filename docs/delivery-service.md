@@ -4,7 +4,7 @@
 
 Delivery chạy cổng 8088, dùng PostgreSQL riêng, Redis (cache LocationPing, vé WebSocket và pub/sub giữa các instance), RabbitMQ (sự kiện nghiệp vụ). Flyway quản lý schema. JWT và `INTERNAL_API_KEY` phải trùng Auth/Order. Không dùng root `.env` thay cho `.env` của service.
 
-**Merge PBL6-19 / PR #29 trước PBL6-20.** Nhánh PBL6-20 đã đồng bộ commit `31fc364` của PBL6-19, gồm bản sửa review về hủy đơn và trạng thái link PayOS. Order giữ các binding Payment/Stock và DeliveryStatusChanged trong một khối cấu hình. Migration Order V5/V6 chuyển nguyên các sự kiện chờ từ `delivery_order_outbox` sang `event_outbox`, bổ sung khóa theo đơn và lịch retry, rồi bỏ bảng/worker cũ. Order dùng trực tiếp các trường thanh toán và `stockReserved` của PBL6-19. Chưa giữ tồn kho, chưa thanh toán, hoặc đơn đã huỷ đều không được giao.
+**Merge PBL6-19 / PR #29 trước PBL6-20.** Nhánh PBL6-20 đã đồng bộ toàn bộ bản sửa Payment theo review ngày 22/10, gồm API khôi phục outbox và kiểm thử thanh toán/hủy đơn. Order giữ các binding Payment/Stock và DeliveryStatusChanged trong một khối cấu hình. Migration Order V5/V6 chuyển nguyên các sự kiện chờ từ `delivery_order_outbox` sang `event_outbox`, bổ sung khóa theo đơn và lịch retry, rồi bỏ bảng/worker cũ. Order dùng trực tiếp các trường thanh toán và `stockReserved` của PBL6-19. Chưa giữ tồn kho, chưa thanh toán, hoặc đơn đã huỷ đều không được giao.
 
 API nội bộ Delivery của Order dùng cấu hình riêng `app.delivery.internal-api-key`, cùng biến môi trường `INTERNAL_API_KEY`; không phụ thuộc cấu hình Cart. Không sửa các migration đã phát hành; Delivery nâng tiếp qua V3/V4, Order qua V5/V6.
 
