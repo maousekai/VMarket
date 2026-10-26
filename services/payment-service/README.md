@@ -163,3 +163,11 @@ resolving service dependencies. This matches the existing Shop/Product image bui
 The change is limited to these two build recipes; Compose is unchanged. Maven dependency
 resolution and package commands were validated locally; actual image build and smoke checks
 are verified separately by GitHub CI.
+
+### Review ngày 22/10/2026
+
+Order có API Admin khôi phục event DEAD, audit, metric và alert mà vẫn giữ thứ tự
+theo đơn. Cách vận hành và chạy kiểm thử liên service có barrier xem
+[outbox-recovery.md](../../docs/outbox-recovery.md). Suite chạy các service nghiệp vụ,
+PostgreSQL, RabbitMQ và MongoDB thật; Cart/User/PayOS là HTTP stub. Hoàn tiền vẫn là
+quy trình Admin xác nhận chuyển khoản thủ công, có audit.
