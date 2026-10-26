@@ -26,8 +26,8 @@ Mọi REST API dưới `/api/delivery` dùng `Authorization: Bearer <access toke
 | Shipper | POST `/shipper/assignments/{id}/location` | `{"latitude":16.04,"longitude":108.21}` |
 | Shipper/Admin | POST `/{shipper\|admin}/assignments/{id}/retry` | Tối đa hai lần giao lại |
 | Buyer/Seller/Shipper/Admin | GET `/orders/{orderId}` | Seller chỉ nhận item/pickup của shop mình; không có địa chỉ, liên hệ người mua, tổng COD, snapshot đơn hoặc item của shop khác |
-| Cùng quyền trên | GET `/orders/{orderId}/route?page=0&size=100` | Lịch sử GPS theo thứ tự, tối đa 500 điểm/trang |
-| Cùng quyền trên | POST `/orders/{orderId}/tracking-ticket` | Vé WebSocket dùng một lần, sống 30 giây |
+| Buyer/Shipper phụ trách/Admin | GET `/orders/{orderId}/route?page=0&size=100` | Lịch sử GPS theo thứ tự, tối đa 500 điểm/trang; Seller nhận 403 |
+| Buyer/Shipper phụ trách/Admin | POST `/orders/{orderId}/tracking-ticket` | Vé WebSocket dùng một lần, sống 30 giây; Seller nhận 403 |
 
 Body tạo shipper:
 
@@ -88,3 +88,34 @@ DeliveryApiTest kiểm tra JWT/quyền, bàn giao nhiều shop, trạng thái/CO
 Regression outbox tạo 100 DeliveryAssigned lỗi trước trạng thái/COD hợp lệ, xác nhận sự kiện phía sau vẫn đi qua và bản ghi lỗi còn nguyên. Test retry kiểm tra thời điểm đến hạn, giới hạn 5 phút, DEAD và khởi động lại dispatcher. Test migration giữ payload, route sequence và khu vực khi nâng Delivery V1 lên V4; Order V4 lên V6 giữ cả hai outbox cũ. Test hai worker đồng thời kiểm tra khóa trên H2; vẫn cần kiểm tra PostgreSQL/RabbitMQ/Redis thật trước khi triển khai.
 
 Các test review bổ sung: NFC/NFD/tiền tố địa chỉ, gán vượt khu vực có audit, GPS xen giữa thao tác trạng thái/retry, thu hồi hàng từ shipper bị khóa ở bốn trạng thái, hoàn hàng bởi admin, Auth lỗi sau claim, dữ liệu riêng từng shop, cache quyền WebSocket và hạn JWT. Order kiểm tra tách khóa Delivery khỏi Cart, không kẹt đơn khác khi sự kiện lỗi và giữ thứ tự sự kiện cùng đơn.
+
+## Review ngày 22/10/2026
+
+Order vẫn giữ thứ tự tuyệt đối trong từng đơn, nhưng event DEAD có API Admin replay,
+audit bền vững, metric và alert vận hành. Xem [outbox-recovery.md](outbox-recovery.md)
+để khôi phục bằng API; dùng API thay cho cập nhật SQL thủ công ở hướng dẫn cũ.
+Migration Order V7 chỉ thêm bảng audit, không sửa payload/sequence cũ.
+
+Delivery V5 thêm lịch thử phân công và lease lưu trong PostgreSQL. Worker mặc định
+quét mỗi 5 giây, tối đa 20 chuyến/lần; chỉ nhận `WAITING_ASSIGNMENT`, vì vậy không
+giao đơn chưa bàn giao đủ hoặc giành lại đơn Admin đã gán. Khi thiếu shipper hoặc
+Auth tạm lỗi, thử lại sau 5 giây, tăng gấp đôi tới tối đa 5 phút. Các cột
+`assignment_attempts`, `next_assignment_at`, `assignment_claim_until` cho phép kiểm tra
+lịch đang chờ. `app.assignment-retry.enabled=false` tắt worker, và
+`app.assignment-retry.delay` cấu hình chu kỳ quét.
+
+Claim dùng `FOR UPDATE SKIP LOCKED`, commit lease 30 giây trước khi gọi Auth HTTP.
+Khi ghi phân công, worker khóa lại dòng và kiểm tra token/hạn lease/trạng thái.
+Worker chết được tiếp quản sau khi lease hết hạn; phản hồi cũ không ghi đè phân công
+mới. Lịch retry không tăng version nghiệp vụ hoặc số lần giao hàng. Retry tiếp tục
+khi chưa có shipper; Admin vẫn có thể gán thủ công bất kỳ lúc nào.
+
+Seller chỉ xem trạng thái và pickup/item thuộc shop mình qua API chi tiết. Route
+GPS, vé theo dõi và quyền mở WebSocket chỉ dành cho người mua của đơn, shipper đang
+phụ trách hoặc Admin. Vé Seller phát trước khi đổi chính sách cũng bị socket từ chối.
+
+Kiểm tra local ngày 26/10/2026 riêng Delivery: **38 test đạt, không lỗi/bỏ qua**,
+bao gồm hai test PostgreSQL thật về hai worker dùng chung lease và tiếp quản lease
+hết hạn. H2/API kiểm tra Auth phục hồi, backoff, Admin gán trong khi worker đang
+chờ HTTP, dữ liệu hai shop và vé Seller cũ. Redis/pubsub/Auth HTTP trong các test
+Delivery vẫn dùng mock; chưa kiểm chứng nhiều instance Delivery với Redis thật.

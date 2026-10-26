@@ -96,19 +96,19 @@ public class DeliveryService {
         return DeliveryRepository.lowercaseKeys(
                 jdbc.queryForList(
                         """
-            select s.id, s.name, s.phone, s.province, s.district, s.active,
-                count(d.id) as total_orders,
-                coalesce(sum(case when d.status='DELIVERED' then 1 else 0 end),0) as delivered_orders,
-                coalesce(sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end),0) as completed_orders,
-                case when sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end) > 0
-                     then 100.0 * sum(case when d.status='DELIVERED' then 1 else 0 end)
-                        / sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end)
-                     else 0 end as success_rate_percent
-            from shippers s left join delivery_assignments d on d.shipper_id=s.id
-            where (?='' or s.province=?) and (?='' or s.district=?)
-            group by s.id, s.name, s.phone, s.province, s.district, s.active
-            order by s.id limit ? offset ?
-            """,
+select s.id, s.name, s.phone, s.province, s.district, s.active,
+    count(d.id) as total_orders,
+    coalesce(sum(case when d.status='DELIVERED' then 1 else 0 end),0) as delivered_orders,
+    coalesce(sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end),0) as completed_orders,
+    case when sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end) > 0
+         then 100.0 * sum(case when d.status='DELIVERED' then 1 else 0 end)
+            / sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end)
+         else 0 end as success_rate_percent
+from shippers s left join delivery_assignments d on d.shipper_id=s.id
+where (?='' or s.province=?) and (?='' or s.district=?)
+group by s.id, s.name, s.phone, s.province, s.district, s.active
+order by s.id limit ? offset ?
+""",
                         area(province),
                         area(province),
                         area(district),
@@ -241,6 +241,14 @@ public class DeliveryService {
     }
 
     private void autoAssign(Assignment a, String actor) {
+        autoAssign(a, actor, null);
+    }
+
+    public void retryAssignment(String id, String claim) {
+        autoAssign(repo.find(id, false), "system:assignment-retry", claim);
+    }
+
+    private void autoAssign(Assignment a, String actor, String claim) {
         if (a.getStatus() != DeliveryStatus.WAITING_ASSIGNMENT) return;
         for (String id : repo.candidates(a.getProvince(), a.getDistrict())) {
             try {
@@ -253,6 +261,10 @@ public class DeliveryService {
                             tx().execute(
                                             ignored -> {
                                                 Assignment current = repo.find(a.getId(), true);
+                                                if (claim != null
+                                                        && !repo.assignmentClaimValid(
+                                                                a.getId(), claim, clock.instant()))
+                                                    return true;
                                                 if (current.getStatus()
                                                         != DeliveryStatus.WAITING_ASSIGNMENT)
                                                     return true;
@@ -581,6 +593,19 @@ public class DeliveryService {
                                         ApiException.notFound(
                                                 "DELIVERY_NOT_FOUND", "Đơn chưa có chuyến giao"));
         scope(a, actor, admin);
+        return a;
+    }
+
+    // Sellers receive pickup/status information for their own shop, not the shared GPS route.
+    public void trackingScope(Assignment a, String actor, boolean admin) {
+        if (!admin && !actor.equals(a.getBuyerId()) && !actor.equals(a.getShipperId()))
+            throw forbidden();
+        scope(a, actor, admin);
+    }
+
+    public Assignment trackingOrder(String order, String actor, boolean admin) {
+        Assignment a = order(order, actor, admin);
+        trackingScope(a, actor, admin);
         return a;
     }
 

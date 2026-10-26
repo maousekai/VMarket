@@ -81,7 +81,7 @@ public class TrackingSocket extends TextWebSocketHandler {
         if (expired(client)) return false;
         if (client.authorizedUntil.isAfter(clock.instant())) return true;
         try {
-            deliveries.scope(
+            deliveries.trackingScope(
                     repo.find(client.access.assignmentId(), false),
                     client.access.actor(),
                     client.access.admin());

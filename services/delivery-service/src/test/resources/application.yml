@@ -17,6 +17,8 @@ auth:
   jwt:
     secret: test-only-secret-0123456789-0123456789-0123456789
 app:
+  assignment-retry:
+    enabled: false
   outbox-enabled: false
   tracking-listener: false
   delivery:

@@ -49,6 +49,7 @@ class DeliveryApiTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper json;
     @Autowired DeliveryRepository repo;
+    @Autowired com.vmarket.delivery.service.AssignmentRetryWorker assignmentRetry;
     @Autowired TrackingSocket socket;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
 
@@ -90,8 +91,8 @@ class DeliveryApiTest {
                 .thenReturn(
                         json.readTree(
                                 """
-            {"id":"shop-1","ownerId":"seller-1","status":"ACTIVE","province":"Đà Nẵng","district":"Hải Châu","streetAddress":"1 đường lấy hàng"}
-            """));
+{"id":"shop-1","ownerId":"seller-1","status":"ACTIVE","province":"Đà Nẵng","district":"Hải Châu","streetAddress":"1 đường lấy hàng"}
+"""));
         when(clients.order(anyString(), anyBoolean())).thenReturn(order("COD", false));
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(values);
@@ -109,11 +110,11 @@ class DeliveryApiTest {
     private JsonNode order(String method, boolean twoShops) {
         return json.readTree(
                 """
-            {"id":"order-1","userId":"buyer-1","status":"PROCESSING","stockReserved":true,
-             "paymentMethod":"METHOD","totalAmount":125000,"recipientName":"Buyer","phone":"0912345678",
-             "province":"Đà Nẵng","district":"Hải Châu","ward":"Phường 1","streetAddress":"2 đường giao hàng",
-             "items":[{"shopId":"shop-1"}EXTRA]}
-            """
+{"id":"order-1","userId":"buyer-1","status":"PROCESSING","stockReserved":true,
+ "paymentMethod":"METHOD","totalAmount":125000,"recipientName":"Buyer","phone":"0912345678",
+ "province":"Đà Nẵng","district":"Hải Châu","ward":"Phường 1","streetAddress":"2 đường giao hàng",
+ "items":[{"shopId":"shop-1"}EXTRA]}
+"""
                         .replace("METHOD", method)
                         .replace("EXTRA", twoShops ? ",{\"shopId\":\"shop-2\"}" : ""));
     }
@@ -153,6 +154,10 @@ class DeliveryApiTest {
     }
 
     private String handoff() throws Exception {
+        return handoff("ASSIGNED");
+    }
+
+    private String handoff(String expectedStatus) throws Exception {
         var result =
                 call(
                                 post("/api/delivery/seller/orders/{id}/handoff", ORDER),
@@ -160,7 +165,7 @@ class DeliveryApiTest {
                                 "SELLER",
                                 null)
                         .andExpect(status().isOk())
-                        .andExpect(jsonPath("$.status").value("ASSIGNED"))
+                        .andExpect(jsonPath("$.status").value(expectedStatus))
                         .andReturn();
         return json.readTree(result.getResponse().getContentAsString()).path("id").asString();
     }
@@ -950,6 +955,166 @@ class DeliveryApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.order.items.length()").value(2))
                 .andExpect(jsonPath("$.order.streetAddress").exists());
+        for (String actor : List.of(SELLER, "seller-2")) {
+            call(get("/api/delivery/orders/{id}/route", ORDER), actor, "SELLER", null)
+                    .andExpect(status().isForbidden());
+            call(post("/api/delivery/orders/{id}/tracking-ticket", ORDER), actor, "SELLER", null)
+                    .andExpect(status().isForbidden());
+        }
+        for (String[] allowed :
+                List.of(
+                        new String[] {BUYER, "BUYER"},
+                        new String[] {SHIPPER, "SHIPPER"},
+                        new String[] {"admin", "ADMIN"})) {
+            call(get("/api/delivery/orders/{id}/route", ORDER), allowed[0], allowed[1], null)
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Test
+    void backgroundAssignmentRetriesAfterNoCandidateAndAfterAuthRecovers() throws Exception {
+        jdbc.update("update shippers set active=false");
+        String id = handoff("WAITING_ASSIGNMENT");
+        assertThat(repo.find(id, false).getStatus().name()).isEqualTo("WAITING_ASSIGNMENT");
+        assignmentRetry.runBatch();
+        assertThat(
+                        jdbc.queryForObject(
+                                "select assignment_attempts from delivery_assignments where id=?",
+                                Integer.class,
+                                id))
+                .isEqualTo(1);
+        jdbc.update("update shippers set active=true");
+        when(clients.activeShipper(anyString()))
+                .thenThrow(
+                        com.vmarket.delivery.exception.ApiException.unavailable(
+                                "AUTH_DOWN", "temporary"));
+        jdbc.update(
+                "update delivery_assignments set next_assignment_at=?",
+                java.sql.Timestamp.from(Instant.EPOCH));
+        assignmentRetry.runBatch();
+        assertThat(repo.find(id, false).getStatus().name()).isEqualTo("WAITING_ASSIGNMENT");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select assignment_attempts from delivery_assignments where id=?",
+                                Integer.class,
+                                id))
+                .isEqualTo(2);
+        // Backoff prevents a request loop while Auth is down.
+        assignmentRetry.runBatch();
+        verify(clients, times(1)).activeShipper(SHIPPER);
+        doReturn(true).when(clients).activeShipper(anyString());
+        jdbc.update(
+                "update delivery_assignments set next_assignment_at=?",
+                java.sql.Timestamp.from(Instant.EPOCH));
+        assignmentRetry.runBatch();
+        assertThat(repo.find(id, false).getShipperId()).isEqualTo(SHIPPER);
+        assertThat(repo.find(id, false).getStatus().name()).isEqualTo("ASSIGNED");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from delivery_outbox where"
+                                    + " event_type='DeliveryAssigned'",
+                                Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void twoAssignmentWorkersShareOneLeaseAndDoNotHoldTransactionDuringAuth() throws Exception {
+        when(clients.activeShipper(anyString())).thenReturn(false);
+        String id = handoff("WAITING_ASSIGNMENT");
+        CountDownLatch checking = new CountDownLatch(1), release = new CountDownLatch(1);
+        when(clients.activeShipper(anyString()))
+                .thenAnswer(
+                        inv -> {
+                            assertThat(
+                                            org.springframework.transaction.support
+                                                    .TransactionSynchronizationManager
+                                                    .isActualTransactionActive())
+                                    .isFalse();
+                            checking.countDown();
+                            assertThat(release.await(8, TimeUnit.SECONDS)).isTrue();
+                            return true;
+                        });
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(assignmentRetry::runBatch);
+            assertThat(checking.await(5, TimeUnit.SECONDS)).isTrue();
+            pool.submit(assignmentRetry::runBatch).get(3, TimeUnit.SECONDS);
+            release.countDown();
+            first.get(8, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(repo.find(id, false).getStatus().name()).isEqualTo("ASSIGNED");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from delivery_outbox where"
+                                    + " event_type='DeliveryAssigned'",
+                                Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void expiredWorkerCannotOverwriteAdminAssignment() throws Exception {
+        when(clients.activeShipper(anyString())).thenReturn(false);
+        String id = handoff("WAITING_ASSIGNMENT");
+        jdbc.update(
+                "insert into shippers (id, provision_key, name, phone, province, district, active,"
+                    + " created_at) values ('shipper-2','provision-2','Second','0900000000','da"
+                    + " nang','hai chau',true,CURRENT_TIMESTAMP)");
+        CountDownLatch checking = new CountDownLatch(1), release = new CountDownLatch(1);
+        when(clients.activeShipper(SHIPPER))
+                .thenAnswer(
+                        inv -> {
+                            checking.countDown();
+                            assertThat(release.await(8, TimeUnit.SECONDS)).isTrue();
+                            return true;
+                        });
+        when(clients.activeShipper("shipper-2")).thenReturn(true);
+        var pool = Executors.newSingleThreadExecutor();
+        try {
+            var stale = pool.submit(assignmentRetry::runBatch);
+            assertThat(checking.await(5, TimeUnit.SECONDS)).isTrue();
+            jdbc.update(
+                    "update delivery_assignments set assignment_claim_until=? where id=?",
+                    java.sql.Timestamp.from(Instant.EPOCH),
+                    id);
+            call(
+                            post("/api/delivery/admin/assignments/{id}/assign", id),
+                            "admin",
+                            "ADMIN",
+                            "{\"shipperId\":\"shipper-2\"}")
+                    .andExpect(status().isOk());
+            release.countDown();
+            stale.get(8, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(repo.find(id, false).getShipperId()).isEqualTo("shipper-2");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from delivery_outbox where"
+                                    + " event_type='DeliveryAssigned'",
+                                Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void sellerTicketIssuedBeforePolicyChangeCannotOpenTrackingSocket() throws Exception {
+        String id = handoff();
+        var session = mock(org.springframework.web.socket.WebSocketSession.class);
+        when(session.getId()).thenReturn("legacy-seller");
+        when(session.isOpen()).thenReturn(true);
+        when(session.getAttributes())
+                .thenReturn(
+                        Map.of(
+                                "access",
+                                new TrackingTickets.Access(
+                                        id, SELLER, false, Instant.now().plusSeconds(60))));
+        socket.afterConnectionEstablished(session);
+        verify(session).close(org.springframework.web.socket.CloseStatus.POLICY_VIOLATION);
+        verify(session, never()).sendMessage(any());
     }
 
     @Test

@@ -47,7 +47,7 @@ class DeliveryOutboxMigrationTest {
                 a.getId());
         var flyway = Flyway.configure().dataSource(url, "sa", "").load();
         flyway.migrate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
         assertThat(jdbc.queryForObject("select payload from delivery_outbox", String.class))
                 .isEqualTo("{\"pending\":true}");
         assertThat(jdbc.queryForObject("select retry_attempts from delivery_outbox", Integer.class))

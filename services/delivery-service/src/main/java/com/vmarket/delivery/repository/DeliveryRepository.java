@@ -72,6 +72,19 @@ public class DeliveryRepository {
                 .findFirst();
     }
 
+    public boolean assignmentClaimValid(String id, String token, Instant now) {
+        return jdbc.queryForObject(
+                        """
+select count(*) from delivery_assignments where id=? and assignment_claim_token=?
+  and assignment_claim_until > ?
+""",
+                        Integer.class,
+                        id,
+                        token,
+                        Timestamp.from(now))
+                == 1;
+    }
+
     public Assignment find(String id, boolean lock) {
         return jdbc
                 .query(
@@ -88,10 +101,10 @@ public class DeliveryRepository {
     public void insert(Assignment a) {
         jdbc.update(
                 """
-            insert into delivery_assignments(id, order_id, buyer_id, status, attempt, payment_method, cod_amount,
-                province, district, order_snapshot, version, created_at, updated_at)
-            values (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
+insert into delivery_assignments(id, order_id, buyer_id, status, attempt, payment_method, cod_amount,
+    province, district, order_snapshot, version, created_at, updated_at)
+values (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+""",
                 a.getId(),
                 a.getOrderId(),
                 a.getBuyerId(),
@@ -106,9 +119,9 @@ public class DeliveryRepository {
     public void save(Assignment a) {
         jdbc.update(
                 """
-            update delivery_assignments set shipper_id=?, status=?, attempt=?, version=?, latitude=?, longitude=?,
-                location_at=?, location_sequence=?, tracking_sequence=?, updated_at=CURRENT_TIMESTAMP where id=?
-            """,
+update delivery_assignments set shipper_id=?, status=?, attempt=?, version=?, latitude=?, longitude=?,
+    location_at=?, location_sequence=?, tracking_sequence=?, updated_at=CURRENT_TIMESTAMP where id=?
+""",
                 a.getShipperId(),
                 a.getStatus().name(),
                 a.getAttempt(),
@@ -166,11 +179,11 @@ public class DeliveryRepository {
     public List<String> candidates(String province, String district) {
         return jdbc.queryForList(
                 """
-            select s.id from shippers s left join delivery_assignments d on d.shipper_id=s.id
-                and d.status not in ('DELIVERED','RETURNED')
-            where s.active=true and s.province=? and s.district=?
-            group by s.id order by count(d.id), s.id
-            """,
+                select s.id from shippers s left join delivery_assignments d on d.shipper_id=s.id
+                    and d.status not in ('DELIVERED','RETURNED')
+                where s.active=true and s.province=? and s.district=?
+                group by s.id order by count(d.id), s.id
+                """,
                 String.class,
                 province,
                 district);
@@ -188,10 +201,10 @@ public class DeliveryRepository {
             boolean areaOverride) {
         jdbc.update(
                 """
-            insert into delivery_status_history
-                (id, assignment_id, status, actor_id, reason, attempt, occurred_at, shipper_id, previous_shipper_id, area_override)
-            values (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
-            """,
+insert into delivery_status_history
+    (id, assignment_id, status, actor_id, reason, attempt, occurred_at, shipper_id, previous_shipper_id, area_override)
+values (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+""",
                 UUID.randomUUID().toString(),
                 a.getId(),
                 a.getStatus().name(),

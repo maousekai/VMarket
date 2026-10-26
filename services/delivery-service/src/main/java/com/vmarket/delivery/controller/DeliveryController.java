@@ -116,13 +116,13 @@ public class DeliveryController {
             @PathVariable String order,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "100") @Min(1) @Max(500) int size) {
-        var a = service.order(order, auth.getName(), DeliveryService.admin(auth));
+        var a = service.trackingOrder(order, auth.getName(), DeliveryService.admin(auth));
         return repo.route(a.getId(), page, size);
     }
 
     @PostMapping("/orders/{order}/tracking-ticket")
     public Map<String, String> ticket(Authentication auth, @PathVariable String order) {
-        var a = service.order(order, auth.getName(), DeliveryService.admin(auth));
+        var a = service.trackingOrder(order, auth.getName(), DeliveryService.admin(auth));
         String ticket =
                 tickets.issue(
                         a.getId(),

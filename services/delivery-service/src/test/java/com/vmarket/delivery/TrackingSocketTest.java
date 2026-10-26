@@ -49,14 +49,14 @@ class TrackingSocketTest {
             socket.expire();
             socket.accept("{\"assignmentId\":\"assignment\",\"sequence\":" + i + ",\"version\":1}");
         }
-        verify(deliveries, times(1)).scope(assignment, "shipper", false);
+        verify(deliveries, times(1)).trackingScope(assignment, "shipper", false);
         verify(repo, times(2)).find("assignment", false);
 
         when(clock.instant()).thenReturn(start.plusSeconds(31));
         socket.accept("{\"assignmentId\":\"assignment\",\"sequence\":21,\"version\":1}");
-        verify(deliveries, times(1)).scope(assignment, "shipper", false);
+        verify(deliveries, times(1)).trackingScope(assignment, "shipper", false);
         socket.expire();
-        verify(deliveries, times(2)).scope(assignment, "shipper", false);
+        verify(deliveries, times(2)).trackingScope(assignment, "shipper", false);
         socket.revoke(new TrackingRevoked("assignment", "shipper"));
         verify(session).close(CloseStatus.POLICY_VIOLATION);
     }
