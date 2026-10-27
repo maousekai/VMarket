@@ -1,3 +1,4 @@
+import { normalizePhone } from '../auth/phone'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
@@ -29,7 +30,7 @@ function ProfileForm({ profile, session, saveProfile }) {
     if (saving) return
     const normalized = {
       ...values,
-      phone: String(values.phone ?? '').replace(/[\s.-]/g, ''),
+      phone: normalizePhone(values.phone),
     }
     const errors = validateProfile(normalized)
     setFieldErrors(errors)
