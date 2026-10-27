@@ -15,16 +15,22 @@ describe('form validation against backend contracts', () => {
     expect(validateLogin({ email: '', password: '' })).toHaveProperty('email')
   })
 
-  it('rejects invalid usernames, weak passwords, and mismatching confirmation', () => {
+  it('rejects invalid usernames, phones, weak passwords, long names, and mismatching confirmation', () => {
     const errors = validateRegistration({
       email: 'an@example.com',
       username: 'x',
       password: 'abcdefg',
       confirmPassword: 'different',
-      fullName: 'An',
+      fullName: 'a'.repeat(101),
       phone: '123',
     })
-    expect(Object.keys(errors).sort()).toEqual(['confirmPassword', 'password', 'phone', 'username'])
+    expect(Object.keys(errors).sort()).toEqual([
+      'confirmPassword',
+      'fullName',
+      'password',
+      'phone',
+      'username',
+    ])
     expect(
       validateRegistration({
         email: 'an@example.com',
@@ -33,6 +39,18 @@ describe('form validation against backend contracts', () => {
         confirmPassword: 'Abcd1234@',
         fullName: 'An',
         phone: '+84912345678',
+      }),
+    ).toEqual({})
+  })
+
+  it('allows leaving the registration phone empty', () => {
+    expect(
+      validateRegistration({
+        email: 'an@example.com',
+        username: 'an.nguyen',
+        password: 'Abcd1234@',
+        confirmPassword: 'Abcd1234@',
+        phone: '',
       }),
     ).toEqual({})
   })

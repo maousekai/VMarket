@@ -14,6 +14,7 @@
   background: #f9fafb;
   font-synthesis: none;
   --color-primary: #0670ce;
+  --color-primary-dark: #04427f;
   --color-text: #111827;
   --color-muted: #4b5563;
   --color-border: #e5e7eb;
@@ -80,7 +81,7 @@ p {
   text-decoration: none;
 }
 .button--primary {
-  background: linear-gradient(165deg, #04427f, #1073ca);
+  background: linear-gradient(165deg, var(--color-primary-dark), #1073ca);
   color: white;
 }
 .button--primary:hover {
@@ -174,22 +175,22 @@ p {
 }
 .auth-content {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 32px;
+  padding: 32px;
 }
 .auth-card {
   width: 100%;
   max-width: 440px;
+  /* Auto margins keep short forms centred but let tall forms start at the top and scroll. */
+  margin: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 .auth-card h1 {
   font-size: 28px;
   font-weight: 800;
   letter-spacing: -0.7px;
-  line-height: 1.5;
+  line-height: 1.3;
   margin: 0;
 }
 .auth-description {
@@ -205,7 +206,7 @@ p {
   display: flex;
   gap: 4px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #f3f4f6;
 }
 .auth-tabs a {
@@ -213,20 +214,43 @@ p {
   display: grid;
   place-items: center;
   border: 1px solid var(--color-primary);
-  border-radius: 10px;
+  border-radius: calc(var(--radius-md) - 4px);
   height: 38px;
   font-size: 14px;
   font-weight: 600;
   background: white;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.auth-tabs a:hover {
+  background: #f0f8ff;
 }
 .auth-tabs a.active {
-  background: #e9f5ff;
-  box-shadow: 0 1px 4px #0670ce18;
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+  color: white;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--color-primary-dark) 18%, transparent);
 }
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+}
+.auth-form__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 1fr);
+  gap: 14px;
+}
+/* The two-column auth layout squeezes the card on tablets; stack the row there. */
+@media (min-width: 701px) and (max-width: 900px) {
+  .auth-form__row {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 480px) {
+  .auth-form__row {
+    grid-template-columns: 1fr;
+  }
 }
 .form-field {
   width: 100%;
@@ -403,8 +427,7 @@ p {
   }
   .auth-content {
     min-height: 100vh;
-    padding: 32px 24px;
-    align-items: center;
+    padding: 24px;
   }
   .auth-mobile-brand {
     display: block;

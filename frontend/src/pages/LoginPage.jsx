@@ -80,7 +80,7 @@ export default function LoginPage() {
           autoComplete="username"
           autoCapitalize="none"
           spellCheck={false}
-          placeholder="Nhập email"
+          placeholder="example@gmail.com"
           error={fields.email}
           maxLength={320}
           required
@@ -103,9 +103,6 @@ export default function LoginPage() {
           {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
         </button>
       </form>
-      <p className="auth-footer">
-        Chưa có tài khoản? <Link to="/register">Đăng ký ngay</Link>
-      </p>
     </AuthLayout>
   )
 }

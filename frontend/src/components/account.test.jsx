@@ -199,6 +199,22 @@ describe('Profile form', () => {
     expect(value.saveProfile).not.toHaveBeenCalled()
     expect(screen.getByLabelText('Số điện thoại').getAttribute('aria-invalid')).toBe('true')
   })
+
+  it('normalizes a formatted phone before saving the profile', async () => {
+    const value = auth()
+    render(
+      <AppView value={value}>
+        <ProfilePage />
+      </AppView>,
+    )
+    fireEvent.change(screen.getByLabelText('Số điện thoại'), {
+      target: { value: '+84 912 345 678' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }))
+    await waitFor(() => expect(value.saveProfile).toHaveBeenCalledOnce())
+    expect(value.saveProfile.mock.calls[0][0]).toMatchObject({ phone: '+84912345678' })
+    expect(screen.getByLabelText('Số điện thoại').value).toBe('+84912345678')
+  })
 })
 
 describe('Seller access', () => {

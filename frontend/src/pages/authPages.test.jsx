@@ -131,6 +131,14 @@ describe('Safe post-login navigation', () => {
 })
 
 describe('Login flow', () => {
+  it('keeps a single registration entry point in the tabs and shows an email example', () => {
+    renderPage(<LoginPage />, '/login')
+    expect(screen.getByLabelText('Email').placeholder).toBe('example@gmail.com')
+    expect(screen.getByLabelText('Email').getAttribute('autocomplete')).toBe('username')
+    expect(screen.getAllByRole('link', { name: 'Đăng ký tài khoản' })).toHaveLength(1)
+    expect(screen.queryByRole('link', { name: 'Đăng ký ngay' })).toBeNull()
+  })
+
   it('rejects username before calling the login API', async () => {
     const login = vi.fn()
     renderPage(<LoginPage />, '/login', { login })
@@ -168,6 +176,25 @@ describe('Login flow', () => {
 })
 
 describe('Registration flow', () => {
+  it('asks for username and phone with the expected limits and marks the current tab', () => {
+    renderPage(<RegisterPage />, '/register')
+    const username = screen.getByLabelText('Tên tài khoản')
+    const phone = screen.getByLabelText('Số điện thoại')
+    const email = screen.getByLabelText('Email')
+    expect(username).toBeTruthy()
+    expect(username.maxLength).toBe(50)
+    expect(username.getAttribute('autocomplete')).toBe('nickname')
+    expect(phone.placeholder).toBe('0912345678')
+    expect(phone.maxLength).toBe(15)
+    expect(phone.getAttribute('inputmode')).toBe('tel')
+    expect(email.placeholder).toBe('example@gmail.com')
+    expect(email.getAttribute('autocomplete')).toBe('username')
+    expect(
+      screen.getByRole('link', { name: 'Đăng ký tài khoản' }).getAttribute('aria-current'),
+    ).toBe('page')
+    expect(screen.getByRole('link', { name: 'Đăng nhập' }).getAttribute('aria-current')).toBeNull()
+  })
+
   it('continues registration after OTP delivery fails without registering twice', async () => {
     registerAccount.mockResolvedValue({})
     requestOtp.mockRejectedValue(failure(503, 'EMAIL_SEND_FAILED', 'Chưa gửi được mã.'))
@@ -184,6 +211,20 @@ describe('Registration flow', () => {
       email: active.email,
       username: 'buyer.one',
       password: 'StrongPass1!',
+    })
+  })
+
+  it('normalizes a formatted phone before saving the registration draft', async () => {
+    registerAccount.mockResolvedValue({})
+    requestOtp.mockResolvedValue({})
+    const flow = renderPage(<RegisterPage />, '/register')
+    fillRegister()
+    change('Số điện thoại', '+84 912 345 678')
+    fireEvent.click(screen.getByRole('button', { name: 'Tạo tài khoản' }))
+    await screen.findByTestId('destination')
+    expect(flow.auth.setRegistrationDraft).toHaveBeenCalledWith({
+      ...draft,
+      phone: '+84912345678',
     })
   })
 
