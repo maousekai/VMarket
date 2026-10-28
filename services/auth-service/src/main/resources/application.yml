@@ -25,6 +25,13 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+  # Timeout cho RestClient.Builder tu cau hinh (hien chi BrevoEmailSender dung).
+  # Khong dat thi request toi Brevo co the treo vo han, giu thread Tomcat cua cac
+  # route cong khai /otp/request va /password/forgot (PBL6-66).
+  http:
+    clients:
+      connect-timeout: ${HTTP_CLIENT_CONNECT_TIMEOUT:3s}
+      read-timeout: ${HTTP_CLIENT_READ_TIMEOUT:5s}
 
 server:
   port: ${SERVER_PORT:8081}
