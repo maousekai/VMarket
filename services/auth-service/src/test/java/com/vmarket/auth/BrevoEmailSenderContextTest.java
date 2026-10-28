@@ -1,13 +1,20 @@
 package com.vmarket.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.web.client.ResourceAccessException;
@@ -34,6 +41,17 @@ class BrevoEmailSenderContextTest {
 	@Autowired
 	private RestClient.Builder restClientBuilder;
 
+	private ServerSocket silent;
+
+	@AfterEach
+	void closeSilentServer() throws IOException {
+		// Đóng listener cũng reset kết nối đang chờ trong backlog, nên request còn treo
+		// (khi test bị @Timeout cắt ngang) sẽ thoát ra thay vì giữ thread mãi.
+		if (silent != null) {
+			silent.close();
+		}
+	}
+
 	@Test
 	void providerBrevo_contextKhoiDongDuoc() {
 		assertThat(emailSender).isInstanceOf(BrevoEmailSender.class);
@@ -41,18 +59,38 @@ class BrevoEmailSenderContextTest {
 
 	/**
 	 * Builder BrevoEmailSender nhận phải mang read-timeout từ spring.http.clients.*:
-	 * server nhận kết nối nhưng không bao giờ trả lời thì request phải dừng, không treo.
+	 * server nhận kết nối nhưng không bao giờ trả lời thì request phải dừng vì timeout.
+	 *
+	 * <p>Bind và gọi cùng một địa chỉ IPv4 cụ thể: getLoopbackAddress() có thể trả ::1
+	 * trên JVM ưu tiên IPv6, khi đó gọi 127.0.0.1 bị từ chối kết nối ngay và test pass
+	 * mà không hề kiểm tra timeout. Vì vậy cũng phải kiểm tra nguyên nhân là
+	 * HttpTimeoutException (lỗi read-timeout của JDK HttpClient), không phải
+	 * ConnectException. @Timeout là deadline riêng: nếu timeout không được áp dụng thì
+	 * request treo vô hạn và kiểm tra thời gian bên dưới không bao giờ chạy tới.
 	 */
 	@Test
+	@Timeout(value = 10, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 	void builderTuCauHinh_apDungReadTimeout() throws Exception {
-		try (ServerSocket silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
-			RestClient client = restClientBuilder
-					.baseUrl("http://127.0.0.1:" + silent.getLocalPort())
-					.build();
-			long start = System.nanoTime();
-			assertThatThrownBy(() -> client.get().retrieve().toBodilessEntity())
-					.isInstanceOf(ResourceAccessException.class);
-			assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(5));
+		InetAddress ipv4Loopback = InetAddress.getByName("127.0.0.1");
+		silent = new ServerSocket(0, 1, ipv4Loopback);
+		RestClient client = restClientBuilder
+				.baseUrl("http://" + ipv4Loopback.getHostAddress() + ":" + silent.getLocalPort())
+				.build();
+
+		long start = System.nanoTime();
+		Throwable thrown = catchThrowable(() -> client.get().retrieve().toBodilessEntity());
+		Duration elapsed = Duration.ofNanos(System.nanoTime() - start);
+
+		assertThat(thrown).isInstanceOf(ResourceAccessException.class);
+		assertThat(causeChain(thrown)).anyMatch(HttpTimeoutException.class::isInstance);
+		assertThat(elapsed).isLessThan(Duration.ofSeconds(5));
+	}
+
+	private static List<Throwable> causeChain(Throwable thrown) {
+		List<Throwable> chain = new ArrayList<>();
+		for (Throwable t = thrown; t != null && !chain.contains(t); t = t.getCause()) {
+			chain.add(t);
 		}
+		return chain;
 	}
 }
