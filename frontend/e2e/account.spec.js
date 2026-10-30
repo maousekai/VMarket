@@ -17,7 +17,7 @@ async function fillAddress(page, { recipient, phone = '0912345678', street, ward
 }
 
 const addressCard = (page, recipient) =>
-  page.getByRole('listitem', { name: `Địa chỉ của ${recipient}` })
+  page.locator('.address-card').filter({ has: page.getByText(recipient, { exact: true }) })
 
 test('profile edits persist, including birth date and gender', async ({ page }) => {
   const account = await createAccount(page.request)
