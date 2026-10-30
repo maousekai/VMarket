@@ -14,6 +14,29 @@ function passwordError(password) {
     return 'Mật khẩu phải 8–32 ký tự, có chữ hoa, số và ký tự đặc biệt.'
 }
 
+export const passwordRequirements = (password = '') => [
+  {
+    key: 'length',
+    label: 'Từ 8 đến 32 ký tự',
+    met: password.length >= 8 && password.length <= 32,
+  },
+  {
+    key: 'uppercase',
+    label: 'Có ít nhất 1 chữ hoa',
+    met: /[A-Z]/.test(password),
+  },
+  {
+    key: 'digit',
+    label: 'Có ít nhất 1 chữ số',
+    met: /\d/.test(password),
+  },
+  {
+    key: 'special',
+    label: 'Có ít nhất 1 ký tự đặc biệt',
+    met: /[^A-Za-z0-9]/.test(password),
+  },
+]
+
 const compact = (errors) => Object.fromEntries(Object.entries(errors).filter(([, value]) => value))
 
 export const validateLogin = ({ email, password }) =>

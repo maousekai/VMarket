@@ -104,7 +104,13 @@ function AddressForm({ address, isFirst, onCancel, onSaved }) {
       onClose={() => !saving && onCancel()}
     >
       <form className="profile-form" noValidate onSubmit={onSubmit}>
-        <AccountField label="Người nhận" required maxLength={100} {...field('recipientName')} />
+        <AccountField
+          label="Người nhận"
+          required
+          maxLength={100}
+          data-autofocus
+          {...field('recipientName')}
+        />
         <AccountField
           label="Số điện thoại"
           required
@@ -230,6 +236,7 @@ function DeleteDialog({ address, hasOthers, onCancel, onDeleted }) {
           className="account-button account-button--secondary"
           type="button"
           disabled={saving}
+          data-autofocus
           onClick={onCancel}
         >
           Hủy
@@ -365,7 +372,6 @@ export default function AddressBookPage() {
                 <li
                   key={address.id}
                   className={`account-card address-card${address.isDefault ? ' address-card--default' : ''}`}
-                  aria-label={`Địa chỉ của ${address.recipientName}`}
                 >
                   <div className="address-card__head">
                     <strong>{address.recipientName}</strong>

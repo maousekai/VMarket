@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSessionManager } from './session'
+import { createSessionManager, sessionFromResponse } from './session'
 import { registrationDraftKey, registrationDraftTtl } from './draftStorage'
 
 const deferred = () => {
@@ -12,8 +12,13 @@ const deferred = () => {
   return { promise, resolve, reject }
 }
 
-function tokenResponse(userId = 'user-1', extra = {}) {
-  const claims = { sub: userId, email: `${userId}@example.com`, username: userId }
+function tokenResponse(userId = 'user-1', extra = {}, claimOverrides = {}) {
+  const claims = {
+    sub: userId,
+    email: `${userId}@example.com`,
+    username: userId,
+    ...claimOverrides,
+  }
   return {
     accessToken: `header.${btoa(JSON.stringify(claims))}.signature`,
     expiresIn: 900,
@@ -70,6 +75,20 @@ function setup(options = {}) {
 afterEach(() => {
   managers.splice(0).forEach((manager) => manager.stop())
   vi.useRealTimers()
+})
+
+describe('session claims', () => {
+  it('keeps the token email verification flag and falls back to the account status', () => {
+    const verified = sessionFromResponse(tokenResponse('user-1', {}, { email_verified: true }))
+    const unverified = sessionFromResponse(tokenResponse('user-1', {}, { email_verified: false }))
+    const legacyActive = sessionFromResponse(tokenResponse('user-1'))
+    const legacyPending = sessionFromResponse(tokenResponse('user-1', { status: 'PENDING' }))
+
+    expect(verified.emailVerified).toBe(true)
+    expect(unverified.emailVerified).toBe(false)
+    expect(legacyActive.emailVerified).toBe(true)
+    expect(legacyPending.emailVerified).toBe(false)
+  })
 })
 
 describe('session refresh', () => {

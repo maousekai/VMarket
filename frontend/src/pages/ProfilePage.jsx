@@ -86,30 +86,19 @@ function ProfileForm({ profile, session, saveProfile }) {
             </p>
           )}
         </div>
-        <div className="account-field">
-          <label htmlFor="profile-phone">Số điện thoại</label>
-          <input
-            id="profile-phone"
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            value={values.phone}
-            onChange={onChange}
-            autoComplete="tel"
-            disabled={saving}
-            placeholder="0905123456"
-            aria-invalid={Boolean(fieldErrors.phone)}
-            aria-describedby={fieldErrors.phone ? 'profile-phone-error' : 'profile-phone-hint'}
-          />
-          <p className="account-field__hint" id="profile-phone-hint">
-            Số di động Việt Nam, bắt đầu bằng 0 hoặc +84.
-          </p>
-          {fieldErrors.phone && (
-            <p className="account-field__error" id="profile-phone-error">
-              {fieldErrors.phone}
-            </p>
-          )}
-        </div>
+        <AccountField
+          label="Số điện thoại"
+          name="phone"
+          type="tel"
+          inputMode="tel"
+          value={values.phone}
+          onChange={onChange}
+          autoComplete="tel"
+          disabled={saving}
+          placeholder="0905123456"
+          hint="Số di động Việt Nam, bắt đầu bằng 0 hoặc +84."
+          error={fieldErrors.phone}
+        />
         <AccountField
           label="Ngày sinh"
           name="dateOfBirth"

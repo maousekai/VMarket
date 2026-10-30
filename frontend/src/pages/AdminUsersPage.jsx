@@ -16,6 +16,42 @@ const statusTabs = [
   ['ACTIVE', 'Đang hoạt động'],
   ['LOCKED', 'Đã khóa'],
 ]
+const tableColumns = [
+  'Họ tên & thành viên',
+  'Email / SĐT',
+  'Vai trò',
+  'Ngày tham gia',
+  'Trạng thái',
+]
+
+function TableSkeleton() {
+  return (
+    <div className="admin-users__table-wrap" aria-busy="true">
+      <table className="admin-table" aria-hidden="true">
+        <thead>
+          <tr>
+            {tableColumns.map((column) => (
+              <th key={column} scope="col">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: 5 }, (_, row) => (
+            <tr key={row}>
+              {tableColumns.map((column) => (
+                <td key={column}>
+                  <span className="admin-skeleton" />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 export default function AdminUsersPage() {
   const { session } = useAuth()
@@ -81,6 +117,7 @@ export default function AdminUsersPage() {
   }
 
   const { result } = state
+  const loading = state.status === 'loading'
   const from = result ? result.page * result.size + 1 : 0
   const to = result ? result.page * result.size + result.items.length : 0
 
@@ -115,6 +152,7 @@ export default function AdminUsersPage() {
               type="search"
               aria-label="Tìm kiếm người dùng"
               aria-invalid={draftError ? 'true' : undefined}
+              aria-describedby={draftError ? 'admin-users-search-error' : undefined}
               placeholder="Tìm tên, email, SĐT…"
               maxLength={200}
               value={draft}
@@ -137,18 +175,18 @@ export default function AdminUsersPage() {
             )}
           </form>
         </div>
-        {draftError && <p className="account-field__error">{draftError}</p>}
+        {draftError && (
+          <p className="account-field__error" id="admin-users-search-error" role="alert">
+            {draftError}
+          </p>
+        )}
         {notice && (
           <p className="account-notice account-notice--success" role="status">
             {notice}
           </p>
         )}
 
-        {state.status === 'loading' && (
-          <p className="account-notice" role="status">
-            Đang tải danh sách người dùng…
-          </p>
-        )}
+        {loading && !result && <TableSkeleton />}
         {state.status === 'error' && (
           <section className="account-card account-state">
             <p role="alert">{state.error}</p>
@@ -164,70 +202,77 @@ export default function AdminUsersPage() {
             </button>
           </section>
         )}
-        {state.status === 'ready' && result.items.length === 0 && (
-          <div className="admin-users__table-wrap">
-            <p className="admin-users__empty">Không tìm thấy người dùng phù hợp.</p>
-          </div>
-        )}
-        {state.status === 'ready' && result.items.length > 0 && (
+        {result && state.status !== 'error' && (
           <>
-            <div className="admin-users__table-wrap">
-              <table className="admin-table">
-                <caption className="visually-hidden">Danh sách người dùng</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Họ tên & thành viên</th>
-                    <th scope="col">Email / SĐT</th>
-                    <th scope="col">Vai trò</th>
-                    <th scope="col">Ngày tham gia</th>
-                    <th scope="col">Trạng thái</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.items.map((user) => (
-                    <tr key={user.userId} data-locked={user.status === 'LOCKED'}>
-                      <td>
-                        <div className="admin-user">
-                          <AccountAvatar name={displayName(user)} avatarUrl={user.avatarUrl} />
-                          <div>
-                            <button
-                              className="admin-user__name"
-                              type="button"
-                              onClick={() => {
-                                setNotice('')
-                                setSelected(user)
-                              }}
-                            >
-                              {displayName(user)}
-                            </button>
-                            <span className="admin-user__id" title={user.userId}>
-                              ID: #{user.userId.slice(-8)}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        {user.email}
-                        {user.phone && <span className="admin-cell__sub">{user.phone}</span>}
-                      </td>
-                      <td>
-                        <span className="admin-roles">
-                          {user.roles.map((role) => (
-                            <span key={role} className="role-badge">
-                              {roleLabels[role] || role}
-                            </span>
-                          ))}
-                        </span>
-                      </td>
-                      <td>{formatDate(user.createdAt)}</td>
-                      <td>
-                        <StatusBadges user={user} />
-                      </td>
+            {result.items.length === 0 ? (
+              <div
+                className={`admin-users__table-wrap${loading ? ' is-loading' : ''}`}
+                aria-busy={loading ? 'true' : undefined}
+              >
+                <p className="admin-users__empty">Không tìm thấy người dùng phù hợp.</p>
+              </div>
+            ) : (
+              <div
+                className={`admin-users__table-wrap${loading ? ' is-loading' : ''}`}
+                aria-busy={loading ? 'true' : undefined}
+              >
+                <table className="admin-table">
+                  <caption className="visually-hidden">Danh sách người dùng</caption>
+                  <thead>
+                    <tr>
+                      {tableColumns.map((column) => (
+                        <th key={column} scope="col">
+                          {column}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {result.items.map((user) => (
+                      <tr key={user.userId} data-locked={user.status === 'LOCKED'}>
+                        <td>
+                          <div className="admin-user">
+                            <AccountAvatar name={displayName(user)} avatarUrl={user.avatarUrl} />
+                            <div>
+                              <button
+                                className="admin-user__name"
+                                type="button"
+                                onClick={() => {
+                                  setNotice('')
+                                  setSelected(user)
+                                }}
+                              >
+                                {displayName(user)}
+                              </button>
+                              <span className="admin-user__id" title={user.userId}>
+                                ID: #{user.userId.slice(-8)}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          {user.email}
+                          {user.phone && <span className="admin-cell__sub">{user.phone}</span>}
+                        </td>
+                        <td>
+                          <span className="admin-roles">
+                            {user.roles.map((role) => (
+                              <span key={role} className="role-badge">
+                                {roleLabels[role] || role}
+                              </span>
+                            ))}
+                          </span>
+                        </td>
+                        <td>{formatDate(user.createdAt)}</td>
+                        <td>
+                          <StatusBadges user={user} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="admin-users__footer">
               <span>
                 Hiển thị {from}–{to} trong số {result.totalElements} người dùng
@@ -236,7 +281,7 @@ export default function AdminUsersPage() {
                 <button
                   className="account-button account-button--secondary"
                   type="button"
-                  disabled={result.page === 0}
+                  disabled={loading || result.page === 0}
                   onClick={() => apply({ ...filters, page: filters.page - 1 })}
                 >
                   Trước
@@ -247,7 +292,7 @@ export default function AdminUsersPage() {
                 <button
                   className="account-button account-button--secondary"
                   type="button"
-                  disabled={result.page + 1 >= result.totalPages}
+                  disabled={loading || result.page + 1 >= result.totalPages}
                   onClick={() => apply({ ...filters, page: filters.page + 1 })}
                 >
                   Sau
@@ -255,6 +300,11 @@ export default function AdminUsersPage() {
               </div>
             </div>
           </>
+        )}
+        {loading && (
+          <p className="visually-hidden" role="status">
+            Đang tải danh sách người dùng…
+          </p>
         )}
       </section>
 

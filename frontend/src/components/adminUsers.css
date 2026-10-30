@@ -80,10 +80,63 @@
   white-space: nowrap;
 }
 .admin-users__table-wrap {
+  position: relative;
   overflow-x: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+.admin-users__table-wrap.is-loading::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  height: 3px;
+  content: '';
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: admin-loading-slide 1.2s ease-in-out infinite;
+}
+.admin-users__table-wrap.is-loading .admin-table {
+  opacity: 0.55;
+}
+.admin-skeleton {
+  display: block;
+  width: 100%;
+  height: 14px;
+  overflow: hidden;
+  background: #eef1f8;
+  border-radius: 999px;
+}
+.admin-skeleton::after {
+  display: block;
+  width: 45%;
+  height: 100%;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 75%), transparent);
+  animation: admin-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes admin-loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes admin-skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-users__table-wrap.is-loading::before,
+  .admin-skeleton::after {
+    animation: none;
+  }
 }
 .admin-table {
   width: 100%;

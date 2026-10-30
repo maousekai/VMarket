@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  passwordRequirements,
   validateAddress,
   validateChangePassword,
   validateLockReason,
@@ -17,6 +18,36 @@ describe('form validation against backend contracts', () => {
     expect(validateLogin({ email: ' An@Example.com ', password: 'old' })).toEqual({})
     expect(validateLogin({ email: 'An.Nguyen', password: 'old' })).toHaveProperty('email')
     expect(validateLogin({ email: '', password: '' })).toHaveProperty('email')
+  })
+
+  it('reports each password requirement independently for the live checklist', () => {
+    const state = (password) =>
+      Object.fromEntries(passwordRequirements(password).map(({ key, met }) => [key, met]))
+
+    expect(state('Abcdefg1!')).toEqual({
+      length: true,
+      uppercase: true,
+      digit: true,
+      special: true,
+    })
+    expect(state('abcdefgh')).toEqual({
+      length: true,
+      uppercase: false,
+      digit: false,
+      special: false,
+    })
+    expect(state('A1!')).toEqual({
+      length: false,
+      uppercase: true,
+      digit: true,
+      special: true,
+    })
+    expect(state(`A1!${'a'.repeat(30)}`)).toEqual({
+      length: false,
+      uppercase: true,
+      digit: true,
+      special: true,
+    })
   })
 
   it('rejects invalid usernames, weak passwords, and mismatching confirmation', () => {

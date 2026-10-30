@@ -6,7 +6,10 @@ import { AuthContext } from '../auth/useAuth'
 import AdminPlaceholderPage from '../pages/AdminPlaceholderPage'
 import AdminNotFoundPage from '../pages/AdminNotFoundPage'
 import { adminSections } from '../pages/adminSections'
+import { getHealth } from '../services/api/healthApi'
 import AdminLayout from './AdminLayout'
+
+vi.mock('../services/api/healthApi', () => ({ getHealth: vi.fn() }))
 
 const session = {
   userId: '01JBQ9YDX7K3M8N5P2R4T6V8AA',
@@ -68,6 +71,7 @@ const current = () =>
 
 beforeEach(() => {
   logout = vi.fn().mockResolvedValue(undefined)
+  getHealth.mockResolvedValue({ service: 'auth-service', status: 'UP' })
 })
 afterEach(cleanup)
 
@@ -131,6 +135,20 @@ describe('Admin sidebar', () => {
       expect(screen.getByText('Chức năng này đang được phát triển.')).toBeTruthy()
       cleanup()
     }
+  })
+
+  it('shows the live API health instead of a hard-coded online label', async () => {
+    view()
+    expect(await screen.findByText('API trực tuyến')).toBeTruthy()
+    expect(screen.getByText('auth-service · UP')).toBeTruthy()
+    expect(screen.queryByText('Hệ thống trực tuyến')).toBeNull()
+  })
+
+  it('shows a clear connection error when the health check fails', async () => {
+    getHealth.mockRejectedValueOnce(new Error('offline'))
+    view()
+    expect(await screen.findByText('Mất kết nối API')).toBeTruthy()
+    expect(screen.getByText('Kiểm tra API Gateway / Auth Service')).toBeTruthy()
   })
 
   it('shows the not found page for an unknown admin address inside the layout', () => {

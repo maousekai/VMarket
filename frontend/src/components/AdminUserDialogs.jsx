@@ -260,6 +260,7 @@ export function LockDialog({ user, onCancel, onLocked }) {
             setError('')
           }}
           disabled={saving}
+          data-autofocus
           placeholder="Ví dụ: Vi phạm chính sách nền tảng"
           hint="Lý do được lưu vào lịch sử hoạt động để Admin khác xem lại."
           error={fieldError}
@@ -326,6 +327,7 @@ export function UnlockDialog({ user, onCancel, onUnlocked }) {
           className="account-button account-button--secondary"
           type="button"
           disabled={saving}
+          data-autofocus
           onClick={onCancel}
         >
           Hủy

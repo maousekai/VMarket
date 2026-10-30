@@ -57,6 +57,12 @@ export function sessionFromResponse(response, now = Date.now()) {
     email: claims.email,
     username: claims.username || '',
     status: response.status,
+    // The access token carries the authoritative flag. Older tokens without it still
+    // map ACTIVE to verified, which is how auth-service derives its status.
+    emailVerified:
+      typeof claims.email_verified === 'boolean'
+        ? claims.email_verified
+        : response.status === 'ACTIVE',
     roles: response.roles || [],
   }
 }

@@ -147,7 +147,12 @@ describe('Admin user list', () => {
     })
     click('Tìm kiếm')
     expect(screen.getByText('Từ khoá tối đa 100 ký tự.')).toBeTruthy()
-    expect(screen.getByLabelText('Tìm kiếm người dùng').getAttribute('aria-invalid')).toBe('true')
+    const input = screen.getByLabelText('Tìm kiếm người dùng')
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(input.getAttribute('aria-describedby')).toBe('admin-users-search-error')
+    expect(document.getElementById('admin-users-search-error').textContent).toBe(
+      'Từ khoá tối đa 100 ký tự.',
+    )
     expect(searchUsers).toHaveBeenCalledTimes(1)
   })
 
@@ -181,6 +186,29 @@ describe('Admin user list', () => {
     expect(await screen.findByText('Trang 2 / 3')).toBeTruthy()
     expect(screen.getByText('Hiển thị 11–11 trong số 25 người dùng')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Trước' }).disabled).toBe(false)
+  })
+
+  it('keeps the current table visible while the next page is loading', async () => {
+    let resolveSearch
+    searchUsers
+      .mockResolvedValueOnce(page([binh], { totalElements: 11, totalPages: 2 }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSearch = resolve
+          }),
+      )
+    view()
+    await nameButton('Nguyễn Văn Bình')
+    click('Sau')
+    await waitFor(() => expect(searchUsers).toHaveBeenCalledTimes(2))
+    const table = screen.getByRole('table')
+    expect(screen.getByText('Nguyễn Văn Bình')).toBeTruthy()
+    expect(table.closest('.admin-users__table-wrap').getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Sau' }).disabled).toBe(true)
+    resolveSearch(page([thuy], { page: 1, totalElements: 11, totalPages: 2 }))
+    expect(await screen.findByText('Trang 2 / 2')).toBeTruthy()
+    expect(await nameButton('thuy.tran')).toBeTruthy()
   })
 
   it('shows an empty state', async () => {
@@ -298,7 +326,9 @@ describe('Locking a user', () => {
   async function openLock() {
     await openDrawer('Nguyễn Văn Bình')
     click('Khóa tài khoản', within(drawer()))
-    return within(await lockDialog())
+    const dialog = within(await lockDialog())
+    expect(document.activeElement).toBe(dialog.getByLabelText(/Lý do khóa/))
+    return dialog
   }
 
   it('requires a reason, then locks, refreshes the list and shows the unlock action', async () => {
@@ -365,7 +395,9 @@ describe('Unlocking a user', () => {
     await openDrawer('thuy.tran')
     expect(within(drawer()).getByText(/Lý do: Spam đánh giá/)).toBeTruthy()
     click('Mở khóa tài khoản', within(drawer()))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Mở khóa tài khoản?' }))
+    const rawDialog = await screen.findByRole('dialog', { name: 'Mở khóa tài khoản?' })
+    const dialog = within(rawDialog)
+    expect(document.activeElement).toBe(dialog.getByRole('button', { name: 'Hủy' }))
     click('Mở khóa', dialog)
     await waitFor(() => expect(unlockUser).toHaveBeenCalledTimes(1))
     expect(unlockUser.mock.calls[0][0]).toBe(THUY_ID)

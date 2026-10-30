@@ -125,6 +125,22 @@ describe('Profile page additions', () => {
     )
   })
 
+  it('shows the email verification state from the session', () => {
+    view(<ProfilePage />, auth({ session: { ...session, emailVerified: false } }))
+    expect(screen.getByText('Email chưa xác thực')).toBeTruthy()
+    cleanup()
+    view(<ProfilePage />, auth({ session: { ...session, emailVerified: true } }))
+    expect(screen.getByText('Email đã xác thực')).toBeTruthy()
+  })
+
+  it('replaces the phone hint with its validation error', () => {
+    view(<ProfilePage />)
+    fill('Số điện thoại', '123')
+    click('Lưu thay đổi')
+    expect(screen.getByText('Số điện thoại phải là số di động Việt Nam hợp lệ.')).toBeTruthy()
+    expect(screen.queryByText('Số di động Việt Nam, bắt đầu bằng 0 hoặc +84.')).toBeNull()
+  })
+
   it('sends the edited date of birth and gender to the profile API', async () => {
     const value = auth()
     view(<ProfilePage />, value)
@@ -182,7 +198,8 @@ describe('Address book', () => {
     province: 'Thành phố Đà Nẵng',
     note: null,
   }
-  const card = async (name) => screen.findByRole('listitem', { name: `Địa chỉ của ${name}` })
+  const card = async (name) =>
+    (await screen.findByText(name, { selector: '.address-card__head strong' })).closest('li')
 
   it('lists addresses with the default marked and only the valid actions', async () => {
     listMyAddresses.mockResolvedValue([home, office])
@@ -429,10 +446,9 @@ describe('Address book', () => {
       .mockResolvedValueOnce(office)
     view(<AddressBookPage />)
     const button = () =>
-      within(screen.getByRole('listitem', { name: 'Địa chỉ của Trần Thu Hà' })).getByRole(
-        'button',
-        { name: 'Thiết lập mặc định' },
-      )
+      within(screen.getByText('Trần Thu Hà').closest('li')).getByRole('button', {
+        name: 'Thiết lập mặc định',
+      })
     await card('Trần Thu Hà')
     fireEvent.click(button())
     expect((await screen.findByRole('alert')).textContent).toContain('Chưa đổi được mặc định.')
@@ -444,7 +460,8 @@ describe('Address book', () => {
     listMyAddresses.mockResolvedValue([home, office])
     view(<AddressBookPage />)
     fireEvent.click(within(await card('Trần Thu Hà')).getByRole('button', { name: 'Xóa' }))
-    await screen.findByRole('dialog', { name: 'Xóa địa chỉ?' })
+    const dialog = await screen.findByRole('dialog', { name: 'Xóa địa chỉ?' })
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Hủy' }))
     expect(screen.queryByText(/sẽ được đặt làm mặc định/)).toBeNull()
     click('Hủy')
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -461,7 +478,7 @@ describe('Address book', () => {
     await waitFor(() => expect(deleteAddress).toHaveBeenCalledTimes(1))
     expect(deleteAddress.mock.calls[0][0]).toBe('a2')
     expect(await screen.findByText('Đã xóa địa chỉ.')).toBeTruthy()
-    await waitFor(() => expect(screen.queryByRole('listitem', { name: /Trần Thu Hà/ })).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Trần Thu Hà')).toBeNull())
   })
 
   it('explains that another address becomes the default when deleting the default one', async () => {

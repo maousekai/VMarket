@@ -61,6 +61,7 @@ export default function AvatarDialog({ profile, saveProfile, onClose }) {
             setError('')
           }}
           disabled={saving}
+          data-autofocus
           maxLength={500}
           placeholder="https://example.com/anh-cua-toi.jpg"
           hint="Nên dùng ảnh vuông. Tối đa 500 ký tự."

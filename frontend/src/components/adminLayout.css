@@ -124,6 +124,23 @@
   background: #16a34a;
   border-radius: 50%;
 }
+.admin-sidebar__dot--loading {
+  background: #f59e0b;
+  animation: admin-status-pulse 1.2s ease-in-out infinite;
+}
+.admin-sidebar__dot--error {
+  background: #ef4444;
+}
+@keyframes admin-status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-sidebar__dot--loading {
+    animation: none;
+  }
+}
 .admin-body {
   display: flex;
   flex-direction: column;
