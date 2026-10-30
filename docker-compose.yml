@@ -279,8 +279,12 @@ services:
       DB_NAME: vmarket_auth
       # Origin FE duoc phep (trung voi CORS_ALLOWED_ORIGINS trong .env)
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
-      # JWT (PBL6-41) - PROD phai override AUTH_JWT_SECRET bang chuoi ngau nhien manh.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      # JWT (PBL6-41). Secret va INTERNAL_API_KEY KHONG co mac dinh (PBL6-51): lay
+      # nguyen tu .env / shell. Thieu thi container nhan chuoi rong va service
+      # dung lai luc khoi dong (bat buoc >= 32 ky tu) thay vi chay bang secret cong
+      # khai. Khong dung ${VAR:?} vi Compose noi suy ca file -> hong moi lenh
+      # `docker compose`, ke ca `up -d` ha tang nhe (xem ghi chu o block minio).
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       AUTH_JWT_ACCESS_TTL: ${AUTH_JWT_ACCESS_TTL:-15m}
       AUTH_JWT_REFRESH_TTL: ${AUTH_JWT_REFRESH_TTL:-15d}
       # Cookie refresh token (PBL6-46) - false vi stack nay chay HTTP local/staging.
@@ -302,7 +306,7 @@ services:
       AUTH_PASSWORD_RESET_HOURLY_LIMIT: ${AUTH_PASSWORD_RESET_HOURLY_LIMIT:-5}
       # API noi bo /internal/** (PBL6-13) - user-service goi vao. PHAI TRUNG voi
       # INTERNAL_API_KEY cua block user-service ben duoi.
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"
@@ -336,12 +340,12 @@ services:
       # user-service chi VERIFY token do auth-service ky. HS256 la thuat toan doi
       # xung nen hai service PHAI dung chung mot chuoi bi mat - dat lech nhau se
       # dan toi canh dang nhap thanh cong nhung moi API ho so deu tra 401.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # Doi mat khau (FR-USER-03) va Admin quan ly tai khoan (FR-USER-04) goi API noi
       # bo cua auth-service - mat khau / trang thai khoa nam o CSDL vmarket_auth.
       # INTERNAL_API_KEY phai TRUNG voi block auth-service o tren.
       AUTH_SERVICE_URL: http://auth-service:8081
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${USER_SERVICE_PORT:-8082}:8082"
@@ -373,7 +377,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
       # shop-service chi VERIFY token do auth-service ky (HS256 doi xung) - PHAI
       # trung AUTH_JWT_SECRET cua block auth-service, lech la moi API tra 401.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${SHOP_SERVICE_PORT:-8083}:8083"
@@ -408,12 +412,12 @@ services:
       MONGO_DIRECT_CONNECTION: "true"
       DB_NAME: vmarket_chatbot
       # Chatbot tu verify token do auth-service ky - PHAI trung AUTH_JWT_SECRET.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
       # order-service / product-service chua container hoa -> goi qua may host.
       ORDER_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8086
       PRODUCT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8084
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     ports:
       - "${CHATBOT_SERVICE_PORT:-8102}:8102"
     extra_hosts:
@@ -453,7 +457,7 @@ services:
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # Origin FE duoc phep goi API qua gateway (phai trung voi FRONTEND_PORT).
       # Spring relaxed binding: APP_CORS_ALLOWED_ORIGINS -> app.cors.allowed-origins
       APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
