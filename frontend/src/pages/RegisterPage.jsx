@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/AuthLayout'
 import FormField from '../components/FormField'
 import FormMessage from '../components/FormMessage'
 import PasswordChecklist from '../components/PasswordChecklist'
 import { useAuth } from '../auth/useAuth'
+import { normalizePhone } from '../auth/phone'
 import { validateRegistration } from '../auth/validation'
 import { registerAccount, requestOtp } from '../services/api/authApi'
 import { getApiError } from '../services/api/apiClient'
@@ -31,7 +32,8 @@ export default function RegisterPage() {
   async function submit(event) {
     event.preventDefault()
     if (busy) return
-    const invalid = validateRegistration(values)
+    const normalized = { ...values, phone: normalizePhone(values.phone) }
+    const invalid = validateRegistration(normalized)
     setFields(invalid)
     setError(null)
     if (Object.keys(invalid).length) return
@@ -40,15 +42,19 @@ export default function RegisterPage() {
     auth.clearRegistrationDraft()
     setBusy(true)
     try {
-      const email = values.email.trim().toLowerCase()
-      await registerAccount({ email, username: values.username.trim(), password: values.password })
+      const email = normalized.email.trim().toLowerCase()
+      await registerAccount({
+        email,
+        username: normalized.username.trim(),
+        password: normalized.password,
+      })
       if (!action.current()) return
       auth.setRegistrationDraft({
         email,
-        fullName: values.fullName.trim(),
-        phone: values.phone.trim(),
+        fullName: normalized.fullName.trim(),
+        phone: normalized.phone,
       })
-      setValues({ ...values, password: '', confirmPassword: '' })
+      setValues({ ...normalized, password: '', confirmPassword: '' })
       let otpError = null
       let sent = false
       try {
@@ -79,17 +85,6 @@ export default function RegisterPage() {
       <FormMessage error={error} />
       <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy}>
         <FormField
-          label="Tên tài khoản"
-          name="username"
-          value={values.username}
-          onChange={change}
-          disabled={busy}
-          autoComplete="username"
-          error={fields.username}
-          hint="3–50 ký tự: chữ, số và . _ -"
-          required
-        />
-        <FormField
           label="Họ và tên"
           name="fullName"
           value={values.fullName}
@@ -99,6 +94,35 @@ export default function RegisterPage() {
           maxLength={100}
           error={fields.fullName}
         />
+        <div className="auth-form__row">
+          <FormField
+            label="Tên tài khoản"
+            name="username"
+            value={values.username}
+            onChange={change}
+            disabled={busy}
+            autoComplete="nickname"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={50}
+            error={fields.username}
+            hint="3–50 ký tự: chữ, số và . _ -"
+            required
+          />
+          <FormField
+            label="Số điện thoại"
+            name="phone"
+            type="tel"
+            inputMode="tel"
+            value={values.phone}
+            onChange={change}
+            disabled={busy}
+            autoComplete="tel"
+            placeholder="0912345678"
+            maxLength={15}
+            error={fields.phone}
+          />
+        </div>
         <FormField
           label="Email"
           name="email"
@@ -106,20 +130,13 @@ export default function RegisterPage() {
           value={values.email}
           onChange={change}
           disabled={busy}
-          autoComplete="email"
+          autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="example@gmail.com"
           error={fields.email}
+          maxLength={320}
           required
-        />
-        <FormField
-          label="Số điện thoại"
-          name="phone"
-          type="tel"
-          value={values.phone}
-          onChange={change}
-          disabled={busy}
-          autoComplete="tel"
-          error={fields.phone}
-          placeholder="0905 xxx xxx"
         />
         <FormField
           label="Mật khẩu"
@@ -149,9 +166,6 @@ export default function RegisterPage() {
           {busy ? 'Đang tạo tài khoản…' : 'Tạo tài khoản'}
         </button>
       </form>
-      <p className="auth-footer">
-        Đã có tài khoản? <Link to="/login">Đăng nhập</Link>
-      </p>
     </AuthLayout>
   )
 }

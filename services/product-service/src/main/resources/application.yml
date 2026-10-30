@@ -26,10 +26,20 @@ management:
         # 'metrics' cần cho alert dựa trên vmarket.outbox.pending / dead.total.
         include: health,info,metrics,prometheus
 
+# JWT (PBL6-49) - product-service chỉ VERIFY access token do auth-service ký
+# (HS256, khoá đối xứng) nên dùng chung AUTH_JWT_SECRET. KHÔNG có giá trị mặc định
+# ở mọi profile (kể cả dev): thiếu biến là fail ngay lúc khởi động thay vì chạy với
+# khoá công khai. Chạy local: nạp biến từ services/product-service/.env.example.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
-  internal-api-key: ${INTERNAL_API_KEY:dev-only-product-internal-key}
+  # Khoá API nội bộ (tồn kho, /internal/**). Không có mặc định, cùng lý do với
+  # AUTH_JWT_SECRET ở trên.
+  internal-api-key: ${INTERNAL_API_KEY}
   events:
     listen: ${EVENTS_LISTEN:true}
     # v2 avoids redeclaring the legacy durable queue with incompatible DLX arguments.

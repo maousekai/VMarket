@@ -47,6 +47,15 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
+		<!--
+		  RestClient.Builder (auto-configuration org.springframework.boot.restclient.*)
+		  cho BrevoEmailSender (auth.email.provider=brevo). Boot 4 tach module nay ra
+		  khoi starter webmvc nen phai khai bao rieng (PBL6-66).
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-restclient</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
