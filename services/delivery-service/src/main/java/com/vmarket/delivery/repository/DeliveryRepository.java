@@ -177,11 +177,22 @@ update delivery_assignments set shipper_id=?, status=?, attempt=?, version=?, la
     }
 
     public List<String> candidates(String province, String district) {
+        if (district == null || district.isBlank()) {
+            return jdbc.queryForList(
+                    """
+                    select s.id from shippers s left join delivery_assignments d on d.shipper_id=s.id
+                        and d.status not in ('DELIVERED','RETURNED')
+                    where s.active=true and s.province=?
+                    group by s.id order by count(d.id), s.id
+                    """,
+                    String.class,
+                    province);
+        }
         return jdbc.queryForList(
                 """
                 select s.id from shippers s left join delivery_assignments d on d.shipper_id=s.id
                     and d.status not in ('DELIVERED','RETURNED')
-                where s.active=true and s.province=? and s.district=?
+                where s.active=true and s.province=? and (s.district=? or s.district is null or s.district='')
                 group by s.id order by count(d.id), s.id
                 """,
                 String.class,
