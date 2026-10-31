@@ -16,7 +16,7 @@ import java.util.UUID;
 
 class DeliveryOutboxMigrationTest {
     @Test
-    void existingPendingEventsSurviveUpgradeAndNewEventsGetRetryDefaults() {
+    void existingPendingEventsSurviveUpgradeAndNewEventsGetRetryDefaults() throws Exception {
         String url =
                 "jdbc:h2:mem:outbox-upgrade-"
                         + UUID.randomUUID()
@@ -47,7 +47,13 @@ class DeliveryOutboxMigrationTest {
                 a.getId());
         var flyway = Flyway.configure().dataSource(url, "sa", "").load();
         flyway.migrate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        try (var c = new DriverManagerDataSource(url, "sa", "").getConnection()) {
+            assertThat(columnIsNullable(c, "shippers", "district")).isTrue();
+            assertThat(columnIsNullable(c, "delivery_assignments", "district")).isTrue();
+            assertThat(columnIsNullable(c, "shippers", "province")).isFalse();
+            assertThat(columnIsNullable(c, "delivery_assignments", "province")).isFalse();
+        }
         assertThat(jdbc.queryForObject("select payload from delivery_outbox", String.class))
                 .isEqualTo("{\"pending\":true}");
         assertThat(jdbc.queryForObject("select retry_attempts from delivery_outbox", Integer.class))
@@ -70,5 +76,20 @@ class DeliveryOutboxMigrationTest {
                                         + " next_attempt_at<=CURRENT_TIMESTAMP",
                                 Integer.class))
                 .isEqualTo(2);
+    }
+
+    private static boolean columnIsNullable(java.sql.Connection c, String table, String column)
+            throws Exception {
+        var meta = c.getMetaData();
+        for (String t : new String[] {table, table.toUpperCase()}) {
+            for (String col : new String[] {column, column.toUpperCase()}) {
+                try (var rs = meta.getColumns(null, null, t, col)) {
+                    if (rs.next()) {
+                        return rs.getInt("NULLABLE") == java.sql.DatabaseMetaData.columnNullable;
+                    }
+                }
+            }
+        }
+        return false;
     }
 }

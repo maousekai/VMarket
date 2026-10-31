@@ -23,7 +23,7 @@ public final class DeliveryRequests {
             @NotBlank @Size(max = 100) String name,
             @NotBlank @Size(max = 20) String phone,
             @NotBlank @Size(max = 100) String province,
-            @NotBlank @Size(max = 100) String district) {}
+            @Size(max = 100) String district) {}
 
     public record Assign(
             @NotBlank @Size(max = 26) String shipperId,

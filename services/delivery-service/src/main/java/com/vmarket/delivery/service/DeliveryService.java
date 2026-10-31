@@ -42,6 +42,27 @@ public class DeliveryService {
         return AreaNames.normalize(value);
     }
 
+    public static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
+    static boolean isAreaMismatch(
+            String shipperProvince,
+            String shipperDistrict,
+            String orderProvince,
+            String orderDistrict) {
+        if (!Objects.equals(shipperProvince, orderProvince)) {
+            return true;
+        }
+        if (shipperDistrict == null
+                || shipperDistrict.isBlank()
+                || orderDistrict == null
+                || orderDistrict.isBlank()) {
+            return false;
+        }
+        return !shipperDistrict.equals(orderDistrict);
+    }
+
     private static ApiException forbidden() {
         return new ApiException(
                 "FORBIDDEN", HttpStatus.FORBIDDEN, "Không có quyền với chuyến giao này");
@@ -58,6 +79,8 @@ public class DeliveryService {
     public Map<String, Object> createShipper(
             String actor, String key, DeliveryRequests.Shipper request) {
         String id = clients.createShipper(actor, key, request.account());
+        String province = area(request.province());
+        String district = blankToNull(area(request.district()));
         return tx().execute(
                         ignored -> {
                             var old =
@@ -68,8 +91,8 @@ public class DeliveryService {
                                 if (!s.get("id").equals(id)
                                         || !s.get("name").equals(request.name().trim())
                                         || !s.get("phone").equals(request.phone().trim())
-                                        || !s.get("province").equals(area(request.province()))
-                                        || !s.get("district").equals(area(request.district()))) {
+                                        || !Objects.equals(s.get("province"), province)
+                                        || !Objects.equals(s.get("district"), district)) {
                                     throw ApiException.conflict(
                                             "PROVISION_KEY_REUSED",
                                             "Khoá tạo shipper đã được dùng với hồ sơ khác");
@@ -84,8 +107,8 @@ public class DeliveryService {
                                     key,
                                     request.name().trim(),
                                     request.phone().trim(),
-                                    area(request.province()),
-                                    area(request.district()));
+                                    province,
+                                    district);
                             return repo.shipper(id);
                         });
     }
@@ -195,7 +218,8 @@ order by s.id limit ? offset ?
                                                             .longValueExact()
                                                     : 0);
                                     a.setProvince(area(claimed.path("province").asString()));
-                                    a.setDistrict(area(claimed.path("district").asString()));
+                                    a.setDistrict(
+                                            blankToNull(area(claimed.path("district").asString())));
                                     repo.insert(a);
                                 }
                             });
@@ -320,8 +344,11 @@ order by s.id limit ? offset ?
                                 throw ApiException.conflict(
                                         "SHIPPER_INACTIVE", "Shipper đã bị khoá");
                             boolean mismatch =
-                                    !s.get("province").equals(a.getProvince())
-                                            || !s.get("district").equals(a.getDistrict());
+                                    isAreaMismatch(
+                                            (String) s.get("province"),
+                                            (String) s.get("district"),
+                                            a.getProvince(),
+                                            a.getDistrict());
                             if (mismatch && !Boolean.TRUE.equals(request.overrideArea())) {
                                 throw ApiException.conflict(
                                         "AREA_MISMATCH", "Shipper không phụ trách khu vực này");
