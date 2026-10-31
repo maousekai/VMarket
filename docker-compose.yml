@@ -303,6 +303,9 @@ services:
       # API noi bo /internal/** (PBL6-13) - user-service goi vao. PHAI TRUNG voi
       # INTERNAL_API_KEY cua block user-service ben duoi.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+      # Tai khoan ADMIN mau cho profile dev (DevAdminSeeder). De trong = sinh mat
+      # khau ngau nhien va in ra log WARN lan dau tao; khong con mat khau co dinh.
+      DEV_ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:-}
     ports:
       # Publish de co the goi truc tiep tu may host khi debug (khong bat buoc)
       - "${AUTH_SERVICE_PORT:-8081}:8081"

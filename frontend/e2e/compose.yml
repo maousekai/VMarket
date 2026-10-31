@@ -56,6 +56,8 @@ services:
       AUTH_REFRESH_COOKIE_SECURE: 'false'
       AUTH_REFRESH_COOKIE_SAMESITE: Lax
       AUTH_JWT_ACCESS_TTL: ${E2E_ACCESS_TTL:-30s}
+      # e2e/account.spec.js đăng nhập bằng tài khoản mẫu này.
+      DEV_ADMIN_PASSWORD: Admin@12345
     depends_on:
       postgres:
         condition: service_healthy

@@ -88,6 +88,7 @@ các subtask sau bổ sung theo expand–contract.
 | `AUTH_JWT_ACCESS_TTL`    | `15m`            | Thời hạn access token               |
 | `AUTH_JWT_REFRESH_TTL`   | `30d`            | Thời hạn refresh token              |
 | `INTERNAL_API_KEY`       | *(giả, ở dev yml)* | Khoá API nội bộ `/internal/**` (≥ 32 ký tự), trùng user-service; prod bắt buộc set |
+| `DEV_ADMIN_PASSWORD`     | *(trống)* | Mật khẩu `admin@vmarket.local` cho profile dev; trống thì `DevAdminSeeder` sinh ngẫu nhiên và ghi log WARN |
 | `AUTH_REFRESH_COOKIE_SECURE`   | `false` (dev) | Cookie `refresh_token` chỉ gửi qua HTTPS; `true` bắt buộc ở môi trường dùng HTTPS thật |
 | `AUTH_REFRESH_COOKIE_SAMESITE` | `Lax`         | SameSite của cookie `refresh_token` |
 

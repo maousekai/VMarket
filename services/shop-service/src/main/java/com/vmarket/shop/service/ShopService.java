@@ -160,7 +160,7 @@ public class ShopService {
 		shop.setContactEmail(request.contactEmail().trim());
 		shop.setContactPhone(request.contactPhone().trim());
 		shop.setProvince(request.province().trim());
-		shop.setDistrict(request.district().trim());
+		shop.setDistrict(blankToNull(request.district()));
 		shop.setWard(request.ward().trim());
 		shop.setStreetAddress(request.streetAddress().trim());
 	}

@@ -1,6 +1,7 @@
 package com.vmarket.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -204,6 +205,34 @@ class OrderApiTest {
                         new BigDecimal("500000.00"), new BigDecimal("250000.00"));
 
         verify(cartServiceClient, times(2)).removeCartItem(eq(ALICE), anyString(), any());
+    }
+
+    @Test
+    void placeOrderWithAddressWithoutDistrictSucceeds() throws Exception {
+        // Địa chỉ tạo từ UI mới không có quận/huyện (Đà Nẵng bỏ cấp này từ 01/07/2025).
+        UserServiceClient.AddressView address =
+                new UserServiceClient.AddressView(
+                        ADDRESS_ID,
+                        "Nguyễn Văn An",
+                        "0912345678",
+                        "Đà Nẵng",
+                        null,
+                        "Thạch Thang",
+                        "54 Nguyễn Lương Bằng");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(address);
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.district").value(nullValue()));
+
+        Order saved = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0);
+        assertThat(saved.getDistrict()).isNull();
     }
 
     @Test

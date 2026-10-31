@@ -83,7 +83,8 @@ public class Shop extends BaseEntity {
 	@Column(nullable = false, length = 100)
 	private String province;
 
-	@Column(nullable = false, length = 100)
+	/** Quận/huyện — nullable vì Đà Nẵng bỏ cấp này từ 01/07/2025. */
+	@Column(length = 100)
 	private String district;
 
 	@Column(nullable = false, length = 100)

@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/AuthLayout'
 import FormField from '../components/FormField'
 import FormMessage from '../components/FormMessage'
+import PasswordChecklist from '../components/PasswordChecklist'
 import { useAuth } from '../auth/useAuth'
 import { normalizePhone } from '../auth/phone'
 import { validateRegistration } from '../auth/validation'
@@ -146,9 +147,10 @@ export default function RegisterPage() {
           disabled={busy}
           autoComplete="new-password"
           error={fields.password}
-          hint="8–32 ký tự, có chữ hoa, số và ký tự đặc biệt"
+          describedBy="register-password-requirements"
           required
         />
+        <PasswordChecklist id="register-password-requirements" password={values.password} />
         <FormField
           label="Xác nhận mật khẩu"
           name="confirmPassword"

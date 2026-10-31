@@ -161,7 +161,7 @@ public class AddressService {
 		address.setRecipientName(request.recipientName().trim());
 		address.setPhone(request.phone().trim());
 		address.setProvince(request.province().trim());
-		address.setDistrict(request.district().trim());
+		address.setDistrict(request.district() == null || request.district().isBlank() ? null : request.district().trim());
 		address.setWard(request.ward().trim());
 		address.setStreetAddress(request.streetAddress().trim());
 		address.setNote(request.note() == null || request.note().isBlank() ? null : request.note().trim());

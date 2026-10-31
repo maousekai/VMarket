@@ -11,6 +11,12 @@ import VerifyEmailPage from './pages/VerifyEmailPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import ProfilePage from './pages/ProfilePage'
+import AddressBookPage from './pages/AddressBookPage'
+import AdminLayout from './components/AdminLayout'
+import AdminNotFoundPage from './pages/AdminNotFoundPage'
+import AdminPlaceholderPage from './pages/AdminPlaceholderPage'
+import { adminSections } from './pages/adminSections'
+import ChangePasswordPage from './pages/ChangePasswordPage'
 import SellerPage from './pages/SellerPage'
 import SellerIntroPage from './pages/SellerIntroPage'
 import RoleAreaPage from './pages/RoleAreaPage'
@@ -33,16 +39,28 @@ export default function App() {
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route element={<RouteGuard roles={['ADMIN']} />}>
+          <Route path="/admin" element={<AdminLayout />}>
+            {adminSections.map(({ Component, ...section }) => {
+              const element = Component ? <Component /> : <AdminPlaceholderPage section={section} />
+              return section.path === '' ? (
+                <Route key="overview" index element={element} />
+              ) : (
+                <Route key={section.path} path={section.path} element={element} />
+              )
+            })}
+            <Route path="*" element={<AdminNotFoundPage />} />
+          </Route>
+        </Route>
         <Route element={<ApplicationLayout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route element={<RouteGuard />}>
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/profile/addresses" element={<AddressBookPage />} />
+            <Route path="/profile/password" element={<ChangePasswordPage />} />
             <Route path="/seller" element={<SellerPage />} />
             <Route path="/seller/register" element={<SellerIntroPage />} />
-          </Route>
-          <Route element={<RouteGuard roles={['ADMIN']} />}>
-            <Route path="/admin" element={<RoleAreaPage role="ADMIN" />} />
           </Route>
           <Route element={<RouteGuard roles={['SHIPPER']} />}>
             <Route path="/shipper" element={<RoleAreaPage role="SHIPPER" />} />

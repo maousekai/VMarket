@@ -42,7 +42,8 @@ public class Address extends BaseEntity {
 	@Column(nullable = false, length = 100)
 	private String province;
 
-	@Column(nullable = false, length = 100)
+	/** Không bắt buộc từ 01/07/2025 (Đà Nẵng bỏ cấp quận/huyện); địa chỉ cũ vẫn giữ giá trị. */
+	@Column(length = 100)
 	private String district;
 
 	@Column(nullable = false, length = 100)

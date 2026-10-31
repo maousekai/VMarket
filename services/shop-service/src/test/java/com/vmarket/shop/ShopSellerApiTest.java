@@ -55,6 +55,22 @@ class ShopSellerApiTest extends ShopApiTestSupport {
 	}
 
 	@Test
+	void dangKy_khongCoQuanHuyen_vanTaoDuocGianHang() throws Exception {
+		// Địa chỉ hai cấp: Đà Nẵng bỏ quận/huyện từ 01/07/2025 nên trường này không bắt buộc.
+		Map<String, Object> body = validShop("Tiệm Gốm Hội An");
+		body.remove("district");
+
+		mockMvc.perform(post("/api/shops")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(body)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.district").value(nullValue()));
+
+		assertThat(shopRepository.findByOwnerId(OWNER_A).orElseThrow().getDistrict()).isNull();
+	}
+
+	@Test
 	void dangKy_khongCoToken_tra401() throws Exception {
 		mockMvc.perform(post("/api/shops")
 						.contentType(MediaType.APPLICATION_JSON)

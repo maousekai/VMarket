@@ -20,7 +20,7 @@ import org.springframework.test.context.TestPropertySource;
 import com.vmarket.shop.entity.Shop;
 
 /**
- * Chạy Flyway THẬT (V1, V2) trên H2 (MODE=PostgreSQL) và để
+ * Chạy Flyway THẬT (V1, V2, V3) trên H2 (MODE=PostgreSQL) và để
  * Hibernate {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra
  * — cùng khuôn với {@code FlywayMigrationTest} của auth-service / user-service.
  *
@@ -46,8 +46,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("2");
-		assertThat(flyway.info().applied()).hasSize(2);
+		assertThat(current.getVersion().getVersion()).isEqualTo("3");
+		assertThat(flyway.info().applied()).hasSize(3);
 	}
 
 	@Test
@@ -70,6 +70,8 @@ class FlywayMigrationTest {
 				assertThat(columnExists(c, "shop_profile_changes", column))
 						.as("shop_profile_changes.%s", column).isTrue();
 			}
+			// V3 - dia chi hai cap: district duoc phep NULL.
+			assertThat(columnIsNullable(c, "shops", "district")).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
 	}
@@ -109,6 +111,20 @@ class FlywayMigrationTest {
 				try (ResultSet rs = meta.getColumns(null, null, t, col)) {
 					if (rs.next()) {
 						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean columnIsNullable(Connection c, String table, String column) throws Exception {
+		DatabaseMetaData meta = c.getMetaData();
+		for (String t : new String[] { table, table.toUpperCase() }) {
+			for (String col : new String[] { column, column.toUpperCase() }) {
+				try (ResultSet rs = meta.getColumns(null, null, t, col)) {
+					if (rs.next()) {
+						return rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable;
 					}
 				}
 			}

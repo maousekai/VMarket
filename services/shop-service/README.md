@@ -63,7 +63,8 @@ Body `POST /api/shops` và `PUT /api/shops/me`:
 | `policies` | | Chính sách đổi trả / vận chuyển, ≤ 5000 ký tự |
 | `contactEmail` | ✓ | Email hợp lệ |
 | `contactPhone` | ✓ | Số di động Việt Nam: `0xxxxxxxxx` hoặc `+84xxxxxxxxx` |
-| `province`, `district`, `ward`, `streetAddress` | ✓ | Địa chỉ kho / lấy hàng |
+| `province`, `ward`, `streetAddress` | ✓ | Địa chỉ kho / lấy hàng |
+| `district` |  | Quận/huyện — không bắt buộc từ 01/07/2025 (Đà Nẵng bỏ cấp này); lưu `NULL` khi trống |
 
 Swagger UI: <http://localhost:8083/swagger-ui.html> · spec: `/v3/api-docs`
 

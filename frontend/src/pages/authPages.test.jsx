@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthContext } from '../auth/useAuth'
@@ -212,6 +212,33 @@ describe('Registration flow', () => {
       username: 'buyer.one',
       password: 'StrongPass1!',
     })
+  })
+
+  it('updates the password checklist live with a green tick for each met rule', () => {
+    renderPage(<RegisterPage />, '/register')
+    const input = screen.getByLabelText('Mật khẩu')
+    const checklist = screen.getByRole('list', { name: 'Yêu cầu mật khẩu' })
+    const labels = [
+      'Từ 8 đến 32 ký tự',
+      'Có ít nhất 1 chữ hoa',
+      'Có ít nhất 1 chữ số',
+      'Có ít nhất 1 ký tự đặc biệt',
+    ]
+    const item = (label) => within(checklist).getByText(label).closest('li')
+    const met = (label) => item(label).classList.contains('is-met')
+
+    expect(input.getAttribute('aria-describedby')).toBe('register-password-requirements')
+    expect(labels.every((label) => !met(label))).toBe(true)
+
+    fireEvent.change(input, { target: { value: 'Abcdefg1!' } })
+    expect(labels.every((label) => met(label))).toBe(true)
+    expect(within(item('Có ít nhất 1 chữ hoa')).getByText('(đã đạt)')).toBeTruthy()
+
+    fireEvent.change(input, { target: { value: 'abcdefgh' } })
+    expect(met('Từ 8 đến 32 ký tự')).toBe(true)
+    expect(met('Có ít nhất 1 chữ hoa')).toBe(false)
+    expect(met('Có ít nhất 1 chữ số')).toBe(false)
+    expect(met('Có ít nhất 1 ký tự đặc biệt')).toBe(false)
   })
 
   it('normalizes a formatted phone before saving the registration draft', async () => {

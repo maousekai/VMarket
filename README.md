@@ -186,6 +186,25 @@ Mỗi service đọc cấu hình từ biến môi trường (đã có giá trị
 
 > **Tối ưu khi dev local:** chỉ chạy **API Gateway + các service bạn đang làm**. Không cần bật hết 14 service.
 
+## Tài khoản admin mẫu (chỉ dev)
+
+Khi auth-service chạy với profile `dev` (mặc định của `mvnw spring-boot:run` và của
+docker compose), `DevAdminSeeder` tạo sẵn một tài khoản quản trị cho giao diện `/admin`:
+
+| Email | Mật khẩu | Username | Vai trò |
+|---|---|---|---|
+| `admin@vmarket.local` | `DEV_ADMIN_PASSWORD` (để trống = sinh ngẫu nhiên) | `admin.vmarket` | `ADMIN` |
+
+- Seeder chạy bằng **code** (`@Profile("dev")`), không còn migration Flyway trong `db/dev`.
+  DB dev từng chạy seed cũ vẫn migrate được vì `application.yml` bỏ qua đúng repeatable
+  migration đã mất (`repeatable:missing`), không bỏ qua migration `V*`.
+- Đặt `DEV_ADMIN_PASSWORD` trong `.env` (hoặc biến môi trường) để có mật khẩu cố định.
+  Để trống thì lần chạy đầu seeder sinh mật khẩu ngẫu nhiên và ghi ra log `WARN`; đổi mật
+  khẩu trong DB sau đó thì seeder không ghi đè.
+- Seeder idempotent: email **hoặc** username đã tồn tại (kể cả tạo tay) thì giữ nguyên,
+  không nâng quyền tài khoản đó. Production không có bean này nên không bao giờ tạo tài khoản.
+- Muốn cấp quyền admin cho tài khoản khác khi dev: thêm dòng vào `user_roles` của DB `vmarket_auth`.
+
 ## AI Search — PBL6-21
 
 [README AI Search](services/ai-search-service/README.md) hướng dẫn setup, API,

@@ -15,7 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V4) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V5) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
  *
  * <p>Nếu context khởi động được nghĩa là: (1) script migration chạy không lỗi,
@@ -30,11 +30,11 @@ import org.springframework.test.context.TestPropertySource;
  * <p>Giống {@code com.vmarket.auth.FlywayMigrationTest} bên auth-service — cố ý
  * chép cùng một khuôn để hai service kiểm migration theo đúng một cách.
  *
- * <p><b>Trên H2 chỉ thấy V1, V2 và V4 — thiếu V3.</b> {@code locations} có
+ * <p><b>Trên H2 chỉ thấy V1, V2, V4 và V5 — thiếu V3.</b> {@code locations} có
  * placeholder {@code {vendor}}; chạy trên H2 thì {@code db/vendor/h2} không tồn tại
  * nên {@code db/vendor/postgresql/V3__addresses_one_default_per_user.sql} (partial
  * index, cú pháp riêng của Postgres) không được nạp. Trên PostgreSQL thật sẽ có đủ
- * bốn — con số 3 dưới đây là <b>đúng cho H2</b>, không phải số migration của prod.
+ * năm — con số 4 dưới đây là <b>đúng cho H2</b>, không phải số migration của prod.
  */
 @SpringBootTest
 @TestPropertySource(properties = {
@@ -52,8 +52,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("4");
-		assertThat(flyway.info().applied()).hasSize(3);
+		assertThat(current.getVersion().getVersion()).isEqualTo("5");
+		assertThat(flyway.info().applied()).hasSize(4);
 	}
 
 	@Test
@@ -90,6 +90,30 @@ class FlywayMigrationTest {
 			assertThat(columnExists(c, "idempotency_keys", "completed_at")).isTrue();
 		}
 		// Context đã khởi động với ddl-auto=validate -> entity đã khớp schema migration.
+	}
+
+	@Test
+	void addressDistrict_isOptionalSinceV5_otherAddressColumnsStayRequired() throws Exception {
+		try (Connection c = dataSource.getConnection()) {
+			assertThat(columnNullable(c, "addresses", "district")).isTrue();
+			assertThat(columnNullable(c, "addresses", "province")).isFalse();
+			assertThat(columnNullable(c, "addresses", "ward")).isFalse();
+			assertThat(columnNullable(c, "addresses", "street_address")).isFalse();
+		}
+	}
+
+	private static boolean columnNullable(Connection c, String table, String column) throws Exception {
+		DatabaseMetaData meta = c.getMetaData();
+		for (String t : new String[] { table, table.toUpperCase() }) {
+			for (String col : new String[] { column, column.toUpperCase() }) {
+				try (ResultSet rs = meta.getColumns(null, null, t, col)) {
+					if (rs.next()) {
+						return rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable;
+					}
+				}
+			}
+		}
+		throw new IllegalStateException("Không tìm thấy cột " + table + "." + column);
 	}
 
 	private static boolean columnExists(Connection c, String table, String column) throws Exception {
