@@ -80,6 +80,12 @@ trống): container `minio` từ chối khởi động khi thiếu một trong h
 credential mặc định. Các lệnh Compose khác không phụ thuộc hai biến này. Giữ nguyên
 `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
+`AUTH_JWT_SECRET` và `INTERNAL_API_KEY` cũng không có giá trị mặc định trong
+`docker-compose.yml`: thiếu thì các service dùng chúng (auth, user, shop, gateway,
+chatbot) dừng lúc khởi động thay vì chạy bằng secret công khai. Nếu `.env` có từ
+trước, thêm hai biến này theo `.env.example` (tối thiểu 32 ký tự; môi trường thật
+dùng chuỗi ngẫu nhiên).
+
 ```bash
 # Bộ nhẹ mặc định (~1.5GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ
 docker compose up -d postgres mongo mongo-init-replica redis rabbitmq
