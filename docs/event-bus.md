@@ -153,7 +153,7 @@ park phía outbox của Product Catalog (xem `§7`).
 | Sự kiện | Phát | Nhận |
 |---|---|---|
 | `ProductCreated` / `ProductUpdated` / `ProductDeleted` | Product Catalog | AI Search, Recommendation |
-| `ShopApproved` / `ShopSuspended` | Shop | Auth, Product Catalog, Notification |
+| `ShopApproved` / `ShopSuspended` | Shop | Auth (PBL6-27), Product Catalog, Notification |
 | `OrderPlaced` | Order | Product Catalog, Payment, Notification, Recommendation |
 | `OrderStatusChanged` | Order | Product Catalog, Notification, Recommendation |
 | `StockReserved` / `StockReleased` / `StockReservationFailed` | Product Catalog | Order |
@@ -202,6 +202,13 @@ có sự kiện "ma" cho thay đổi bị rollback; đổi lại là tối đa m
 
 Thời điểm duyệt / đình chỉ = `timestamp` của envelope. Từ chối hồ sơ và gửi lại hồ sơ
 **không** phát sự kiện (SRS §8.1 không định nghĩa).
+
+Auth Service (PBL6-27) nghe `ShopApproved` trên queue riêng `auth.events.v1` để cấp
+vai trò `SELLER` cho `ownerId`. Consumer idempotent: cấp lại role đã có là no-op, và
+xử lý cả `reinstated=true`. `ShopSuspended` **không** thu hồi role — người bán vẫn
+đăng nhập được để xem lý do và hồ sơ, nhưng API gian hàng từ chối thao tác khi shop
+không `ACTIVE`. Queue khai báo với `EVENTS_LISTEN=true`; test tắt consumer bằng
+`EVENTS_LISTEN=false`.
 
 ### 5.2. `UserBehaviorTracked` (PBL6-24, consumer contract)
 

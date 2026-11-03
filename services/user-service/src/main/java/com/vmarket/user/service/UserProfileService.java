@@ -4,8 +4,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.List;
+
 import com.vmarket.user.dto.ProfileResponse;
 import com.vmarket.user.dto.UpdateProfileRequest;
+import com.vmarket.user.dto.UserProfileSummaryResponse;
 import com.vmarket.user.entity.UserProfile;
 import com.vmarket.user.repository.UserProfileRepository;
 
@@ -94,5 +98,20 @@ public class UserProfileService {
 
 	private static String blankToNull(String value) {
 		return (value == null || value.isBlank()) ? null : value.trim();
+	}
+
+	/** Tóm tắt hồ sơ theo lô; id không tồn tại bị bỏ qua thay vì làm hỏng cả request. */
+	@Transactional(readOnly = true)
+	public List<UserProfileSummaryResponse> summaries(Collection<String> userIds) {
+		List<String> uniqueIds = userIds.stream()
+				.filter(id -> id != null && !id.isBlank())
+				.distinct()
+				.toList();
+		if (uniqueIds.isEmpty()) {
+			return List.of();
+		}
+		return userProfileRepository.findByUserIdIn(uniqueIds).stream()
+				.map(UserProfileSummaryResponse::from)
+				.toList();
 	}
 }

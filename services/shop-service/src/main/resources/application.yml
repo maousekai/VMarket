@@ -49,6 +49,15 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # Service downstream cho dashboard + enrich tên/avatar. Thiếu INTERNAL_API_KEY
+  # thi fail ngay luc khoi dong (xem DownstreamProperties).
+  downstream:
+    user-service-url: ${USER_SERVICE_URL:http://localhost:8082}
+    order-service-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+    product-service-url: ${PRODUCT_SERVICE_URL:http://localhost:8084}
+    internal-api-key: ${INTERNAL_API_KEY}
+    connect-timeout: ${DOWNSTREAM_CONNECT_TIMEOUT:2s}
+    read-timeout: ${DOWNSTREAM_READ_TIMEOUT:5s}
   # Event bus (shared-events - PBL6-39): shop-service CHI PHAT su kien nen de
   # listen=false (mac dinh) - khong khai bao queue, khong mo ket noi consumer.
   # Exchange mac dinh: vmarket.events (docs/event-bus.md).

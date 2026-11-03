@@ -5,18 +5,23 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.vmarket.shop.dto.ErrorResponse;
+import com.vmarket.shop.dto.ShopRecentOrderResponse;
 import com.vmarket.shop.dto.ShopRequest;
 import com.vmarket.shop.dto.ShopResponse;
+import com.vmarket.shop.dto.ShopStatsResponse;
 import com.vmarket.shop.dto.ShopStatusHistoryResponse;
 import com.vmarket.shop.service.ShopService;
+import com.vmarket.shop.service.ShopStatsService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -26,6 +31,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -38,10 +45,12 @@ import lombok.RequiredArgsConstructor;
 @SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/shops")
+@Validated
 @RequiredArgsConstructor
 public class MyShopController {
 
 	private final ShopService shopService;
+	private final ShopStatsService shopStatsService;
 
 	@Operation(summary = "Đăng ký mở gian hàng (FR-SHOP-01)",
 			description = "Cần vai trò BUYER. Hồ sơ vào trạng thái PENDING (Chờ duyệt) cho tới khi Admin duyệt. "
@@ -125,5 +134,36 @@ public class MyShopController {
 	@GetMapping("/me/status-history")
 	public List<ShopStatusHistoryResponse> myHistory(@AuthenticationPrincipal String userId) {
 		return shopService.myHistory(userId);
+	}
+
+	@Operation(summary = "Thống kê dashboard của gian hàng",
+			description = "Chỉ gian hàng ACTIVE. Số liệu đơn hàng lấy từ order-service; top sản phẩm và số "
+					+ "sản phẩm đang bán enrich từ product-service.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Thành công"),
+			@ApiResponse(responseCode = "404", description = "Chưa đăng ký gian hàng (SHOP_NOT_FOUND)"),
+			@ApiResponse(responseCode = "409", description = "Gian hàng chưa hoạt động (SHOP_NOT_ACTIVE)"),
+			@ApiResponse(responseCode = "503", description = "Không đọc được order-service (STATS_UNAVAILABLE)"),
+	})
+	@GetMapping("/me/stats")
+	public ShopStatsResponse stats(@AuthenticationPrincipal String userId,
+			@RequestParam(defaultValue = "7d") String range) {
+		return shopStatsService.stats(userId, range);
+	}
+
+	@Operation(summary = "Đơn hàng gần đây của gian hàng",
+			description = "Chỉ gian hàng ACTIVE. Tiền và số lượng chỉ tính item thuộc gian hàng này.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Thành công"),
+			@ApiResponse(responseCode = "409", description = "Gian hàng chưa hoạt động (SHOP_NOT_ACTIVE)"),
+			@ApiResponse(responseCode = "503", description = "Không đọc được order-service "
+					+ "(RECENT_ORDERS_UNAVAILABLE)"),
+	})
+	@GetMapping("/me/recent-orders")
+	public List<ShopRecentOrderResponse> recentOrders(@AuthenticationPrincipal String userId,
+			@RequestParam(defaultValue = "5")
+			@Min(value = 1, message = "limit phải >= 1")
+			@Max(value = 20, message = "limit tối đa 20") int limit) {
+		return shopStatsService.recentOrders(userId, limit);
 	}
 }

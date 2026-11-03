@@ -21,6 +21,13 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:5173
+  downstream:
+    user-service-url: http://user-service.test:8082
+    order-service-url: http://order-service.test:8086
+    product-service-url: http://product-service.test:8084
+    internal-api-key: test-only-internal-api-key-0123456789-0123456789
+    connect-timeout: 1s
+    read-timeout: 2s
 
 auth:
   jwt:

@@ -8,6 +8,10 @@ spring:
     # Trong container: bien DB_HOST=postgres / DB_PORT=5432 se ghi de default nay.
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:vmarket_shop}
 
+app:
+  downstream:
+    internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
+
 auth:
   jwt:
     # PHAI trung voi gia tri dev cua auth-service, neu khong token do auth-service
