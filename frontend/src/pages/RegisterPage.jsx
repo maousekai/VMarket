@@ -25,10 +25,27 @@ export default function RegisterPage() {
   const [fields, setFields] = useState({})
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [confirmTouched, setConfirmTouched] = useState(false)
   const beginAction = usePageAction()
   if (auth.session)
     return <Navigate to={auth.session.status === 'PENDING' ? '/verify-email' : '/'} replace />
-  const change = (event) => setValues({ ...values, [event.target.name]: event.target.value })
+  const passwordsMatch =
+    Boolean(values.confirmPassword) && values.confirmPassword === values.password
+  const confirmError =
+    fields.confirmPassword ||
+    (confirmTouched && values.confirmPassword && !passwordsMatch
+      ? 'Mật khẩu xác nhận không trùng khớp.'
+      : undefined)
+  const change = (event) => {
+    const { name, value } = event.target
+    setValues((previous) => ({ ...previous, [name]: value }))
+    setFields((previous) => {
+      if (!previous[name]) return previous
+      const next = { ...previous }
+      delete next[name]
+      return next
+    })
+  }
   async function submit(event) {
     event.preventDefault()
     if (busy) return
@@ -106,7 +123,6 @@ export default function RegisterPage() {
             spellCheck={false}
             maxLength={50}
             error={fields.username}
-            hint="3–50 ký tự: chữ, số và . _ -"
             required
           />
           <FormField
@@ -157,9 +173,12 @@ export default function RegisterPage() {
           type="password"
           value={values.confirmPassword}
           onChange={change}
+          onBlur={() => values.confirmPassword && setConfirmTouched(true)}
           disabled={busy}
           autoComplete="new-password"
-          error={fields.confirmPassword}
+          error={confirmError}
+          hint={confirmTouched && passwordsMatch ? 'Mật khẩu trùng khớp.' : undefined}
+          success={confirmTouched && passwordsMatch}
           required
         />
         <button className="button button--primary" disabled={busy}>

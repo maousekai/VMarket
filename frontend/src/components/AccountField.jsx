@@ -46,6 +46,7 @@ export default function AccountField({
             onClick={() => setVisible(!visible)}
           >
             <img src={eye} width="18" height="18" alt="" />
+            {visible && <span className="password-toggle__slash" aria-hidden="true" />}
           </button>
         </div>
       ) : (

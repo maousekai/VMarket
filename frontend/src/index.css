@@ -312,6 +312,62 @@ p {
 .field-hint {
   color: #6b7280;
 }
+.field-success {
+  color: #15803d;
+}
+.password-toggle__slash {
+  position: absolute;
+  width: 18px;
+  height: 2px;
+  background: #6b7280;
+  border-radius: 999px;
+  transform: rotate(-45deg);
+}
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(380px, calc(100vw - 32px));
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #14532d;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-left: 4px solid #16a34a;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgb(17 24 39 / 16%);
+}
+.toast button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.toast button:hover {
+  background: rgb(22 163 74 / 10%);
+}
+@media (max-width: 640px) {
+  .toast {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
+  }
+}
 .password-checklist {
   display: grid;
   gap: 5px;

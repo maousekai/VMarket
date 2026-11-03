@@ -162,6 +162,12 @@ describe('Login flow', () => {
     expect(destination()).toEqual({ path: '/verify-email', state: { returnTo: '/profile' } })
   })
 
+  it('shows the sign-out confirmation as a floating toast instead of a form message', () => {
+    renderPage(<LoginPage />, '/login', {}, { toast: 'Bạn đã đăng xuất.' })
+    expect(document.querySelector('.toast').textContent).toContain('Bạn đã đăng xuất.')
+    expect(document.querySelector('.auth-form').textContent).not.toContain('Bạn đã đăng xuất.')
+  })
+
   it('accepts a legacy non-empty login password and shows the backend suspension error', async () => {
     const login = vi
       .fn()
@@ -193,6 +199,23 @@ describe('Registration flow', () => {
       screen.getByRole('link', { name: 'Đăng ký tài khoản' }).getAttribute('aria-current'),
     ).toBe('page')
     expect(screen.getByRole('link', { name: 'Đăng nhập' }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('does not show a username hint and reports password matching after blur', () => {
+    renderPage(<RegisterPage />, '/register')
+    expect(screen.queryByText('3–50 ký tự: chữ, số và . _ -')).toBeNull()
+
+    const password = screen.getByLabelText('Mật khẩu')
+    const confirmation = screen.getByLabelText('Xác nhận mật khẩu')
+    fireEvent.change(password, { target: { value: 'StrongPass1!' } })
+    fireEvent.change(confirmation, { target: { value: 'StrongPass2!' } })
+    fireEvent.blur(confirmation)
+    expect(screen.getByText('Mật khẩu xác nhận không trùng khớp.')).toBeTruthy()
+
+    fireEvent.change(confirmation, { target: { value: 'StrongPass1!' } })
+    fireEvent.blur(confirmation)
+    expect(screen.getByText('Mật khẩu trùng khớp.')).toBeTruthy()
+    expect(screen.queryByText('Mật khẩu xác nhận không trùng khớp.')).toBeNull()
   })
 
   it('continues registration after OTP delivery fails without registering twice', async () => {

@@ -85,7 +85,7 @@ test('address book: add, default switching, edit and delete with the real User s
   await expect(page.getByText('Chưa có địa chỉ giao hàng')).toBeVisible()
 
   // First address: becomes the default; Da Nang has no district so none is sent.
-  await page.getByRole('button', { name: 'Thêm địa chỉ đầu tiên', exact: true }).click()
+  await page.getByRole('button', { name: 'Thêm địa chỉ mới', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Thêm địa chỉ nhận hàng' })
   await expect(dialog.getByLabel(/Tỉnh \/ thành/)).toBeDisabled()
   await expect(dialog.getByLabel(/Quận/)).toHaveCount(0)
@@ -147,7 +147,7 @@ test('address form validates locally: ward is required and the phone has no spac
   const account = await createAccount(page.request)
   await login(page, account)
   await page.goto('/profile/addresses')
-  await page.getByRole('button', { name: 'Thêm địa chỉ đầu tiên', exact: true }).click()
+  await page.getByRole('button', { name: 'Thêm địa chỉ mới', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Thêm địa chỉ nhận hàng' })
   await fillAddress(page, {
     recipient: 'An',
