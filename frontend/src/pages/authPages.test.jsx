@@ -210,12 +210,12 @@ describe('Registration flow', () => {
     fireEvent.change(password, { target: { value: 'StrongPass1!' } })
     fireEvent.change(confirmation, { target: { value: 'StrongPass2!' } })
     fireEvent.blur(confirmation)
-    expect(screen.getByText('Mật khẩu xác nhận không trùng khớp.')).toBeTruthy()
+    expect(screen.getByText('Mật khẩu không trùng.')).toBeTruthy()
 
     fireEvent.change(confirmation, { target: { value: 'StrongPass1!' } })
     fireEvent.blur(confirmation)
     expect(screen.getByText('Mật khẩu trùng khớp.')).toBeTruthy()
-    expect(screen.queryByText('Mật khẩu xác nhận không trùng khớp.')).toBeNull()
+    expect(screen.queryByText('Mật khẩu không trùng.')).toBeNull()
   })
 
   it('continues registration after OTP delivery fails without registering twice', async () => {

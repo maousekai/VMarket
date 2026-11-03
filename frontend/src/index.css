@@ -297,12 +297,14 @@ p {
   height: 48px;
   display: grid;
   place-items: center;
+  color: #6b7280;
   border: 0;
   background: transparent;
   border-radius: 6px;
 }
 .field-error,
-.field-hint {
+.field-hint,
+.field-success {
   font-size: 12px;
   margin: 5px 0 0;
 }

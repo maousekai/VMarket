@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import eye from '../assets/auth/eye.png'
+import PasswordToggleIcon from './PasswordToggleIcon'
 
 // Labelled control for the account forms. `as` switches between input, select and textarea.
 // Password inputs get the same show/hide button as the login and register forms.
@@ -45,8 +45,7 @@ export default function AccountField({
             aria-pressed={visible}
             onClick={() => setVisible(!visible)}
           >
-            <img src={eye} width="18" height="18" alt="" />
-            {visible && <span className="password-toggle__slash" aria-hidden="true" />}
+            <PasswordToggleIcon visible={visible} />
           </button>
         </div>
       ) : (

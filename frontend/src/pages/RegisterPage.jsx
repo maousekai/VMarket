@@ -34,7 +34,7 @@ export default function RegisterPage() {
   const confirmError =
     fields.confirmPassword ||
     (confirmTouched && values.confirmPassword && !passwordsMatch
-      ? 'Mật khẩu xác nhận không trùng khớp.'
+      ? 'Mật khẩu không trùng.'
       : undefined)
   const change = (event) => {
     const { name, value } = event.target

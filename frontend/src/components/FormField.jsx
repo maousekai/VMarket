@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import eye from '../assets/auth/eye.png'
+import PasswordToggleIcon from './PasswordToggleIcon'
 
 export default function FormField({
   label,
@@ -36,8 +36,7 @@ export default function FormField({
             aria-pressed={visible}
             onClick={() => setVisible(!visible)}
           >
-            <img src={eye} width="18" height="18" alt="" />
-            {visible && <span className="password-toggle__slash" aria-hidden="true" />}
+            <PasswordToggleIcon visible={visible} />
           </button>
         )}
       </div>
