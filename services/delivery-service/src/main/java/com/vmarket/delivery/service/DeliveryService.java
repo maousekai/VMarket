@@ -219,7 +219,9 @@ order by s.id limit ? offset ?
                                                     : 0);
                                     a.setProvince(area(claimed.path("province").asString()));
                                     a.setDistrict(
-                                            blankToNull(area(claimed.path("district").asString())));
+                                            claimed.hasNonNull("district")
+                                                    ? blankToNull(area(claimed.path("district").asString()))
+                                                    : null);
                                     repo.insert(a);
                                 }
                             });

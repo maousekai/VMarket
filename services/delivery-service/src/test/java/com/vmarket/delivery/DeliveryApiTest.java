@@ -5,6 +5,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.nullValue;
 
 import com.vmarket.delivery.client.DeliveryClients;
 import com.vmarket.delivery.domain.DeliveryStatus;
@@ -1398,7 +1401,9 @@ class DeliveryApiTest {
                 "ADMIN",
                 null)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2));
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[*].id").value(hasItems(SHIPPER, shipperNoDistrict)))
+                .andExpect(jsonPath("$[?(@.id == '%s')].district".formatted(shipperNoDistrict)).value(hasItem(nullValue())));
     }
 
     @Test
@@ -1454,5 +1459,59 @@ class DeliveryApiTest {
                 "{\"shipperId\":\"shipper-hn-free\",\"overrideArea\":true,\"reason\":\"Điều động liên tỉnh\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.shipperId").value(shipperHanoi));
+    }
+    @Test
+    void adminGanShipper_donKhongCoQuanHuyen_shipperCoQuanHuyenCungTinh_khongBiAreaMismatch() throws Exception {
+        var snapshot = (tools.jackson.databind.node.ObjectNode) order("COD", false);
+        snapshot.putNull("district");
+        when(clients.order(anyString(), anyBoolean())).thenReturn(snapshot);
+
+        String id = handoff("ASSIGNED");
+
+        // Gán cho shipper có quận 'hai chau' trong cùng tỉnh Đà Nẵng -> thành công không bị AREA_MISMATCH
+        call(
+                post("/api/delivery/admin/assignments/{id}/assign", id),
+                "admin",
+                "ADMIN",
+                "{\"shipperId\":\"" + SHIPPER + "\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.shipperId").value(SHIPPER));
+    }
+
+    @Test
+    void donCoQuanHuyen_uuTienShipperChuyenQuanTruocShipperToanTinh() throws Exception {
+        String shipperToanTinh = "shipper-toan-tinh";
+        jdbc.update(
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
+                        + " values (?, 'provision-tt', 'Shipper TT', '0905555555', 'da nang', null, true, CURRENT_TIMESTAMP)",
+                shipperToanTinh);
+        when(clients.activeShipper(shipperToanTinh)).thenReturn(true);
+
+        // SHIPPER chuyên quận 'hai chau' đang có 1 đơn
+        handoff("ASSIGNED");
+
+        // Shipper toàn tỉnh có 0 đơn (rảnh hơn)
+        // Khi đơn chỉ định quận 'hai chau', candidates phải ưu tiên shipper chuyên quận
+        var candidates = repo.candidates("da nang", "hai chau");
+        assertThat(candidates).startsWith(SHIPPER);
+
+        var snapshot2 = (tools.jackson.databind.node.ObjectNode) order("COD", false);
+        snapshot2.put("id", "order-hai-chau");
+        snapshot2.put("district", "Hải Châu");
+        when(clients.order(eq("order-hai-chau"), anyBoolean())).thenReturn(snapshot2);
+
+        var result = call(
+                post("/api/delivery/seller/orders/{id}/handoff", "order-hai-chau"),
+                SELLER,
+                "SELLER",
+                null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ASSIGNED"))
+                .andReturn();
+
+        String id2 = json.readTree(result.getResponse().getContentAsString()).path("id").asString();
+        var assignment2 = repo.find(id2, false);
+        // Ưu tiên SHIPPER chuyên quận 'hai chau' dù shipper toàn tỉnh đang có 0 đơn
+        assertThat(assignment2.getShipperId()).isEqualTo(SHIPPER);
     }
 }

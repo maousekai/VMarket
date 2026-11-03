@@ -7,7 +7,7 @@
 -- cho phep NULL: don hang moi tao tu order-service (district = NULL) phai
 -- luu duoc va duoc tu dong ghep shipper theo tinh/thanh.
 --
--- Cu phap nay chay duoc tren ca PostgreSQL va H2 (FlywayMigrationTest).
+-- Cu phap nay chay duoc tren ca PostgreSQL va H2 (DeliveryOutboxMigrationTest).
 -- =============================================================================
 
 ALTER TABLE shippers ALTER COLUMN district DROP NOT NULL;

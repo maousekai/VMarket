@@ -193,10 +193,11 @@ update delivery_assignments set shipper_id=?, status=?, attempt=?, version=?, la
                 select s.id from shippers s left join delivery_assignments d on d.shipper_id=s.id
                     and d.status not in ('DELIVERED','RETURNED')
                 where s.active=true and s.province=? and (s.district=? or s.district is null or s.district='')
-                group by s.id order by count(d.id), s.id
+                group by s.id, s.district order by case when s.district=? then 0 else 1 end, count(d.id), s.id
                 """,
                 String.class,
                 province,
+                district,
                 district);
     }
 
