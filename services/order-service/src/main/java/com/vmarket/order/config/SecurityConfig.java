@@ -60,6 +60,7 @@ public class SecurityConfig {
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(PUBLIC_PATHS).permitAll()
 						.requestMatchers("/internal/delivery/**").permitAll()
+						.requestMatchers("/internal/orders/**").permitAll()
 						.requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
 						.anyRequest().authenticated())
 				// Đặt trước filter đăng nhập bằng form/username-password để danh tính
