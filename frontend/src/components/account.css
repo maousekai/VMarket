@@ -398,6 +398,13 @@
 .account-notice p {
   margin: 6px 0 0;
 }
+.account-notice ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.account-notice li + li {
+  margin-top: 4px;
+}
 .account-state {
   padding: 32px;
 }
