@@ -25,17 +25,14 @@ export default function RegisterPage() {
   const [fields, setFields] = useState({})
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [confirmTouched, setConfirmTouched] = useState(false)
   const beginAction = usePageAction()
   if (auth.session)
     return <Navigate to={auth.session.status === 'PENDING' ? '/verify-email' : '/'} replace />
-  const passwordsMatch =
-    Boolean(values.confirmPassword) && values.confirmPassword === values.password
+  const confirmFilled = Boolean(values.confirmPassword)
+  const passwordsMatch = confirmFilled && values.confirmPassword === values.password
   const confirmError =
     fields.confirmPassword ||
-    (confirmTouched && values.confirmPassword && !passwordsMatch
-      ? 'Mật khẩu không trùng.'
-      : undefined)
+    (confirmFilled && !passwordsMatch ? 'Mật khẩu không trùng.' : undefined)
   const change = (event) => {
     const { name, value } = event.target
     setValues((previous) => ({ ...previous, [name]: value }))
@@ -173,12 +170,11 @@ export default function RegisterPage() {
           type="password"
           value={values.confirmPassword}
           onChange={change}
-          onBlur={() => values.confirmPassword && setConfirmTouched(true)}
           disabled={busy}
           autoComplete="new-password"
           error={confirmError}
-          hint={confirmTouched && passwordsMatch ? 'Mật khẩu trùng khớp.' : undefined}
-          success={confirmTouched && passwordsMatch}
+          hint={passwordsMatch ? 'Mật khẩu trùng khớp.' : undefined}
+          success={passwordsMatch}
           required
         />
         <button className="button button--primary" disabled={busy}>

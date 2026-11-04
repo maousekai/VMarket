@@ -201,7 +201,7 @@ describe('Registration flow', () => {
     expect(screen.getByRole('link', { name: 'Đăng nhập' }).getAttribute('aria-current')).toBeNull()
   })
 
-  it('does not show a username hint and reports password matching after blur', () => {
+  it('does not show a username hint and reports password matching while typing', () => {
     renderPage(<RegisterPage />, '/register')
     expect(screen.queryByText('3–50 ký tự: chữ, số và . _ -')).toBeNull()
 
@@ -209,13 +209,14 @@ describe('Registration flow', () => {
     const confirmation = screen.getByLabelText('Xác nhận mật khẩu')
     fireEvent.change(password, { target: { value: 'StrongPass1!' } })
     fireEvent.change(confirmation, { target: { value: 'StrongPass2!' } })
-    fireEvent.blur(confirmation)
     expect(screen.getByText('Mật khẩu không trùng.')).toBeTruthy()
 
     fireEvent.change(confirmation, { target: { value: 'StrongPass1!' } })
-    fireEvent.blur(confirmation)
-    expect(screen.getByText('Mật khẩu trùng khớp.')).toBeTruthy()
+    expect(screen.getByText('Mật khẩu trùng khớp.').className).toBe('field-success')
     expect(screen.queryByText('Mật khẩu không trùng.')).toBeNull()
+
+    fireEvent.change(password, { target: { value: 'StrongPass2!' } })
+    expect(screen.getByText('Mật khẩu không trùng.')).toBeTruthy()
   })
 
   it('continues registration after OTP delivery fails without registering twice', async () => {
