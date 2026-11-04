@@ -7,6 +7,7 @@ export default function AccountField({
   label,
   error,
   hint,
+  success = false,
   required = false,
   as: Control = 'input',
   type,
@@ -16,7 +17,12 @@ export default function AccountField({
   const id = useId()
   const [visible, setVisible] = useState(false)
   const password = Control === 'input' && type === 'password'
-  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined
+  const hintClass = success ? 'account-field__success' : 'account-field__hint'
+  const describedBy = error
+    ? `${id}-error`
+    : hint
+      ? `${id}-${success ? 'success' : 'hint'}`
+      : undefined
   const control = (
     <Control
       id={id}
@@ -52,7 +58,7 @@ export default function AccountField({
         control
       )}
       {hint && !error && (
-        <p className="account-field__hint" id={`${id}-hint`}>
+        <p className={hintClass} id={`${id}-${success ? 'success' : 'hint'}`}>
           {hint}
         </p>
       )}

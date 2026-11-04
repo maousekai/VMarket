@@ -542,6 +542,21 @@ describe('Change password page', () => {
     )
   })
 
+  it('shows matching feedback as soon as the confirmation is typed', () => {
+    view(<ChangePasswordPage />)
+    fill(/^Mật khẩu mới/, 'New@12345')
+
+    fill(/^Xác nhận mật khẩu mới/, 'New@1234')
+    expect(screen.getByText('Mật khẩu xác nhận không khớp.')).toBeTruthy()
+
+    fill(/^Xác nhận mật khẩu mới/, 'New@12345')
+    expect(screen.getByText('Mật khẩu trùng khớp.').className).toBe('account-field__success')
+    expect(screen.queryByText('Mật khẩu xác nhận không khớp.')).toBeNull()
+
+    fill(/^Mật khẩu mới/, 'New@12346')
+    expect(screen.getByText('Mật khẩu xác nhận không khớp.')).toBeTruthy()
+  })
+
   it('rejects a weak or unchanged new password locally', () => {
     view(<ChangePasswordPage />)
     fillPasswords('Old@1234', 'weakpass')
