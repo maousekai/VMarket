@@ -28,8 +28,8 @@
 #   dung ten container -> doi ten container khong anh huong cau hinh ket noi.
 #
 # TỐI ƯU TÀI NGUYÊN:
-# - Ha tang nhe mac dinh ~1.5GB RAM. Elasticsearch nang (~1GB) dat
-#   profile "search" - chi bat khi lam AI Search:
+# - Ha tang nhe mac dinh ~1.75GB RAM (da gom MinIO cho anh dai dien / gian hang).
+#   Elasticsearch nang (~1GB) dat profile "search" - chi bat khi lam AI Search:
 #     docker compose --profile search up -d
 # - Logging tap trung + monitoring (Loki, Promtail, Prometheus, Grafana ~0.9GB)
 #   dat profile "monitoring" (PBL6-40) - bat khi can xem log/dashboard:
@@ -227,15 +227,17 @@ services:
       timeout: 10s
       retries: 12
 
+  # MinIO-compatible media storage (avatar, logo, cover, product images).
+  # Chay MAC DINH cung ha tang: user-service / shop-service can no de upload anh.
+  # Khong bat buoc voi AI Search (Elasticsearch van nam trong profile "search").
   minio:
     # Maintained MinIO fork; original 2025 community image failed the security scan.
     image: ${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac}
-    profiles: ["search"]
     # Credential bat buoc duoc kiem tra TRONG container, khong dung ${VAR:?} cua
-    # Compose: Compose noi suy ca file ke ca khi profile "search" khong bat, nen
-    # ${VAR:?} lam hong MOI lenh `docker compose` (ke ca `up -d` ha tang nhe) khi
-    # .env chua dat password. Image tu no chi tu choi khi thieu MOT trong hai bien;
-    # thieu CA HAI thi no chay voi credential mac dinh -> phai chan o day.
+    # Compose: Compose noi suy ca file ke ca khi service khong bat, nen ${VAR:?}
+    # lam hong MOI lenh `docker compose` khi .env chua dat password. Image tu no
+    # chi tu choi khi thieu MOT trong hai bien; thieu CA HAI thi no chay voi
+    # credential mac dinh -> phai chan o day.
     entrypoint:
       - sh
       - -c
@@ -345,6 +347,14 @@ services:
       # INTERNAL_API_KEY phai TRUNG voi block auth-service o tren.
       AUTH_SERVICE_URL: http://auth-service:8081
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+      # MinIO - upload avatar. Endpoint noi bo trong network; URL tra cho browser
+      # dung MINIO_PUBLIC_ORIGIN (host port da publish ra loopback).
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${USER_SERVICE_PORT:-8082}:8082"
@@ -352,6 +362,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8082/actuator/health >/dev/null 2>&1 || exit 1"]
@@ -383,6 +395,13 @@ services:
       ORDER_SERVICE_URL: http://order-service:8086
       PRODUCT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8084
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+      # MinIO - upload logo / anh bia. Cung bo bien voi user-service.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${SHOP_SERVICE_PORT:-8083}:8083"
@@ -392,6 +411,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8083/actuator/health >/dev/null 2>&1 || exit 1"]

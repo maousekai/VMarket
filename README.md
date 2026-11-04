@@ -74,15 +74,15 @@ tách rời với các service khác.
 
 ## Chạy hạ tầng (tối ưu tài nguyên)
 
-Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. Chỉ khi bật profile Search
-mới cần đặt rõ `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` (password trong example để
-trống): container `minio` từ chối khởi động khi thiếu một trong hai, không có
-credential mặc định. Các lệnh Compose khác không phụ thuộc hai biến này. Giữ nguyên
+Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. `MINIO_ROOT_USER` và
+`MINIO_ROOT_PASSWORD` là **bắt buộc** vì MinIO chạy mặc định cùng hạ tầng (lưu ảnh
+đại diện / logo / ảnh bìa). Container `minio` từ chối khởi động khi thiếu một trong
+hai và password phải dài ít nhất 8 ký tự; không có credential mặc định. Giữ nguyên
 `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
 ```bash
-# Bộ nhẹ mặc định (~1.5GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ
-docker compose up -d postgres mongo mongo-init-replica redis rabbitmq
+# Bộ nhẹ mặc định (~1.75GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ + MinIO
+docker compose up -d postgres mongo mongo-init-replica redis rabbitmq minio
 
 # Chỉ định lẻ khi cần
 docker compose up -d postgres redis
