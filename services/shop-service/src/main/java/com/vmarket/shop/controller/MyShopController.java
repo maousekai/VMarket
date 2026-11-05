@@ -3,17 +3,22 @@ package com.vmarket.shop.controller;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import com.vmarket.media.MediaUploadResponse;
 import com.vmarket.shop.dto.ErrorResponse;
 import com.vmarket.shop.dto.ShopRecentOrderResponse;
 import com.vmarket.shop.dto.ShopRequest;
@@ -21,6 +26,7 @@ import com.vmarket.shop.dto.ShopResponse;
 import com.vmarket.shop.dto.ShopStatsResponse;
 import com.vmarket.shop.dto.ShopStatusHistoryResponse;
 import com.vmarket.shop.service.ShopService;
+import com.vmarket.shop.service.ShopMediaService;
 import com.vmarket.shop.service.ShopStatsService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +57,7 @@ public class MyShopController {
 
 	private final ShopService shopService;
 	private final ShopStatsService shopStatsService;
+	private final ShopMediaService shopMediaService;
 
 	@Operation(summary = "Đăng ký mở gian hàng (FR-SHOP-01)",
 			description = "Cần vai trò BUYER. Hồ sơ vào trạng thái PENDING (Chờ duyệt) cho tới khi Admin duyệt. "
@@ -106,6 +113,60 @@ public class MyShopController {
 	public ShopResponse updateMine(@AuthenticationPrincipal String userId,
 			@Valid @RequestBody ShopRequest request) {
 		return shopService.updateMine(userId, request);
+	}
+
+	@Operation(summary = "Tải logo gian hàng lên kho ảnh",
+			description = "Nhận JPEG/PNG/WebP tối đa 2 MB, tự cắt vuông 512×512 và trả URL công khai. "
+					+ "Dùng được trước khi đăng ký gian hàng; endpoint KHÔNG ghi vào hồ sơ.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Đã tải lên",
+					content = @Content(schema = @Schema(implementation = MediaUploadResponse.class))),
+			@ApiResponse(responseCode = "400", description = "Thiếu file, quá dung lượng hoặc sai định dạng (MEDIA_*)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "503", description = "Kho ảnh không khả dụng "
+					+ "(MEDIA_STORAGE_UNAVAILABLE)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+	})
+	@PostMapping(value = "/me/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public MediaUploadResponse uploadLogo(@AuthenticationPrincipal String userId,
+			@RequestPart("file") MultipartFile file) {
+		return shopMediaService.uploadLogo(userId, file);
+	}
+
+	@Operation(summary = "Tải ảnh bìa gian hàng lên kho ảnh",
+			description = "Nhận JPEG/PNG/WebP tối đa 5 MB, thu nhỏ vừa 1600×900 và trả URL công khai. "
+					+ "Dùng được trước khi đăng ký gian hàng; endpoint KHÔNG ghi vào hồ sơ.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Đã tải lên",
+					content = @Content(schema = @Schema(implementation = MediaUploadResponse.class))),
+			@ApiResponse(responseCode = "400", description = "Thiếu file, quá dung lượng hoặc sai định dạng (MEDIA_*)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "503", description = "Kho ảnh không khả dụng "
+					+ "(MEDIA_STORAGE_UNAVAILABLE)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+	})
+	@PostMapping(value = "/me/cover", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public MediaUploadResponse uploadCover(@AuthenticationPrincipal String userId,
+			@RequestPart("file") MultipartFile file) {
+		return shopMediaService.uploadCover(userId, file);
+	}
+
+	@Operation(summary = "Xoá ảnh gian hàng vừa tải lên",
+			description = "Chỉ xoá được ảnh thuộc thư mục shops/{userId} của chính người dùng. "
+					+ "Dùng để dọn ảnh khi lưu hồ sơ thất bại.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "204", description = "Đã xoá (hoặc ảnh không còn)"),
+			@ApiResponse(responseCode = "400", description = "URL không hợp lệ (INVALID_MEDIA_URL)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "503", description = "Kho ảnh không khả dụng "
+					+ "(MEDIA_STORAGE_UNAVAILABLE)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+	})
+	@DeleteMapping("/me/media")
+	public ResponseEntity<Void> deleteMedia(@AuthenticationPrincipal String userId,
+			@RequestParam String url) {
+		shopMediaService.deleteMedia(userId, url);
+		return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
 	}
 
 	@Operation(summary = "Gửi lại hồ sơ bị từ chối",

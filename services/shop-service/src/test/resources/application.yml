@@ -21,6 +21,14 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:5173
+  # Khong goi MinIO trong test hien co; S3Client chi duoc tao (khong ket noi).
+  media:
+    endpoint: http://minio.test:9000
+    public-origin: http://localhost:9000
+    bucket: vmarket-media-test
+    access-key: test-access-key
+    secret-key: test-secret-key
+    region: us-east-1
   downstream:
     user-service-url: http://user-service.test:8082
     order-service-url: http://order-service.test:8086

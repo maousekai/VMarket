@@ -39,6 +39,9 @@ chối — Admin phải chủ động "gỡ đình chỉ". Mọi bước (kể c
 | POST | `/api/shops` | BUYER | Đăng ký gian hàng → `PENDING` |
 | GET | `/api/shops/me` | Đã đăng nhập | Gian hàng của tôi (mọi trạng thái, kèm lý do từ chối/đình chỉ) |
 | PUT | `/api/shops/me` | Đã đăng nhập | Cập nhật thông tin — **thay thế toàn bộ** |
+| POST | `/api/shops/me/logo` | Đã đăng nhập | Tải logo lên kho ảnh, trả `{ "url" }` |
+| POST | `/api/shops/me/cover` | Đã đăng nhập | Tải ảnh bìa lên kho ảnh, trả `{ "url" }` |
+| DELETE | `/api/shops/me/media?url=` | Đã đăng nhập | Dọn ảnh vừa tải nếu lưu hồ sơ thất bại |
 | POST | `/api/shops/me/resubmit` | Đã đăng nhập | Gửi lại hồ sơ bị từ chối |
 | GET | `/api/shops/me/status-history` | Đã đăng nhập | Lịch sử trạng thái của tôi |
 | GET | `/api/shops/admin?status=&keyword=&page=&size=` | ADMIN | Danh sách (lọc trạng thái, tên), mới nộp trước |
@@ -65,6 +68,24 @@ Body `POST /api/shops` và `PUT /api/shops/me`:
 | `contactPhone` | ✓ | Số di động Việt Nam: `0xxxxxxxxx` hoặc `+84xxxxxxxxx` |
 | `province`, `ward`, `streetAddress` | ✓ | Địa chỉ kho / lấy hàng |
 | `district` |  | Quận/huyện — không bắt buộc từ 01/07/2025 (Đà Nẵng bỏ cấp này); lưu `NULL` khi trống |
+
+### Logo và ảnh bìa
+
+Hai endpoint upload nhận `multipart/form-data` với trường `file` và **chỉ trả URL**,
+không ghi vào hồ sơ. Client tải ảnh trước, sau đó gửi URL trong `POST /api/shops`
+hoặc `PUT /api/shops/me`. Nếu lưu hồ sơ thất bại, client gọi
+`DELETE /api/shops/me/media?url=...` để dọn ảnh vừa tải.
+
+| Loại | Kích thước tối đa | Chuẩn hoá |
+| --- | --- | --- |
+| Logo (`POST /api/shops/me/logo`) | 2 MB, 25 MP | Cắt vuông 512×512, PNG |
+| Ảnh bìa (`POST /api/shops/me/cover`) | 5 MB, 25 MP | Vừa trong 1600×900, JPEG |
+
+Nhận JPEG, PNG, WebP. Server mã hoá lại ảnh nên EXIF/GPS bị loại bỏ. Ảnh nằm dưới
+`shops/{userId}/logo/` hoặc `shops/{userId}/cover/` trong bucket `vmarket-media`, đọc
+công khai qua `MINIO_PUBLIC_ORIGIN`. Endpoint xoá chỉ chấp nhận URL thuộc đúng thư mục
+của người dùng hiện tại; ảnh cũ ngoài MinIO không bị xoá. Form vẫn hỗ trợ dán URL
+`http(s)` trực tiếp vào `logoUrl` / `coverUrl` như trước.
 
 Swagger UI: <http://localhost:8083/swagger-ui.html> · spec: `/v3/api-docs`
 
