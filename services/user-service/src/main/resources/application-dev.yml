@@ -17,6 +17,10 @@ auth:
 app:
   internal:
     api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
+  # MinIO chay trong docker compose voi credential local trong .env.example.
+  media:
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
   auth-service:
     # PHAI trung voi gia tri dev cua auth-service (application-dev.yml ben do).
     internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}

@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Collection;
 import java.util.List;
 
+import com.vmarket.media.MediaStorage;
 import com.vmarket.user.dto.ProfileResponse;
 import com.vmarket.user.dto.UpdateProfileRequest;
 import com.vmarket.user.dto.UserProfileSummaryResponse;
@@ -35,6 +36,7 @@ public class UserProfileService {
 
 	private final UserProfileRepository userProfileRepository;
 	private final UserProfileProvisioner provisioner;
+	private final MediaStorage mediaStorage;
 
 	/**
 	 * Cố ý <b>không</b> bọc {@code @Transactional}: đây là đường đọc nóng nhất của
@@ -55,6 +57,7 @@ public class UserProfileService {
 	@Transactional
 	public ProfileResponse updateProfile(String userId, UpdateProfileRequest request) {
 		UserProfile profile = getOrCreate(userId);
+		String oldAvatarUrl = profile.getAvatarUrl();
 
 		// Ngữ nghĩa THAY THẾ: trường không gửi = null = xoá. Xem javadoc của
 		// UpdateProfileRequest. Chuẩn hoá chuỗi rỗng thành null để "" và "chưa khai"
@@ -65,8 +68,18 @@ public class UserProfileService {
 		profile.setDateOfBirth(request.dateOfBirth());
 		profile.setGender(request.gender());
 
+		UserProfile saved = userProfileRepository.save(profile);
+		String newAvatarUrl = saved.getAvatarUrl();
+		if (oldAvatarUrl != null && !oldAvatarUrl.equals(newAvatarUrl)) {
+			// Ảnh cũ chỉ bị xoá SAU khi transaction commit: nếu update rollback,
+			// hồ sơ vẫn trỏ tới ảnh cũ và ảnh đó phải còn. URL ngoài MinIO (ảnh
+			// legacy) không khớp prefix nên deleteQuietly bỏ qua.
+			MediaStorage.afterCommit(() -> mediaStorage.deleteQuietly(
+					oldAvatarUrl, UserMediaService.avatarPrefix(userId)));
+		}
+
 		log.info("Cập nhật hồ sơ userId={}", userId);
-		return ProfileResponse.from(userProfileRepository.save(profile));
+		return ProfileResponse.from(saved);
 	}
 
 	/**
