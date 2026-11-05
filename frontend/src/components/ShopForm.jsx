@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { validateShop } from '../auth/validation'
 import AccountField from './AccountField'
+import ImageUploadField from './ImageUploadField'
 import { DA_NANG_PROVINCE, DA_NANG_WARD_GROUPS } from '../data/daNangAddress'
 import { getApiError } from '../services/api/apiClient'
-import { imageUrlOrEmpty } from '../utils/shop'
+import {
+  deleteMyShopMedia,
+  discardUploaded,
+  uploadMyShopCover,
+  uploadMyShopLogo,
+} from '../services/api/mediaApi'
 import './accountForms.css'
 import './seller.css'
 
@@ -52,34 +58,6 @@ function shopRequestBody(values) {
   }
 }
 
-function ImagePreview({ url, label }) {
-  const [failed, setFailed] = useState(false)
-  const safe = imageUrlOrEmpty(url)
-
-  // A new URL must get a fresh chance even if the previous one failed to load.
-  useEffect(() => setFailed(false), [safe])
-
-  if (!safe) {
-    return (
-      <div className="shop-image-preview shop-image-preview--empty">
-        <span>{label}</span>
-      </div>
-    )
-  }
-  if (failed) {
-    return (
-      <div className="shop-image-preview shop-image-preview--empty" role="status">
-        <span>Không tải được ảnh {label.toLowerCase()}</span>
-      </div>
-    )
-  }
-  return (
-    <div className="shop-image-preview">
-      <img src={safe} alt={`Xem trước ${label.toLowerCase()}`} onError={() => setFailed(true)} />
-    </div>
-  )
-}
-
 export default function ShopForm({
   initial,
   onSubmit,
@@ -93,10 +71,13 @@ export default function ShopForm({
   const [fieldErrors, setFieldErrors] = useState({})
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [uploadStage, setUploadStage] = useState('idle')
+  const [logoFile, setLogoFile] = useState(null)
+  const [coverFile, setCoverFile] = useState(null)
   const [submitAttempt, setSubmitAttempt] = useState(0)
   const formRef = useRef(null)
   const feedbackRef = useRef(null)
-  const hasFieldErrors = Object.keys(fieldErrors).length > 0
+  const hasFieldErrors = Object.values(fieldErrors).some(Boolean)
 
   // Submit happens at the bottom of a long form. Without this, a validation error
   // leaves the user staring at the button with no visible explanation. Run only
@@ -106,11 +87,11 @@ export default function ShopForm({
     const firstInvalid = formRef.current?.querySelector('[aria-invalid="true"]')
     if (firstInvalid) {
       firstInvalid.focus({ preventScroll: true })
-      firstInvalid.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      firstInvalid.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
       return
     }
     feedbackRef.current?.focus({ preventScroll: true })
-    feedbackRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    feedbackRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
   }, [submitAttempt])
 
   const wards = useMemo(() => {
@@ -132,6 +113,19 @@ export default function ShopForm({
     setError('')
   }
 
+  function onImageChange(name, value) {
+    setValues((current) => ({ ...current, [name]: value }))
+    setFieldErrors((current) => ({ ...current, [name]: undefined }))
+    setError('')
+  }
+
+  function onImageFile(name, file) {
+    if (name === 'logoUrl') setLogoFile(file)
+    else setCoverFile(file)
+    setFieldErrors((current) => ({ ...current, [name]: undefined }))
+    setError('')
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
     if (saving || disabled) return
@@ -143,17 +137,40 @@ export default function ShopForm({
       return
     }
     setSaving(true)
+    setUploadStage('idle')
+    const uploadedUrls = []
     try {
-      await onSubmit(shopRequestBody(values))
+      // Files are uploaded only now, when the user has committed to saving. If a
+      // later upload or the save itself fails, remove whatever already landed.
+      const body = shopRequestBody(values)
+      if (logoFile) {
+        setUploadStage('uploading')
+        const result = await uploadMyShopLogo(logoFile)
+        // Content-addressed keys: re-uploading the current image returns the URL
+        // that is already stored. That URL must never be removed by cleanup.
+        if (result.url !== body.logoUrl) uploadedUrls.push(result.url)
+        body.logoUrl = result.url
+      }
+      if (coverFile) {
+        setUploadStage('uploading')
+        const result = await uploadMyShopCover(coverFile)
+        if (result.url !== body.coverUrl) uploadedUrls.push(result.url)
+        body.coverUrl = result.url
+      }
+      setUploadStage('saving')
+      await onSubmit(body)
     } catch (failure) {
+      if (uploadedUrls.length) discardUploaded(uploadedUrls, deleteMyShopMedia)
       const apiError = getApiError(failure)
       setFieldErrors(apiError.fieldErrors)
       setError(apiError.message)
       setSubmitAttempt((value) => value + 1)
       setSaving(false)
+      setUploadStage('idle')
       return
     }
     setSaving(false)
+    setUploadStage('idle')
   }
 
   const field = (name) => ({
@@ -209,26 +226,32 @@ export default function ShopForm({
         />
         <div className="shop-form__images">
           <div className="shop-form__image-field">
-            <AccountField
-              label="URL logo"
-              type="url"
-              inputMode="url"
-              maxLength={500}
-              placeholder="https://cdn.example.com/logo.png"
-              {...field('logoUrl')}
+            <ImageUploadField
+              label="Logo"
+              value={values.logoUrl}
+              file={logoFile}
+              onChange={(next) => onImageChange('logoUrl', next)}
+              onFileChange={(next) => onImageFile('logoUrl', next)}
+              shape="square"
+              maxSizeMb={2}
+              hint="Ảnh vuông, nền rõ · JPEG, PNG hoặc WebP · tối đa 2 MB."
+              error={fieldErrors.logoUrl}
+              disabled={disabled || saving}
             />
-            <ImagePreview url={values.logoUrl} label="Logo" />
           </div>
           <div className="shop-form__image-field">
-            <AccountField
-              label="URL ảnh bìa"
-              type="url"
-              inputMode="url"
-              maxLength={500}
-              placeholder="https://cdn.example.com/cover.jpg"
-              {...field('coverUrl')}
+            <ImageUploadField
+              label="Ảnh bìa"
+              value={values.coverUrl}
+              file={coverFile}
+              onChange={(next) => onImageChange('coverUrl', next)}
+              onFileChange={(next) => onImageFile('coverUrl', next)}
+              shape="cover"
+              maxSizeMb={5}
+              hint="Ảnh ngang 16:9 · JPEG, PNG hoặc WebP · tối đa 5 MB."
+              error={fieldErrors.coverUrl}
+              disabled={disabled || saving}
             />
-            <ImagePreview url={values.coverUrl} label="Ảnh bìa" />
           </div>
         </div>
         <AccountField
@@ -309,7 +332,7 @@ export default function ShopForm({
       {!disabled && (
         <div className="account-actions">
           <button className="account-button" type="submit" disabled={saving}>
-            {saving ? busyLabel : submitLabel}
+            {saving ? (uploadStage === 'uploading' ? 'Đang tải ảnh…' : busyLabel) : submitLabel}
           </button>
           {actions}
         </div>

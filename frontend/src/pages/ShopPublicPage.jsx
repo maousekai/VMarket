@@ -12,8 +12,35 @@ const PAGE_SIZE = 12
 
 function ShopLogo({ shop }) {
   const logo = imageUrlOrEmpty(shop.logoUrl)
-  if (logo) return <img src={logo} alt={`Logo ${shop.name}`} />
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => setFailed(false), [logo])
+
+  if (logo && !failed) {
+    return <img src={logo} alt={`Logo ${shop.name}`} onError={() => setFailed(true)} />
+  }
   return <span aria-hidden="true">{shop.name.trim().charAt(0).toLocaleUpperCase('vi')}</span>
+}
+
+function ShopCover({ shop }) {
+  const cover = imageUrlOrEmpty(shop.coverUrl)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => setFailed(false), [cover])
+
+  const showImage = Boolean(cover) && !failed
+  return (
+    <div className={`shop-hero__cover${showImage ? ' has-image' : ''}`}>
+      {showImage ? (
+        <img src={cover} alt="" onError={() => setFailed(true)} />
+      ) : (
+        <span className="shop-hero__cover-mark" aria-hidden="true">
+          <small>VMarket</small>
+          <strong>{shop.name.trim().charAt(0).toLocaleUpperCase('vi')}</strong>
+        </span>
+      )}
+    </div>
+  )
 }
 
 function ProductImage({ product }) {
@@ -100,7 +127,6 @@ export default function ShopPublicPage() {
   }
 
   const shop = shopState.shop
-  const cover = imageUrlOrEmpty(shop.coverUrl)
 
   return (
     <main className="shop-public">
@@ -111,9 +137,7 @@ export default function ShopPublicPage() {
       </nav>
 
       <section className="shop-hero" aria-labelledby="shop-public-name">
-        <div className={`shop-hero__cover${cover ? ' has-image' : ''}`}>
-          {cover && <img src={cover} alt="" />}
-        </div>
+        <ShopCover shop={shop} />
         <div className="shop-hero__body">
           <div className="shop-hero__logo">
             <ShopLogo shop={shop} />
