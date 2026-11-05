@@ -3,14 +3,32 @@ spring:
     name: notification-service
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  # Spring Boot 4: URI Mongo nam o spring.mongodb.* (khong con spring.data.mongodb.uri).
+  # directConnection=true vi mongo trong compose chay replica set 1 node rs0 va
+  # quang ba host noi bo 'mongo' - may host khong phan giai duoc ten nay.
+  mongodb:
+    uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${DB_NAME:vmarket_notification}?directConnection=true
   data:
     mongodb:
-      uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${DB_NAME:vmarket_notification}
+      # Tao unique index chong trung (eventId + nguoi nhan + loai) luc khoi dong.
+      auto-index-creation: true
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+  # Chi dung khi NOTIFICATION_EMAIL_PROVIDER=smtp (vd Gmail SMTP cho demo - SRS §6).
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:true}
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
 
 server:
   port: ${SERVER_PORT:8090}
@@ -20,7 +38,57 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+  # Health tong hop khong phu thuoc mail server (SMTP chi dung khi gui).
+  health:
+    mail:
+      enabled: false
+
+# JWT - notification-service chi VERIFY access token do auth-service ky (HS256)
+# de biet ai dang xem trung tam thong bao. KHONG co gia tri mac dinh: thieu bien
+# la fail luc khoi dong thay vi chay voi khoa cong khai.
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET}
 
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # Event bus (PBL6-39). Queue chinh nhan moi su kien can bao cho nguoi dung.
+  # DeliveryAssigned KHONG bind o day: delivery-service da khai bao san queue
+  # rieng 'notification-service.delivery-assigned' (giu su kien khi Notification
+  # chua chay) -> xem DeliveryAssignedListenerConfig. Bind them o day se nhan 2 lan.
+  events:
+    listen: ${EVENTS_LISTEN:true}
+    queue: ${EVENTS_QUEUE:notification-service.events}
+    bindings:
+      - OrderPlaced
+      - OrderStatusChanged
+      - PaymentSucceeded
+      - PaymentFailed
+      - DeliveryStatusChanged
+      - ShopApproved
+      - ShopSuspended
+      - ProductModerated
+      - ReturnResolved
+  notification:
+    # Khoa API noi bo: goi order-service (tra nguoi mua / gian hang cua don) va
+    # auth-service (tra email nguoi nhan). PHAI trung INTERNAL_API_KEY cua 2 service do.
+    internal-api-key: ${INTERNAL_API_KEY}
+    order-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+    auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    # Link trong email tro ve frontend.
+    frontend-url: ${FRONTEND_URL:http://localhost:5173}
+    email:
+      # log (mac dinh) = chi ghi log, khong gui that | smtp | brevo
+      provider: ${NOTIFICATION_EMAIL_PROVIDER:log}
+      from: ${NOTIFICATION_EMAIL_FROM:no-reply@vmarket.local}
+      from-name: ${NOTIFICATION_EMAIL_FROM_NAME:VMarket}
+      brevo:
+        api-key: ${BREVO_API_KEY:}
+    push:
+      # log (mac dinh) = chi ghi log | fcm = Firebase Cloud Messaging HTTP v1
+      provider: ${NOTIFICATION_PUSH_PROVIDER:log}
+      fcm:
+        project-id: ${FCM_PROJECT_ID:}
+        # Duong dan file JSON service account Firebase (khong commit file nay).
+        credentials-file: ${FCM_CREDENTIALS_FILE:}
