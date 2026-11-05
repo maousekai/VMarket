@@ -309,6 +309,9 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 
 - Product nhận `ReviewCreated(reviewId, productId, ratingAverage, ratingCount)`;
   payload mang aggregate mới nhất để xử lý lặp không cộng điểm hai lần.
+  Review Service (PBL6-22) phát qua outbox khi có đánh giá mới **và** khi admin
+  ẩn/khôi phục đánh giá; aggregate chỉ tính đánh giá đang hiển thị và được tính lúc
+  phát, nên bản tin sau cùng luôn khớp dữ liệu đã commit.
 - Product nhận `OrderStatusChanged`; trạng thái `CANCELLED` hoàn giữ kho, còn đơn
   COD chuyển sang `CONFIRMED`/`PREPARING` sẽ chốt kho. Thanh toán online tiếp tục
   chốt qua `PaymentSucceeded` theo FR-PROD-02.
