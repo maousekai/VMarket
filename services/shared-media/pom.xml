@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.vmarket</groupId>
+		<artifactId>vmarket-services</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+		<relativePath>../pom.xml</relativePath>
+	</parent>
+	<groupId>com.vmarket</groupId>
+	<artifactId>shared-media</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>shared-media</name>
+	<description>VMarket - Thu vien upload / chuan hoa anh dung chung (MinIO S3)</description>
+
+	<properties>
+		<aws-sdk.version>2.57.8</aws-sdk.version>
+		<twelvemonkeys.version>3.15.3</twelvemonkeys.version>
+	</properties>
+
+	<dependencies>
+		<!-- @AutoConfiguration, @EnableConfigurationProperties, @ConditionalOnMissingBean -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-autoconfigure</artifactId>
+		</dependency>
+		<!-- MediaCleanup: chi xoa anh cu SAU KHI transaction commit. -->
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-tx</artifactId>
+		</dependency>
+		<!-- Rang buoc @NotBlank tren MediaProperties. -->
+		<dependency>
+			<groupId>jakarta.validation</groupId>
+			<artifactId>jakarta.validation-api</artifactId>
+		</dependency>
+		<!-- Log canh bao khi don anh cu that bai (khong keo ca starter logging). -->
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-api</artifactId>
+		</dependency>
+
+		<!-- S3 client (MinIO-compatible). UrlConnection client tranh keo them Netty/Apache. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
+			<version>${aws-sdk.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>url-connection-client</artifactId>
+			<version>${aws-sdk.version}</version>
+		</dependency>
+
+		<!-- Java ImageIO khong doc duoc WebP; plugin chi de DOC, dau ra luon PNG/JPEG. -->
+		<dependency>
+			<groupId>com.twelvemonkeys.imageio</groupId>
+			<artifactId>imageio-webp</artifactId>
+			<version>${twelvemonkeys.version}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+</project>
