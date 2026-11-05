@@ -19,6 +19,9 @@ spring:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  review:
+    order-url: ${ORDER_SERVICE_URL}
+    shop-url: ${SHOP_SERVICE_URL}
 
 logging:
   level:

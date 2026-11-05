@@ -1,0 +1,7 @@
+# Profile DEV - gia tri gia cho local. Prod KHONG co mac dinh (thieu bien la fail).
+spring:
+  jpa:
+    show-sql: true
+auth:
+  jwt:
+    secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}

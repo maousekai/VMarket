@@ -1,12 +1,25 @@
-# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL that
+# Cau hinh test - H2 in-memory (MODE PostgreSQL), khong can PostgreSQL that.
+# Schema van tao bang Flyway de test chay dung migration that.
 spring:
   application:
     name: review-service
   datasource:
-    url: jdbc:h2:mem:review;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:review;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+auth:
+  jwt:
+    secret: test-only-secret-0123456789-0123456789-0123456789
+app:
+  review:
+    outbox-enabled: false
+  cors:
+    allowed-origins: http://localhost:5173
