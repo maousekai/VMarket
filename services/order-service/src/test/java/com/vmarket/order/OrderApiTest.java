@@ -378,4 +378,113 @@ class OrderApiTest {
         // Chỉ có đúng 1 đơn được lưu trong database
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
     }
+
+    @Test
+    void placeOrderWithConcurrentRetriesReturnsSameOrder() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        String key = "concurrent-idempotency-key-" + System.currentTimeMillis();
+        int threads = 6;
+        java.util.concurrent.ExecutorService executor =
+                java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch readyLatch =
+                new java.util.concurrent.CountDownLatch(threads);
+        java.util.concurrent.CountDownLatch startLatch =
+                new java.util.concurrent.CountDownLatch(1);
+        java.util.List<org.springframework.test.web.servlet.MvcResult> results =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        java.util.List<Throwable> errors =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+        for (int i = 0; i < threads; i++) {
+            executor.submit(
+                    () -> {
+                        readyLatch.countDown();
+                        try {
+                            startLatch.await();
+                            org.springframework.test.web.servlet.MvcResult result =
+                                    mockMvc.perform(
+                                                    post("/api/orders")
+                                                            .header(
+                                                                    HttpHeaders.AUTHORIZATION,
+                                                                    aliceToken())
+                                                            .header("Idempotency-Key", key)
+                                                            .contentType(
+                                                                    MediaType.APPLICATION_JSON)
+                                                            .content(
+                                                                    "{\"addressId\":\""
+                                                                            + ADDRESS_ID
+                                                                            + "\"}"))
+                                            .andReturn();
+                            results.add(result);
+                        } catch (Throwable t) {
+                            errors.add(t);
+                        }
+                    });
+        }
+
+        readyLatch.await(5, java.util.concurrent.TimeUnit.SECONDS);
+        startLatch.countDown();
+        executor.shutdown();
+        assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        assertThat(errors).isEmpty();
+        assertThat(results).hasSize(threads);
+
+        // Mọi request retry song song đều phải thành công (201 Created) và trả về cùng một đơn
+        String firstOrderId = null;
+        for (org.springframework.test.web.servlet.MvcResult result : results) {
+            assertThat(result.getResponse().getStatus()).isEqualTo(201);
+            String content = result.getResponse().getContentAsString();
+            String orderId = com.jayway.jsonpath.JsonPath.read(content, "$.id");
+            assertThat(orderId).isNotBlank();
+            if (firstOrderId == null) {
+                firstOrderId = orderId;
+            } else {
+                assertThat(orderId).isEqualTo(firstOrderId);
+            }
+        }
+
+        // Database chỉ lưu duy nhất 1 đơn cho idempotency key này
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
+
+    @Test
+    void placeOrderConcurrentRetryWhenCartAlreadyEmptiedReturnsExistingOrder() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        String key = "retry-empty-cart-" + System.currentTimeMillis();
+
+        // Lần gọi 1 thành công tạo đơn
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", key)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        // Lần gọi 2 đến khi cart-service đã bị dọn sạch giỏ (rỗng)
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new com.vmarket.order.client.CartServiceClient.CartView(
+                                ALICE, java.util.List.of(), 0, BigDecimal.ZERO));
+
+        // Retry với cùng key vẫn phải trả đơn cũ 201 thành công, KHÔNG ném 400 CART_EMPTY
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", key)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
 }
