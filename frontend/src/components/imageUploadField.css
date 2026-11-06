@@ -18,14 +18,6 @@
   color: #374151;
 }
 
-.image-field__hint {
-  max-width: 460px;
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--color-muted);
-}
-
 .image-field__status {
   flex-shrink: 0;
   padding: 3px 9px;
@@ -88,8 +80,24 @@
 
 .image-field--cover .image-field__drop {
   width: 100%;
+  max-width: 560px;
   aspect-ratio: 16 / 9;
   border-radius: 16px;
+}
+
+/* A cover is wide, so the tools sit under it instead of squeezing beside it. */
+.image-field--cover .image-field__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.image-field--cover .image-field__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding-top: 0;
 }
 
 .image-field__drop img {
@@ -216,12 +224,6 @@
 
 .image-field__url input[aria-invalid='true'] {
   border-color: #dc2626;
-}
-
-.image-field__url p {
-  margin: 0;
-  font-size: 11px;
-  color: var(--color-muted);
 }
 
 .image-field__error {

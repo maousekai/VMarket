@@ -61,11 +61,7 @@ export default function AvatarDialog({ profile, saveProfile, onClose }) {
   const busyLabel = stage === 'uploading' ? 'Đang tải ảnh…' : 'Đang lưu…'
 
   return (
-    <Modal
-      title="Đổi ảnh đại diện"
-      description="Ảnh vuông giúp khuôn mặt rõ nhất. Ảnh chỉ được tải lên khi bạn bấm Lưu."
-      onClose={() => !saving && onClose()}
-    >
+    <Modal title="Đổi ảnh đại diện" onClose={() => !saving && onClose()}>
       <form
         className="profile-form avatar-dialog"
         noValidate
@@ -90,7 +86,6 @@ export default function AvatarDialog({ profile, saveProfile, onClose }) {
           }}
           shape="square"
           maxSizeMb={2}
-          hint="JPEG, PNG hoặc WebP · tối đa 2 MB. Hệ thống tự cắt vuông và tối ưu ảnh."
           error={fieldError}
           disabled={saving}
         />

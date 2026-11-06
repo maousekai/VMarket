@@ -234,7 +234,6 @@ export default function ShopForm({
               onFileChange={(next) => onImageFile('logoUrl', next)}
               shape="square"
               maxSizeMb={2}
-              hint="Ảnh vuông, nền rõ · JPEG, PNG hoặc WebP · tối đa 2 MB."
               error={fieldErrors.logoUrl}
               disabled={disabled || saving}
             />
@@ -248,7 +247,6 @@ export default function ShopForm({
               onFileChange={(next) => onImageFile('coverUrl', next)}
               shape="cover"
               maxSizeMb={5}
-              hint="Ảnh ngang 16:9 · JPEG, PNG hoặc WebP · tối đa 5 MB."
               error={fieldErrors.coverUrl}
               disabled={disabled || saving}
             />

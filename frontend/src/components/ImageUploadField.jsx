@@ -45,7 +45,6 @@ export default function ImageUploadField({
   onFileChange,
   shape = 'square',
   maxSizeMb = 2,
-  hint,
   error,
   disabled = false,
   required = false,
@@ -123,7 +122,6 @@ export default function ImageUploadField({
             {label}
             {required && <span aria-hidden="true"> *</span>}
           </span>
-          {hint && <p className="image-field__hint">{hint}</p>}
         </div>
         <span className={`image-field__status${file ? ' is-new' : ''}`}>
           {file ? 'Ảnh mới' : storedUrl ? 'Đã đặt' : 'Chưa có ảnh'}
@@ -219,7 +217,6 @@ export default function ImageUploadField({
               onChange(event.target.value)
             }}
           />
-          <p>Dán URL http(s) nếu ảnh đã có sẵn trên internet.</p>
         </div>
       )}
 
