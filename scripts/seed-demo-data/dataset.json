@@ -1,0 +1,271 @@
+{
+  "$comment": "Du lieu demo VMarket Da Nang (PBL6-69). Gia la so nguyen VND. Anh lay tu loremflickr (anh Flickr giay phep CC) theo tu khoa + lock co dinh. Tu khoa/variants o day duoc seed.mjs mo rong thanh ProductRequest day du.",
+  "categories": [
+    { "key": "fashion", "name": "Thời trang", "sortOrder": 1 },
+    { "key": "electronics", "name": "Điện máy", "sortOrder": 2 },
+    { "key": "grocery", "name": "Bách hóa", "sortOrder": 3 },
+    { "key": "baby", "name": "Mẹ & Bé", "sortOrder": 4 },
+    { "key": "sports", "name": "Thể thao", "sortOrder": 5 },
+    { "key": "books", "name": "Sách", "sortOrder": 6 },
+    { "key": "beauty", "name": "Mỹ phẩm", "sortOrder": 7 },
+    { "key": "food", "name": "Ẩm thực ĐN", "sortOrder": 8 }
+  ],
+  "shops": [
+    {
+      "key": "minh-huong-fashion",
+      "name": "Shop Thời Trang Minh Hương",
+      "category": "fashion",
+      "district": "Sơn Trà",
+      "ward": "An Hải Bắc",
+      "street": "45 Ngô Quyền",
+      "phone": "0905100101",
+      "cover": "clothing,store",
+      "description": "Thời trang nữ thiết kế, may tại Đà Nẵng. Đổi size miễn phí trong 7 ngày.",
+      "products": [
+        ["Áo Sơ Mi Oversize Unisex Cotton", 220000, "shirt", "size"],
+        ["Đầm Maxi Hoa Vải Linen Mùa Hè", 295000, "dress", "size"],
+        ["Áo Khoác Bomber Vintage Unisex", 520000, "jacket", "size"],
+        ["Chân Váy Xếp Ly Dáng Dài", 249000, "skirt", "size"],
+        ["Áo Thun Cổ Tròn Basic", 129000, "tshirt", "size"],
+        ["Quần Jean Ống Rộng Lưng Cao", 359000, "jeans", "size"],
+        ["Áo Len Cardigan Mỏng", 279000, "cardigan", "size"],
+        ["Áo Dài Lụa Cách Tân", 690000, "aodai,dress", "size"]
+      ]
+    },
+    {
+      "key": "vai-may-do",
+      "name": "Boutique Vải & May Đo",
+      "category": "fashion",
+      "district": "Ngũ Hành Sơn",
+      "ward": "Mỹ An",
+      "street": "120 Lê Văn Hiến",
+      "phone": "0905100102",
+      "cover": "fabric,tailor",
+      "description": "May đo âu phục, áo dài theo số đo. Nhận may lấy nhanh trong 48 giờ.",
+      "products": [
+        ["Áo Sơ Mi Nam Công Sở Slim Fit", 289000, "dress-shirt", "size"],
+        ["Quần Tây Nam Vải Tuyết Mưa", 399000, "trousers", "size"],
+        ["Vest Nam May Đo Hai Nút", 2490000, "suit", "size"],
+        ["Áo Polo Nam Cá Sấu", 199000, "polo", "size"],
+        ["Khăn Lụa Tơ Tằm Hội An", 320000, "scarf,silk", null],
+        ["Cà Vạt Lụa Họa Tiết", 159000, "necktie", null],
+        ["Thắt Lưng Da Bò Thật", 349000, "belt,leather", null],
+        ["Túi Tote Vải Canvas", 149000, "tote,bag", null]
+      ]
+    },
+    {
+      "key": "dien-may-hai-chau",
+      "name": "Điện Máy Hải Châu",
+      "category": "electronics",
+      "district": "Hải Châu",
+      "ward": "Thạch Thang",
+      "street": "212 Lê Duẩn",
+      "phone": "0905100103",
+      "cover": "electronics,store",
+      "description": "Phân phối điện thoại, phụ kiện chính hãng. Bảo hành 12 tháng tại cửa hàng.",
+      "products": [
+        ["Tai Nghe Bluetooth Chống Ồn", 890000, "headphones", null],
+        ["Sạc Dự Phòng 20000mAh Sạc Nhanh", 459000, "powerbank", null],
+        ["Ốp Lưng iPhone 15 Pro Trong Suốt Magsafe", 159000, "phone,case", null],
+        ["Loa Bluetooth Mini Chống Nước", 590000, "speaker", null],
+        ["Đồng Hồ Thông Minh Theo Dõi Sức Khỏe", 1290000, "smartwatch", null],
+        ["Cáp Sạc USB-C Bọc Dù 2m", 99000, "cable,usb", null],
+        ["Bàn Phím Cơ Không Dây", 1150000, "keyboard", null],
+        ["Chuột Không Dây Yên Tĩnh", 249000, "computer,mouse", null]
+      ]
+    },
+    {
+      "key": "gia-dung-thanh-khe",
+      "name": "Gia Dụng Thanh Khê",
+      "category": "electronics",
+      "district": "Thanh Khê",
+      "ward": "Thạc Gián",
+      "street": "88 Điện Biên Phủ",
+      "phone": "0905100104",
+      "cover": "kitchen,appliance",
+      "description": "Đồ gia dụng thông minh cho căn bếp gia đình Việt. Giao lắp đặt nội thành.",
+      "products": [
+        ["Nồi Chiên Không Dầu 5.5L", 1490000, "airfryer", null],
+        ["Máy Xay Sinh Tố Đa Năng", 690000, "blender", null],
+        ["Ấm Siêu Tốc Inox 1.8L", 259000, "kettle", null],
+        ["Quạt Đứng Tiết Kiệm Điện", 790000, "electric,fan", null],
+        ["Nồi Cơm Điện Cao Tần 1.8L", 1890000, "rice,cooker", null],
+        ["Máy Pha Cà Phê Phin Điện", 990000, "coffee,machine", null],
+        ["Bàn Ủi Hơi Nước Cầm Tay", 459000, "iron,clothes", null],
+        ["Đèn Bàn LED Chống Cận", 329000, "desk,lamp", null]
+      ]
+    },
+    {
+      "key": "bach-hoa-hoa-khanh",
+      "name": "Bách Hóa Hòa Khánh",
+      "category": "grocery",
+      "district": "Liên Chiểu",
+      "ward": "Hòa Khánh Bắc",
+      "street": "15 Nguyễn Lương Bằng",
+      "phone": "0905100105",
+      "cover": "grocery,market",
+      "description": "Nhu yếu phẩm hằng ngày, rau củ sạch từ nông trại Hòa Vang.",
+      "products": [
+        ["Gạo ST25 Túi 5kg", 189000, "rice,bag", null],
+        ["Nước Mắm Nam Ô Truyền Thống 500ml", 85000, "fish,sauce", null],
+        ["Dầu Ăn Hướng Dương 1L", 69000, "cooking,oil", null],
+        ["Cà Phê Rang Xay Đà Nẵng 500g", 145000, "coffee,beans", null],
+        ["Trà Xanh Thái Nguyên 200g", 79000, "green,tea", null],
+        ["Mật Ong Rừng Nguyên Chất 500ml", 210000, "honey", null],
+        ["Hạt Điều Rang Muối 500g", 175000, "cashew", null],
+        ["Bột Giặt Hữu Cơ 3kg", 159000, "laundry,detergent", null]
+      ]
+    },
+    {
+      "key": "me-be-cam-le",
+      "name": "Mẹ & Bé Cẩm Lệ",
+      "category": "baby",
+      "district": "Cẩm Lệ",
+      "ward": "Hòa Thọ Đông",
+      "street": "302 Cách Mạng Tháng Tám",
+      "phone": "0905100106",
+      "cover": "baby,toys",
+      "description": "Đồ dùng mẹ và bé an toàn, có kiểm định. Tư vấn miễn phí cho mẹ bầu.",
+      "products": [
+        ["Bình Sữa Thủy Tinh Chống Sặc 240ml", 245000, "baby,bottle", null],
+        ["Tã Dán Sơ Sinh Size S 60 Miếng", 289000, "diaper", null],
+        ["Xe Đẩy Gấp Gọn Siêu Nhẹ", 2390000, "stroller", null],
+        ["Bộ Đồ Sơ Sinh Cotton 5 Món", 199000, "baby,clothes", null],
+        ["Đồ Chơi Xếp Hình Gỗ Montessori", 159000, "wooden,toy", null],
+        ["Khăn Sữa Sợi Tre 10 Chiếc", 99000, "baby,towel", null],
+        ["Ghế Ăn Dặm Đa Năng", 890000, "highchair", null],
+        ["Địu Em Bé Trợ Lực", 459000, "baby,carrier", null]
+      ]
+    },
+    {
+      "key": "the-thao-son-tra",
+      "name": "Thể Thao Biển Sơn Trà",
+      "category": "sports",
+      "district": "Sơn Trà",
+      "ward": "Phước Mỹ",
+      "street": "9 Võ Nguyên Giáp",
+      "phone": "0905100107",
+      "cover": "sports,store",
+      "description": "Đồ thể thao, đồ bơi và phụ kiện biển cho dân chạy bộ ven biển Mỹ Khê.",
+      "products": [
+        ["Giày Chạy Bộ Đệm Êm Nam", 1290000, "running,shoes", "shoe"],
+        ["Giày Thể Thao Nữ Pastel Platform", 459000, "sneakers", "shoe"],
+        ["Kính Bơi Chống Mờ UV", 189000, "swimming,goggles", null],
+        ["Thảm Tập Yoga TPE 8mm", 299000, "yoga,mat", null],
+        ["Bình Nước Thể Thao Giữ Nhiệt 750ml", 219000, "water,bottle", null],
+        ["Áo Chạy Bộ Thoáng Khí", 179000, "sportswear", "size"],
+        ["Ván Lướt Sóng Mềm 7ft", 3990000, "surfboard", null],
+        ["Bộ Dây Kháng Lực 5 Mức", 249000, "resistance,band", null]
+      ]
+    },
+    {
+      "key": "nha-sach-hai-chau",
+      "name": "Nhà Sách Bạch Đằng",
+      "category": "books",
+      "district": "Hải Châu",
+      "ward": "Hải Châu",
+      "street": "76 Bạch Đằng",
+      "phone": "0905100108",
+      "cover": "bookstore",
+      "description": "Sách văn học, kỹ năng và sách thiếu nhi. Bọc sách miễn phí.",
+      "products": [
+        ["Đà Nẵng — Ký Ức Một Thành Phố", 168000, "book,city", null],
+        ["Lập Trình Không Khó (Tái Bản)", 215000, "programming,book", null],
+        ["Tuyển Tập Truyện Ngắn Việt Nam", 129000, "books", null],
+        ["Sổ Tay Bìa Da A5", 89000, "notebook", null],
+        ["Sách Tranh Thiếu Nhi Song Ngữ", 79000, "children,book", null],
+        ["Tư Duy Nhanh Và Chậm", 189000, "book,reading", null],
+        ["Bộ Bút Highlight Pastel 6 Màu", 65000, "highlighter", null],
+        ["Lịch Để Bàn 2026 Đà Nẵng", 59000, "desk,calendar", null]
+      ]
+    },
+    {
+      "key": "my-pham-ngu-hanh-son",
+      "name": "Mỹ Phẩm Thiên Nhiên Non Nước",
+      "category": "beauty",
+      "district": "Ngũ Hành Sơn",
+      "ward": "Hòa Hải",
+      "street": "33 Trường Sa",
+      "phone": "0905100109",
+      "cover": "cosmetics",
+      "description": "Mỹ phẩm thuần chay, nguyên liệu Việt. Có giấy công bố đầy đủ.",
+      "products": [
+        ["Serum Vitamin C Sáng Da 30ml", 245000, "serum", null],
+        ["Set Dưỡng Da Cấp Ẩm 5 Bước", 385000, "skincare", null],
+        ["Sữa Rửa Mặt Cấp Ẩm Sạch Sâu 150ml", 185000, "cleanser", null],
+        ["Kem Chống Nắng SPF50 PA++++", 229000, "sunscreen", null],
+        ["Son Thỏi Lì Màu Đỏ Gạch", 159000, "lipstick", null],
+        ["Bộ Cọ Trang Điểm 12 Món", 285000, "makeup,brushes", null],
+        ["Dầu Gội Bưởi Kích Mọc Tóc", 139000, "shampoo", null],
+        ["Nước Hoa Hồng Không Cồn 200ml", 119000, "toner,rose", null]
+      ]
+    },
+    {
+      "key": "dac-san-han-market",
+      "name": "Đặc Sản Chợ Hàn",
+      "category": "food",
+      "district": "Hải Châu",
+      "ward": "Hải Châu",
+      "street": "119 Trần Phú",
+      "phone": "0905100110",
+      "cover": "vietnam,market",
+      "description": "Đặc sản Đà Nẵng đóng gói làm quà: chả bò, mực rim, tré, bánh khô mè.",
+      "products": [
+        ["Combo Gia Vị Đặc Sản Đà Nẵng 10 Loại", 189000, "spices", null],
+        ["Chả Bò Đà Nẵng 500g", 165000, "sausage,beef", null],
+        ["Mực Rim Me Đặc Biệt 300g", 155000, "squid", null],
+        ["Bánh Khô Mè Cẩm Lệ Hộp 500g", 69000, "sesame,cookies", null],
+        ["Tré Đà Nẵng Gói 10 Cái", 120000, "vietnamese,food", null],
+        ["Mắm Ruốc Huế Hũ 400g", 75000, "shrimp,paste", null],
+        ["Cá Bò Tẩm Gia Vị 500g", 210000, "dried,fish", null],
+        ["Hộp Quà Tết Đặc Sản Miền Trung", 590000, "gift,box", null]
+      ]
+    },
+    {
+      "key": "ca-phe-moc",
+      "name": "Cà Phê Mộc Thanh Khê",
+      "category": "food",
+      "district": "Thanh Khê",
+      "ward": "An Khê",
+      "street": "51 Hà Huy Tập",
+      "phone": "0905100111",
+      "cover": "coffee,shop",
+      "description": "Cà phê rang mộc từ Cầu Đất và Khe Sanh, rang mới mỗi tuần.",
+      "products": [
+        ["Cà Phê Robusta Rang Mộc 500g", 135000, "coffee", null],
+        ["Cà Phê Arabica Cầu Đất 250g", 165000, "arabica", null],
+        ["Phin Nhôm Pha Cà Phê", 45000, "vietnamese,coffee", null],
+        ["Cà Phê Muối Hòa Tan Hộp 10 Gói", 89000, "instant,coffee", null],
+        ["Cold Brew Đóng Chai 500ml", 59000, "cold,brew", null],
+        ["Bộ Quà Tặng Cà Phê & Phin", 299000, "coffee,gift", null],
+        ["Ly Sứ Men Lam Hội An", 95000, "ceramic,mug", null],
+        ["Cacao Nguyên Chất Đắk Lắk 300g", 115000, "cocoa", null]
+      ]
+    },
+    {
+      "key": "bep-nha-mi-quang",
+      "name": "Bếp Nhà Mì Quảng",
+      "category": "food",
+      "district": "Cẩm Lệ",
+      "ward": "Khuê Trung",
+      "street": "18 Núi Thành",
+      "phone": "0905100112",
+      "cover": "noodles,vietnam",
+      "description": "Mì Quảng, bánh tráng cuốn thịt heo đóng gói chân không, giao trong ngày.",
+      "products": [
+        ["Mì Quảng Gà Đóng Gói (4 Phần)", 159000, "noodles", null],
+        ["Bánh Tráng Cuốn Thịt Heo Set 2 Người", 179000, "spring,rolls", null],
+        ["Bánh Tráng Đại Lộc Xấp 20 Cái", 45000, "rice,paper", null],
+        ["Nước Lèo Mì Quảng Cô Đặc 1L", 99000, "soup", null],
+        ["Bún Chả Cá Đà Nẵng (3 Phần)", 145000, "fish,noodle", null],
+        ["Bánh Xèo Miền Trung Bột Pha Sẵn", 55000, "pancake", null],
+        ["Tương Ớt Nhà Làm 250ml", 39000, "chili,sauce", null],
+        ["Rau Sống Sạch Hòa Vang 500g", 35000, "vegetables", null]
+      ]
+    }
+  ],
+  "variantSets": {
+    "size": { "label": "Kích cỡ", "values": ["S", "M", "L", "XL"] },
+    "shoe": { "label": "Size giày", "values": ["37", "38", "39", "40", "41", "42"] }
+  }
+}
