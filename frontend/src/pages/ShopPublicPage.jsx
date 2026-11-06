@@ -149,9 +149,7 @@ export default function ShopPublicPage() {
             <ul className="shop-hero__meta">
               <li>{shop.province}</li>
               {shop.approvedAt && <li>Hoạt động từ {formatDate(shop.approvedAt)}</li>}
-              <li>
-                {products.total > 0 ? `${products.total} sản phẩm` : 'Đang cập nhật sản phẩm'}
-              </li>
+              <li>{products.status === 'ready' ? `${products.total} sản phẩm` : '—'}</li>
             </ul>
           </div>
         </div>
