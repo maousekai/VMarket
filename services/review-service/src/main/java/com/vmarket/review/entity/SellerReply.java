@@ -1,7 +1,8 @@
 package com.vmarket.review.entity;
 
 import java.time.Instant;
-import java.util.UUID;
+
+import com.github.f4b6a3.ulid.UlidCreator;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -22,7 +23,7 @@ import lombok.NoArgsConstructor;
 public class SellerReply {
 
 	@Id
-	@Column(length = 36)
+	@Column(length = 26)
 	private String id;
 
 	@OneToOne(fetch = FetchType.LAZY, optional = false)
@@ -42,7 +43,7 @@ public class SellerReply {
 	private Instant updatedAt;
 
 	public SellerReply(Review review, String sellerId, String content, Instant now) {
-		this.id = UUID.randomUUID().toString();
+		this.id = UlidCreator.getUlid().toString();
 		this.review = review;
 		this.sellerId = sellerId;
 		this.content = content;

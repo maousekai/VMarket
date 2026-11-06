@@ -1,6 +1,6 @@
 package com.vmarket.review.entity;
 
-import java.util.UUID;
+import com.github.f4b6a3.ulid.UlidCreator;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -23,7 +23,7 @@ public class ReviewImage {
 	public static final int MAX_PER_REVIEW = 5;
 
 	@Id
-	@Column(length = 36)
+	@Column(length = 26)
 	private String id;
 
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -37,7 +37,7 @@ public class ReviewImage {
 	private int sortOrder;
 
 	ReviewImage(Review review, String url, int sortOrder) {
-		this.id = UUID.randomUUID().toString();
+		this.id = UlidCreator.getUlid().toString();
 		this.review = review;
 		this.url = url;
 		this.sortOrder = sortOrder;

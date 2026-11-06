@@ -3,7 +3,8 @@ package com.vmarket.review.entity;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+
+import com.github.f4b6a3.ulid.UlidCreator;
 
 import org.hibernate.annotations.BatchSize;
 
@@ -38,10 +39,10 @@ import lombok.Setter;
 public class Review {
 
 	@Id
-	@Column(length = 36)
+	@Column(length = 26)
 	private String id;
 
-	@Column(name = "order_id", nullable = false, length = 36)
+	@Column(name = "order_id", nullable = false, length = 26)
 	private String orderId;
 
 	@Column(name = "product_id", nullable = false, length = 64)
@@ -96,7 +97,7 @@ public class Review {
 	public static Review create(String orderId, String productId, String variantId, String shopId, String buyerId,
 			int rating, String comment, List<String> imageUrls, Instant now) {
 		Review review = new Review();
-		review.id = UUID.randomUUID().toString();
+		review.id = UlidCreator.getUlid().toString();
 		review.orderId = orderId;
 		review.productId = productId;
 		review.variantId = variantId;

@@ -2,7 +2,8 @@ package com.vmarket.review.service;
 
 import java.sql.Timestamp;
 import java.time.Clock;
-import java.util.UUID;
+
+import com.github.f4b6a3.ulid.UlidCreator;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -32,6 +33,6 @@ public class ReviewOutbox {
 		Timestamp now = Timestamp.from(clock.instant());
 		jdbc.update("insert into review_outbox (id, event_type, review_id, product_id, state, retry_attempts,"
 				+ " next_attempt_at, created_at) values (?, ?, ?, ?, 'PENDING', 0, ?, ?)",
-				UUID.randomUUID().toString(), EventType.REVIEW_CREATED, reviewId, productId, now, now);
+				UlidCreator.getUlid().toString(), EventType.REVIEW_CREATED, reviewId, productId, now, now);
 	}
 }
