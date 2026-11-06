@@ -20,13 +20,22 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Đẩy dòng outbox lên Event Bus (FR-REV-02).
  *
- * <p><b>Aggregate tính lúc phát, không lúc ghi:</b> hai đánh giá cùng sản phẩm commit gần như đồng
- * thời sẽ mỗi bên đọc thiếu bản ghi của bên kia nếu tính trong transaction ghi. Tính lại ở đây (sau
- * commit) thì bản tin phát sau cùng luôn mang số liệu đầy đủ; Product Service nhận aggregate tuyệt
- * đối nên xử lý lặp/không theo thứ tự đều hội tụ đúng.
+ * <p><b>Aggregate tính lúc phát, dưới khoá theo sản phẩm.</b> Mỗi dòng được claim bằng
+ * {@code FOR UPDATE SKIP LOCKED} (nhiều replica chia nhau hàng đợi), nhưng trước khi tính aggregate
+ * còn phải giữ dòng {@code product_rating_locks} của sản phẩm đó. Hai replica xử lý hai dòng của
+ * cùng sản phẩm vì vậy chạy tuần tự: replica sau chỉ tính khi replica trước đã publish và commit,
+ * nên sự kiện publish sau luôn mang aggregate mới hơn (timestamp envelope cũng tăng dần — Product
+ * Service giữ bản tin mới nhất). Không có khoá này, replica A có thể tính count=1, replica B tính
+ * count=2 và publish trước, rồi A ghi đè bằng count=1.
+ *
+ * <p>Transaction và các khoá được giữ trong lúc chờ broker confirm (tối đa
+ * {@code app.events.confirm-timeout-millis}, xử lý tuần tự tối đa {@value #BATCH_LIMIT} dòng mỗi
+ * lượt). Chấp nhận được với lưu lượng đánh giá thấp; khoá chỉ chặn publisher khác của
+ * <b>cùng sản phẩm</b>, không chặn request ghi đánh giá.
  *
  * <p>Lỗi phát → thử lại với backoff luỹ thừa (5s → tối đa 5 phút); quá {@link #MAX_ATTEMPTS} lần
- * thì đánh dấu {@code DEAD} để không chặn hàng đợi.
+ * thì chuyển {@code DEAD} để không chặn hàng đợi. Dòng DEAD được báo qua metric/log
+ * ({@link ReviewOutboxMonitor}) và phát lại qua {@code /api/reviews/admin/outbox}.
  */
 @Slf4j
 @Component
@@ -35,6 +44,7 @@ public class ReviewOutboxPublisher {
 
 	public static final int MAX_ATTEMPTS = 10;
 	private static final int BATCH_LIMIT = 100;
+	private static final int MAX_ERROR_LENGTH = 500;
 
 	private final JdbcTemplate jdbc;
 	private final EventPublisher publisher;
@@ -60,7 +70,7 @@ public class ReviewOutboxPublisher {
 		}
 	}
 
-	/** Phát một dòng đến hạn; trả {@code false} khi không còn dòng nào. */
+	/** Phát một dòng đến hạn trong transaction hiện tại; trả {@code false} khi không còn dòng nào. */
 	public boolean publishOne() {
 		var rows = jdbc.queryForList("select id, review_id, product_id, retry_attempts from review_outbox"
 				+ " where state = 'PENDING' and next_attempt_at <= ?"
@@ -72,6 +82,7 @@ public class ReviewOutboxPublisher {
 		var row = rows.get(0);
 		String id = (String) row.get("id");
 		String productId = (String) row.get("product_id");
+		lockProduct(productId);
 		try {
 			RatingSummary summary = ratings.productSummary(productId);
 			publisher.publish(EventType.REVIEW_CREATED, new ReviewCreated(
@@ -83,9 +94,24 @@ public class ReviewOutboxPublisher {
 			String state = attempts >= MAX_ATTEMPTS ? "DEAD" : "PENDING";
 			jdbc.update("update review_outbox set retry_attempts = ?, next_attempt_at = ?, state = ?, last_error = ?"
 					+ " where id = ?", attempts, Timestamp.from(clock.instant().plusSeconds(delaySeconds)), state,
-					ex.getClass().getSimpleName(), id);
-			log.warn("ReviewCreated outbox {} -> {} sau {} lần thử", id, state, attempts);
+					describe(ex), id);
+			log.warn("ReviewCreated outbox {} -> {} sau {} lần thử: {}", id, state, attempts, describe(ex));
 		}
 		return true;
+	}
+
+	/**
+	 * Giữ khoá ghi trên dòng của sản phẩm tới hết transaction. {@code ON CONFLICT DO NOTHING} tạo dòng
+	 * khoá ở lần đầu mà không lỗi khi hai replica cùng tạo.
+	 */
+	private void lockProduct(String productId) {
+		jdbc.update("insert into product_rating_locks (product_id) values (?) on conflict do nothing", productId);
+		jdbc.queryForList("select product_id from product_rating_locks where product_id = ? for update", productId);
+	}
+
+	/** Tên lớp + message đã cắt ngắn để debug được mà không phình cột. */
+	static String describe(Throwable ex) {
+		String text = ex.getClass().getSimpleName() + (ex.getMessage() == null ? "" : ": " + ex.getMessage());
+		return text.length() <= MAX_ERROR_LENGTH ? text : text.substring(0, MAX_ERROR_LENGTH);
 	}
 }
