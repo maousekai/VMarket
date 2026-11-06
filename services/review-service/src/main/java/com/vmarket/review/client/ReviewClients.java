@@ -52,16 +52,29 @@ public class ReviewClients {
 	}
 
 	/** Id gian hàng của seller đang đăng nhập. */
-	public String myShopId(String authorization) {
+	public MyShop myShop(String authorization) {
 		try {
-			String id = call(http.get().uri(config.getShopUrl() + "/api/shops/me")
-					.header("Authorization", authorization)).path("id").asString();
-			if (id.isBlank()) {
+			JsonNode shop = call(http.get().uri(config.getShopUrl() + "/api/shops/me")
+					.header("Authorization", authorization));
+			String id = shop.path("id").asString();
+			String status = shop.path("status").asString();
+			if (id.isBlank() || status.isBlank()) {
 				throw ApiException.unavailable("DEPENDENCY_UNAVAILABLE", "Shop Service trả dữ liệu không hợp lệ");
 			}
-			return id;
+			return new MyShop(id, status);
 		} catch (UpstreamRejected ex) {
 			throw ApiException.forbidden("SHOP_NOT_FOUND", "Bạn chưa có gian hàng");
+		}
+	}
+
+	/**
+	 * Gian hàng của seller. {@code status} theo {@code ShopStatus} của Shop Service: PENDING, ACTIVE,
+	 * REJECTED, SUSPENDED.
+	 */
+	public record MyShop(String id, String status) {
+
+		public boolean isActive() {
+			return "ACTIVE".equals(status);
 		}
 	}
 

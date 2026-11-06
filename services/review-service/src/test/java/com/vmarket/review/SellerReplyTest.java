@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
+import com.vmarket.review.client.ReviewClients;
 import com.vmarket.review.exception.ApiException;
 
 /** FR-REV-03: seller phản hồi đánh giá trong gian hàng mình. */
@@ -22,7 +23,7 @@ class SellerReplyTest extends ReviewTestSupport {
 	@Test
 	void sellerRepliesPubliclyAndCanEditAndDelete() throws Exception {
 		String reviewId = createReview(BUYER, "order-1", PRODUCT, 5);
-		when(clients.myShopId(anyString())).thenReturn(SHOP);
+		when(clients.myShop(anyString())).thenReturn(new ReviewClients.MyShop(SHOP, "ACTIVE"));
 
 		mvc.perform(put("/api/reviews/seller/{id}/reply", reviewId)
 				.header("Authorization", token(SELLER, "SELLER"))
@@ -50,7 +51,7 @@ class SellerReplyTest extends ReviewTestSupport {
 	@Test
 	void sellerCannotReplyToAnotherShopsReview() throws Exception {
 		String reviewId = createReview(BUYER, "order-1", PRODUCT, 2);
-		when(clients.myShopId(anyString())).thenReturn("shop-other");
+		when(clients.myShop(anyString())).thenReturn(new ReviewClients.MyShop("shop-other", "ACTIVE"));
 
 		mvc.perform(put("/api/reviews/seller/{id}/reply", reviewId)
 				.header("Authorization", token("seller-2", "SELLER"))
@@ -73,7 +74,7 @@ class SellerReplyTest extends ReviewTestSupport {
 				.contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"  \"}"))
 				.andExpect(status().isBadRequest());
 
-		when(clients.myShopId(anyString())).thenThrow(ApiException.forbidden("SHOP_NOT_FOUND", "Bạn chưa có gian hàng"));
+		when(clients.myShop(anyString())).thenThrow(ApiException.forbidden("SHOP_NOT_FOUND", "Bạn chưa có gian hàng"));
 		mvc.perform(put("/api/reviews/seller/{id}/reply", reviewId)
 				.header("Authorization", token(SELLER, "SELLER"))
 				.contentType(MediaType.APPLICATION_JSON).content(REPLY))
@@ -82,10 +83,27 @@ class SellerReplyTest extends ReviewTestSupport {
 	}
 
 	@Test
+	void suspendedShopCannotReply() throws Exception {
+		String reviewId = createReview(BUYER, "order-1", PRODUCT, 2);
+		when(clients.myShop(anyString())).thenReturn(new ReviewClients.MyShop(SHOP, "SUSPENDED"));
+
+		mvc.perform(put("/api/reviews/seller/{id}/reply", reviewId)
+				.header("Authorization", token(SELLER, "SELLER"))
+				.contentType(MediaType.APPLICATION_JSON).content(REPLY))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.error.code").value("SHOP_NOT_ACTIVE"));
+
+		// Vẫn xem được danh sách đánh giá của shop mình.
+		mvc.perform(get("/api/reviews/seller").header("Authorization", token(SELLER, "SELLER")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(1));
+	}
+
+	@Test
 	void sellerListsOwnShopReviews() throws Exception {
 		createReview(BUYER, "order-1", PRODUCT, 5);
 		createReview(OTHER_BUYER, "order-2", PRODUCT, 1);
-		when(clients.myShopId(anyString())).thenReturn(SHOP);
+		when(clients.myShop(anyString())).thenReturn(new ReviewClients.MyShop(SHOP, "ACTIVE"));
 
 		mvc.perform(get("/api/reviews/seller").header("Authorization", token(SELLER, "SELLER")))
 				.andExpect(status().isOk())
@@ -93,6 +111,7 @@ class SellerReplyTest extends ReviewTestSupport {
 
 		mvc.perform(get("/api/reviews/seller").param("rating", "1").header("Authorization", token(SELLER, "SELLER")))
 				.andExpect(jsonPath("$.totalElements").value(1))
-				.andExpect(jsonPath("$.items[0].buyerId").value(OTHER_BUYER));
+				.andExpect(jsonPath("$.items[0].orderId").value("order-2"))
+				.andExpect(jsonPath("$.items[0].buyerId").doesNotExist());
 	}
 }

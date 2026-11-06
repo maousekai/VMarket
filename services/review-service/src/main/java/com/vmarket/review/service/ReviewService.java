@@ -1,8 +1,10 @@
 package com.vmarket.review.service;
 
+import java.net.URI;
 import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
@@ -13,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.vmarket.review.client.ReviewClients;
+import com.vmarket.review.config.ReviewProperties;
 import com.vmarket.review.dto.PageResponse;
 import com.vmarket.review.dto.ReviewRequests;
 import com.vmarket.review.dto.ReviewResponse;
@@ -30,6 +33,10 @@ import tools.jackson.databind.JsonNode;
  * ({@value #COMPLETED_STATUS}) và chứa sản phẩm được đánh giá. Gọi Order Service <b>ngoài</b>
  * transaction để không giữ kết nối DB trong lúc chờ mạng; ràng buộc {@code UNIQUE (order_id,
  * product_id)} vẫn chặn được request trùng lọt qua bước kiểm tra trước.
+ *
+ * <p>SRS gọi trạng thái này là "Hoàn thành"; Order Service hiện chưa có trạng thái hoàn thành riêng
+ * (hay tự chuyển sau N ngày) nên dùng {@code DELIVERED}. Khi Order Service bổ sung thì đổi
+ * {@link #COMPLETED_STATUS}.
  */
 @Service
 public class ReviewService {
@@ -41,24 +48,25 @@ public class ReviewService {
 	private final ReviewRepository reviews;
 	private final ReviewClients clients;
 	private final ReviewOutbox outbox;
+	private final ReviewProperties properties;
 	private final Clock clock;
 	private final TransactionTemplate transactions;
 
-	public ReviewService(ReviewRepository reviews, ReviewClients clients, ReviewOutbox outbox, Clock clock,
-			PlatformTransactionManager transactionManager) {
+	public ReviewService(ReviewRepository reviews, ReviewClients clients, ReviewOutbox outbox,
+			ReviewProperties properties, Clock clock, PlatformTransactionManager transactionManager) {
 		this.reviews = reviews;
 		this.clients = clients;
 		this.outbox = outbox;
+		this.properties = properties;
 		this.clock = clock;
 		this.transactions = new TransactionTemplate(transactionManager);
 	}
 
 	public ReviewResponse create(String buyerId, String authorization, ReviewRequests.CreateReview request) {
 		List<String> images = normalizeImages(request.imageUrls());
-		if (reviews.existsByOrderIdAndProductId(request.orderId(), request.productId())) {
-			throw alreadyReviewed();
-		}
 
+		// Xác minh quyền sở hữu đơn TRƯỚC khi kiểm tra trùng: người khác đoán đúng orderId nhận 404 như
+		// đơn không tồn tại, không biết được đơn đó đã có đánh giá hay chưa.
 		JsonNode order = clients.myOrder(request.orderId(), authorization);
 		if (!request.orderId().equals(order.path("id").asString())) {
 			throw ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng của bạn");
@@ -73,6 +81,9 @@ public class ReviewService {
 		}
 		String variantId = item.path("variantId").isString() ? item.path("variantId").asString() : null;
 		String comment = request.comment() == null || request.comment().isBlank() ? null : request.comment().strip();
+		if (reviews.existsByOrderIdAndProductId(request.orderId(), request.productId())) {
+			throw alreadyReviewed();
+		}
 
 		try {
 			return transactions.execute(status -> {
@@ -103,8 +114,9 @@ public class ReviewService {
 
 	/** Đánh giá của tôi — lọc theo đơn để client biết sản phẩm nào trong đơn đã đánh giá. */
 	@Transactional(readOnly = true)
-	public List<ReviewResponse> myReviews(String buyerId, String orderId) {
-		return reviews.findByBuyer(buyerId, blankToNull(orderId)).stream().map(ReviewResponse::fullView).toList();
+	public PageResponse<ReviewResponse> myReviews(String buyerId, String orderId, int page, int size) {
+		return PageResponse.of(reviews.findByBuyer(buyerId, blankToNull(orderId), newestFirst(page, size)),
+				ReviewResponse::fullView);
 	}
 
 	static PageRequest newestFirst(int page, int size) {
@@ -124,12 +136,39 @@ public class ReviewService {
 		return value == null || value.isBlank() ? null : value.strip();
 	}
 
-	private static List<String> normalizeImages(List<String> urls) {
+	/** Bỏ ảnh trùng (giữ thứ tự người dùng chọn) và chỉ nhận ảnh thuộc origin kho ảnh đã cấu hình. */
+	private List<String> normalizeImages(List<String> urls) {
 		if (urls == null) {
 			return List.of();
 		}
-		// Bỏ ảnh trùng nhưng giữ thứ tự người dùng chọn.
-		return List.copyOf(new LinkedHashSet<>(urls.stream().map(String::strip).toList()));
+		List<String> images = List.copyOf(new LinkedHashSet<>(urls.stream().map(String::strip).toList()));
+		for (String url : images) {
+			if (!isAllowedImage(url)) {
+				throw ApiException.badRequest("IMAGE_URL_NOT_ALLOWED", "Ảnh phải được tải lên kho ảnh của VMarket");
+			}
+		}
+		return images;
+	}
+
+	/** So khớp chính xác scheme + host + port với một origin cho phép và có đường dẫn tới file. */
+	private boolean isAllowedImage(String url) {
+		try {
+			URI uri = URI.create(url);
+			if (uri.getScheme() == null || uri.getRawUserInfo() != null || uri.getHost() == null || uri.getRawPath() == null
+					|| uri.getRawPath().length() <= 1) {
+				return false;
+			}
+			String origin = origin(uri);
+			return properties.getImageOrigins().stream().anyMatch(o -> origin.equals(origin(URI.create(o))));
+		} catch (IllegalArgumentException ex) {
+			return false;
+		}
+	}
+
+	private static String origin(URI uri) {
+		String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
+		int port = uri.getPort() != -1 ? uri.getPort() : "https".equals(scheme) ? 443 : 80;
+		return scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT) + ":" + port;
 	}
 
 	private static JsonNode findItem(JsonNode order, String productId) {

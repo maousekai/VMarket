@@ -1,7 +1,5 @@
 package com.vmarket.review.controller;
 
-import java.util.List;
-
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -46,11 +44,12 @@ public class ReviewController {
 		return reviewService.create(buyerId, authorization, request);
 	}
 
-	@Operation(summary = "Đánh giá của tôi", description = "Truyền orderId để biết sản phẩm nào trong đơn đã được đánh giá.")
+	@Operation(summary = "Đánh giá của tôi (mới nhất trước)", description = "Truyền orderId để biết sản phẩm nào trong đơn đã được đánh giá.")
 	@GetMapping("/me")
-	public List<ReviewResponse> myReviews(@AuthenticationPrincipal String buyerId,
-			@RequestParam(required = false) String orderId) {
-		return reviewService.myReviews(buyerId, orderId);
+	public PageResponse<ReviewResponse> myReviews(@AuthenticationPrincipal String buyerId,
+			@RequestParam(required = false) String orderId, @RequestParam(defaultValue = "0") int page,
+			@RequestParam(defaultValue = "10") int size) {
+		return reviewService.myReviews(buyerId, orderId, page, size);
 	}
 
 	@Operation(summary = "Danh sách đánh giá công khai của sản phẩm (mới nhất trước)")

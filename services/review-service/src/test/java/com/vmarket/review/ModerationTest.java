@@ -12,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
+import com.vmarket.review.client.ReviewClients;
+
 /** FR-REV-04: admin ẩn / khôi phục đánh giá; điểm trung bình đi theo. */
 class ModerationTest extends ReviewTestSupport {
 
@@ -84,7 +86,7 @@ class ModerationTest extends ReviewTestSupport {
 				.contentType(MediaType.APPLICATION_JSON).content(HIDE))
 				.andExpect(status().isOk());
 
-		when(clients.myShopId(anyString())).thenReturn(SHOP);
+		when(clients.myShop(anyString())).thenReturn(new ReviewClients.MyShop(SHOP, "ACTIVE"));
 		mvc.perform(put("/api/reviews/seller/{id}/reply", reviewId)
 				.header("Authorization", token(SELLER, "SELLER"))
 				.contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"Xin lỗi bạn\"}"))

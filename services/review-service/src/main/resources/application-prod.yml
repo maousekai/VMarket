@@ -22,6 +22,7 @@ app:
   review:
     order-url: ${ORDER_SERVICE_URL}
     shop-url: ${SHOP_SERVICE_URL}
+    image-origins: ${REVIEW_IMAGE_ORIGINS}
 
 logging:
   level:

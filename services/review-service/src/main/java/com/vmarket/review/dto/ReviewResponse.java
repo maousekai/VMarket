@@ -11,8 +11,17 @@ import com.vmarket.review.entity.SellerReply;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * Một đánh giá trả ra client. Trường kiểm duyệt ({@code moderation*}) chỉ có ở góc nhìn của admin /
- * seller / chính người viết; góc nhìn công khai để {@code null} và bị lược khỏi JSON.
+ * Một đánh giá trả ra client. Trường {@code null} bị lược khỏi JSON; mỗi góc nhìn chỉ lộ đúng dữ liệu
+ * người xem cần:
+ *
+ * <ul>
+ * <li>{@link #publicView} — trang sản phẩm/gian hàng (ai cũng xem được): KHÔNG có {@code buyerId},
+ * {@code orderId}, {@code variantId} để không ai thu thập được id nội bộ hay liên kết một người với
+ * những gì họ đã mua; không có trường kiểm duyệt.</li>
+ * <li>{@link #sellerView} — seller của gian hàng: có {@code orderId} (đơn của chính shop) và trường
+ * kiểm duyệt, nhưng không có {@code buyerId}.</li>
+ * <li>{@link #fullView} — admin và chính người viết.</li>
+ * </ul>
  */
 @Schema(name = "ReviewResponse", description = "Đánh giá sản phẩm")
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -42,19 +51,24 @@ public record ReviewResponse(
 
 	/** Góc nhìn công khai (trang sản phẩm / gian hàng). */
 	public static ReviewResponse publicView(Review r) {
-		return of(r, false);
+		return of(r, false, false, false);
 	}
 
-	/** Góc nhìn đầy đủ cho admin, seller của gian hàng và người viết. */
+	/** Góc nhìn của seller sở hữu gian hàng. */
+	public static ReviewResponse sellerView(Review r) {
+		return of(r, true, false, true);
+	}
+
+	/** Góc nhìn đầy đủ cho admin và chính người viết. */
 	public static ReviewResponse fullView(Review r) {
-		return of(r, true);
+		return of(r, true, true, true);
 	}
 
-	private static ReviewResponse of(Review r, boolean full) {
-		return new ReviewResponse(r.getId(), r.getOrderId(), r.getProductId(), r.getVariantId(), r.getShopId(),
-				r.getBuyerId(), r.getRating(), r.getComment(),
-				r.getImages().stream().map(ReviewImage::getUrl).toList(), r.getStatus().name(), r.getCreatedAt(),
-				r.getUpdatedAt(), ReplyResponse.from(r.getReply()), full ? r.getModerationReason() : null,
-				full ? r.getModeratedAt() : null);
+	private static ReviewResponse of(Review r, boolean withOrder, boolean withBuyer, boolean withModeration) {
+		return new ReviewResponse(r.getId(), withOrder ? r.getOrderId() : null, r.getProductId(),
+				withOrder ? r.getVariantId() : null, r.getShopId(), withBuyer ? r.getBuyerId() : null, r.getRating(),
+				r.getComment(), r.getImages().stream().map(ReviewImage::getUrl).toList(), r.getStatus().name(),
+				r.getCreatedAt(), r.getUpdatedAt(), ReplyResponse.from(r.getReply()),
+				withModeration ? r.getModerationReason() : null, withModeration ? r.getModeratedAt() : null);
 	}
 }

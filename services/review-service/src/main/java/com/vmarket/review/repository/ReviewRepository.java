@@ -44,9 +44,8 @@ public interface ReviewRepository extends JpaRepository<Review, String> {
 	@Query("""
 			select r from Review r
 			where r.buyerId = :buyerId and (:orderId is null or r.orderId = :orderId)
-			order by r.createdAt desc
 			""")
-	List<Review> findByBuyer(@Param("buyerId") String buyerId, @Param("orderId") String orderId);
+	Page<Review> findByBuyer(@Param("buyerId") String buyerId, @Param("orderId") String orderId, Pageable pageable);
 
 	@EntityGraph(attributePaths = "reply")
 	@Query("""

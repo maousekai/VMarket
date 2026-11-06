@@ -5,3 +5,7 @@ spring:
 auth:
   jwt:
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
+app:
+  review:
+    # Trung MINIO_PUBLIC_ORIGIN cua docker compose
+    image-origins: ${REVIEW_IMAGE_ORIGINS:http://localhost:9000}

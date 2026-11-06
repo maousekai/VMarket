@@ -20,6 +20,8 @@ import com.vmarket.review.repository.ReviewRepository;
  *
  * <p>Gian hàng của seller lấy từ Shop Service bằng chính token của họ (ngoài transaction), rồi so
  * với {@code shopId} chụp từ đơn lúc tạo đánh giá — seller không thể phản hồi đánh giá của shop khác.
+ * Chỉ gian hàng {@code ACTIVE} mới được phản hồi/xoá phản hồi; shop bị đình chỉ, từ chối hay chờ duyệt
+ * vẫn xem được danh sách đánh giá nhưng không ghi được.
  */
 @Service
 public class SellerReplyService {
@@ -41,13 +43,13 @@ public class SellerReplyService {
 			int page, int size) {
 		ReviewService.validateRating(rating);
 		var pageable = ReviewService.newestFirst(page, size);
-		String shopId = clients.myShopId(authorization);
+		String shopId = clients.myShop(authorization).id();
 		return transactions.execute(tx -> PageResponse.of(reviews.findByShop(shopId, status, rating, pageable),
-				ReviewResponse::fullView));
+				ReviewResponse::sellerView));
 	}
 
 	public ReviewResponse reply(String sellerId, String authorization, String reviewId, String content) {
-		String shopId = clients.myShopId(authorization);
+		String shopId = activeShopId(authorization);
 		return transactions.execute(tx -> {
 			Review review = ownedReview(reviewId, shopId);
 			if (!review.isVisible()) {
@@ -59,12 +61,12 @@ public class SellerReplyService {
 			} else {
 				review.getReply().edit(sellerId, text, clock.instant());
 			}
-			return ReviewResponse.fullView(reviews.saveAndFlush(review));
+			return ReviewResponse.sellerView(reviews.saveAndFlush(review));
 		});
 	}
 
 	public void deleteReply(String authorization, String reviewId) {
-		String shopId = clients.myShopId(authorization);
+		String shopId = activeShopId(authorization);
 		transactions.executeWithoutResult(tx -> {
 			Review review = ownedReview(reviewId, shopId);
 			if (review.getReply() == null) {
@@ -73,6 +75,14 @@ public class SellerReplyService {
 			review.setReply(null);
 			reviews.saveAndFlush(review);
 		});
+	}
+
+	private String activeShopId(String authorization) {
+		ReviewClients.MyShop shop = clients.myShop(authorization);
+		if (!shop.isActive()) {
+			throw ApiException.forbidden("SHOP_NOT_ACTIVE", "Gian hàng chưa hoạt động hoặc đang bị đình chỉ");
+		}
+		return shop.id();
 	}
 
 	/** Đánh giá của shop khác trả 404 như không tồn tại — không lộ đánh giá ngoài phạm vi seller. */

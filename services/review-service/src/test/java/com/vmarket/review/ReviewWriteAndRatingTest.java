@@ -199,7 +199,11 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 				.andExpect(jsonPath("$.items.length()").value(2))
 				.andExpect(jsonPath("$.totalElements").value(3))
 				.andExpect(jsonPath("$.totalPages").value(2))
-				.andExpect(jsonPath("$.items[0].moderationReason").doesNotExist());
+				.andExpect(jsonPath("$.items[0].moderationReason").doesNotExist())
+				.andExpect(jsonPath("$.items[0].buyerId").doesNotExist())
+				.andExpect(jsonPath("$.items[0].orderId").doesNotExist())
+				.andExpect(jsonPath("$.items[0].variantId").doesNotExist())
+				.andExpect(jsonPath("$.items[0].productId").value(PRODUCT));
 
 		mvc.perform(get("/api/reviews/products/{id}", PRODUCT).param("rating", "5"))
 				.andExpect(jsonPath("$.totalElements").value(2));
@@ -217,11 +221,19 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 
 		mvc.perform(get("/api/reviews/me").param("orderId", "order-1").header("Authorization", token(BUYER, "BUYER")))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.length()").value(1))
-				.andExpect(jsonPath("$[0].productId").value(PRODUCT));
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.items[0].productId").value(PRODUCT))
+				.andExpect(jsonPath("$.items[0].buyerId").value(BUYER));
 
 		mvc.perform(get("/api/reviews/me").header("Authorization", token(BUYER, "BUYER")))
-				.andExpect(jsonPath("$.length()").value(2));
+				.andExpect(jsonPath("$.totalElements").value(2));
+
+		mvc.perform(get("/api/reviews/me").param("size", "1").header("Authorization", token(BUYER, "BUYER")))
+				.andExpect(jsonPath("$.items.length()").value(1))
+				.andExpect(jsonPath("$.totalPages").value(2));
+
+		mvc.perform(get("/api/reviews/me").param("size", "51").header("Authorization", token(BUYER, "BUYER")))
+				.andExpect(status().isBadRequest());
 	}
 
 	@Test
@@ -265,5 +277,48 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(createBody("order-1", PRODUCT, 5, List.of())))
 				.andExpect(status().isServiceUnavailable());
+	}
+
+	@Test
+	void imagesMustComeFromConfiguredStorageOrigin() throws Exception {
+		givenOrder("order-1", "DELIVERED", PRODUCT);
+		for (String url : List.of("https://tracker.example.com/pixel.gif", "http://cdn.vmarket.vn/r/1.jpg",
+				"https://cdn.vmarket.vn.evil.com/r/1.jpg", "https://user@cdn.vmarket.vn/r/1.jpg",
+				"https://cdn.vmarket.vn/")) {
+			mvc.perform(post("/api/reviews")
+					.header("Authorization", token(BUYER, "BUYER"))
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(createBody("order-1", PRODUCT, 5, List.of(url))))
+					.andExpect(status().isBadRequest())
+					.andExpect(jsonPath("$.error.code").value("IMAGE_URL_NOT_ALLOWED"));
+		}
+		assertThat(jdbc.queryForObject("select count(*) from reviews", Long.class)).isZero();
+
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-1", PRODUCT, 5, List.of("https://CDN.vmarket.vn:443/r/1.jpg"))))
+				.andExpect(status().isCreated());
+	}
+
+	@Test
+	void anotherBuyerGets404EvenWhenOrderWasReviewed() throws Exception {
+		createReview(BUYER, "order-1", PRODUCT, 5);
+		when(clients.myOrder(eq("order-1"), anyString()))
+				.thenThrow(ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng của bạn"));
+
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(OTHER_BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-1", PRODUCT, 1, List.of())))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.error.code").value("ORDER_NOT_FOUND"));
+	}
+
+	@Test
+	void reviewIdsAreUlids() throws Exception {
+		String id = createReview(BUYER, "order-1", PRODUCT, 5);
+		assertThat(id).matches("[0-9A-HJKMNP-TV-Z]{26}");
+		assertThat(jdbc.queryForObject("select id from review_outbox", String.class)).hasSize(26);
 	}
 }

@@ -21,5 +21,7 @@ auth:
 app:
   review:
     outbox-enabled: false
+    outbox-monitor-enabled: false
+    image-origins: https://cdn.vmarket.vn
   cors:
     allowed-origins: http://localhost:5173
