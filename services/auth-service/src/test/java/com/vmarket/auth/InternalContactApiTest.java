@@ -44,7 +44,8 @@ class InternalContactApiTest {
 				.andExpect(jsonPath("$.email").value(user.getEmail()))
 				.andExpect(jsonPath("$.emailVerified").value(true))
 				.andExpect(jsonPath("$.suspended").value(false))
-				.andExpect(jsonPath("$.roles").doesNotExist());
+				.andExpect(jsonPath("$.roles").doesNotExist())
+				.andExpect(jsonPath("$.username").doesNotExist());
 	}
 
 	@Test

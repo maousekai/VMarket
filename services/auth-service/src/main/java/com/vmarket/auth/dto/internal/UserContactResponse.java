@@ -15,13 +15,11 @@ public record UserContactResponse(
 
 		@Schema(example = "an.nguyen@example.com") String email,
 
-		@Schema(example = "an.nguyen") String username,
-
 		@Schema(description = "Email đã xác thực OTP") boolean emailVerified,
 
 		@Schema(description = "Đang bị Admin khoá") boolean suspended) {
 
 	public static UserContactResponse from(User u) {
-		return new UserContactResponse(u.getId(), u.getEmail(), u.getUsername(), u.isEmailVerified(), u.isSuspended());
+		return new UserContactResponse(u.getId(), u.getEmail(), u.isEmailVerified(), u.isSuspended());
 	}
 }
