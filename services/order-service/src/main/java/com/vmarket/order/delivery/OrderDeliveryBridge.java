@@ -74,6 +74,21 @@ public class OrderDeliveryBridge {
         return internalSnapshot(order);
     }
 
+    /**
+     * Đọc snapshot KHÔNG khoá dòng cho notification-service (PBL6-23). Notification gọi
+     * một lần cho mỗi sự kiện; dùng {@link #snapshot} (SELECT ... FOR UPDATE) sẽ tranh
+     * chấp row lock với luồng huỷ đơn / bàn giao. Chỉ trả {@link OrderNotificationView}
+     * (không có dữ liệu cá nhân của người nhận).
+     */
+    @Transactional(readOnly = true)
+    public OrderNotificationView view(String id) {
+        Order order =
+                orders.findById(id)
+                        .orElseThrow(
+                                () -> ApiException.notFound("ORDER_NOT_FOUND", "Không có đơn hàng"));
+        return OrderNotificationView.from(order);
+    }
+
     @Transactional
     public void apply(DeliveryStatusChanged event) {
         if (event.version() <= 0) throw ApiException.badRequest("INVALID_VERSION", "Sai version");
