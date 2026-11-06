@@ -60,20 +60,46 @@ test('avatar is changed from the button under the picture with an image URL, and
   await expect(page.getByLabel(/Đường dẫn ảnh/)).toHaveCount(0)
   await page.getByRole('button', { name: 'Đổi ảnh đại diện', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Đổi ảnh đại diện' })
-  await dialog.getByLabel('Đường dẫn ảnh').fill('ftp://example.com/a.png')
+
+  // Open the image source picker and switch to the URL mode
+  await dialog.getByRole('button', { name: 'Chọn ảnh đại diện', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Chọn ảnh đại diện' })
+  await picker.getByRole('button', { name: 'Dùng đường dẫn ảnh', exact: true }).click()
+  await picker.getByLabel('Đường dẫn ảnh').fill('ftp://example.com/a.png')
+  await picker.getByRole('button', { name: 'Dùng ảnh này', exact: true }).click()
+
+  // Saving invalid URL triggers validation error
   await dialog.getByRole('button', { name: 'Lưu ảnh', exact: true }).click()
-  await expect(dialog.getByLabel('Đường dẫn ảnh')).toHaveAttribute('aria-invalid', 'true')
-  await dialog.getByLabel('Đường dẫn ảnh').fill('https://example.com/avatar.png')
+  await expect(dialog.getByRole('alert')).toBeVisible()
+
+  // Re-open URL picker to fix it; field retains aria-invalid
+  await dialog.getByRole('button', { name: 'Chọn ảnh đại diện', exact: true }).click()
+  await picker.getByRole('button', { name: 'Dùng đường dẫn ảnh', exact: true }).click()
+  await expect(picker.getByLabel('Đường dẫn ảnh')).toHaveAttribute('aria-invalid', 'true')
+  await picker.getByLabel('Đường dẫn ảnh').fill('https://example.com/avatar.png')
+  await picker.getByRole('button', { name: 'Dùng ảnh này', exact: true }).click()
   await dialog.getByRole('button', { name: 'Lưu ảnh', exact: true }).click()
   await expect(dialog).toBeHidden()
+
+  // Verify avatar persistence on reload
   await page.reload()
   await page.getByRole('button', { name: 'Đổi ảnh đại diện', exact: true }).click()
-  await expect(dialog.getByLabel('Đường dẫn ảnh')).toHaveValue('https://example.com/avatar.png')
+  await dialog.getByRole('button', { name: 'Chọn ảnh đại diện', exact: true }).click()
+  await picker.getByRole('button', { name: 'Dùng đường dẫn ảnh', exact: true }).click()
+  await expect(picker.getByLabel('Đường dẫn ảnh')).toHaveValue('https://example.com/avatar.png')
+  await picker.getByRole('button', { name: 'Dùng ảnh này', exact: true }).click()
+
+  // Remove avatar
   await dialog.getByRole('button', { name: 'Xóa ảnh', exact: true }).click()
   await expect(dialog).toBeHidden()
+
+  // Verify avatar removed on reload
   await page.reload()
   await page.getByRole('button', { name: 'Đổi ảnh đại diện', exact: true }).click()
-  await expect(dialog.getByLabel('Đường dẫn ảnh')).toHaveValue('')
+  await expect(dialog.getByRole('button', { name: 'Xóa ảnh' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Chọn ảnh đại diện', exact: true }).click()
+  await picker.getByRole('button', { name: 'Dùng đường dẫn ảnh', exact: true }).click()
+  await expect(picker.getByLabel('Đường dẫn ảnh')).toHaveValue('')
 })
 
 test('address book: add, default switching, edit and delete with the real User service', async ({
