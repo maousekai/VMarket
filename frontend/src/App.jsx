@@ -2,7 +2,9 @@ import { Routes, Route, Outlet } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
 import AppHeader from './components/AppHeader'
 import RouteGuard from './components/RouteGuard'
+import SiteFooter from './components/SiteFooter'
 import HomePage from './pages/HomePage'
+import SearchPage from './pages/SearchPage'
 import AboutPage from './pages/AboutPage'
 import NotFoundPage from './pages/NotFoundPage'
 import LoginPage from './pages/LoginPage'
@@ -26,6 +28,7 @@ function ApplicationLayout() {
     <>
       <AppHeader />
       <Outlet />
+      <SiteFooter />
     </>
   )
 }
@@ -54,6 +57,7 @@ export default function App() {
         </Route>
         <Route element={<ApplicationLayout />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route element={<RouteGuard />}>
             <Route path="/profile" element={<ProfilePage />} />

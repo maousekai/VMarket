@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { getApiError } from '../services/api/apiClient'
+import { ACTIVE_CITY } from '../data/city'
 import brandBasket from '../assets/account/brand-basket.svg'
 import chevronDown from '../assets/account/chevron-down.svg'
+import CategoryNav from './CategoryNav'
+import HeaderSearch from './HeaderSearch'
 import './account.css'
 
 function initials(name) {
@@ -110,12 +113,10 @@ export default function AppHeader() {
           </span>
           <span>
             <strong>VMarket</strong>
-            <small>TP. ĐÀ NẴNG</small>
+            <small>{ACTIVE_CITY.shortLabel}</small>
           </span>
         </Link>
-        <nav className="app-header__navigation" aria-label="Điều hướng chính">
-          <Link to="/">Trang chủ</Link>
-        </nav>
+        <HeaderSearch />
         {bootstrapState === 'loading' ? (
           <span className="app-header__pending" role="status">
             Đang khôi phục phiên…
@@ -207,6 +208,7 @@ export default function AppHeader() {
           </div>
         )}
       </div>
+      <CategoryNav />
     </header>
   )
 }
