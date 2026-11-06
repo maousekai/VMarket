@@ -61,6 +61,7 @@ public class SecurityConfig {
 						.requestMatchers(PUBLIC_PATHS).permitAll()
 						.requestMatchers("/internal/delivery/**").permitAll()
 						.requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
+						.requestMatchers("/api/orders/seller/**").hasAnyRole("SELLER", "ADMIN")
 						.anyRequest().authenticated())
 				// Đặt trước filter đăng nhập bằng form/username-password để danh tính
 				// từ token có mặt trong SecurityContext khi tầng phân quyền chạy.

@@ -281,6 +281,34 @@ public class OrderService {
         return OrderResponse.from(orderRepository.save(order));
     }
 
+    /**
+     * Người mua xác nhận đã nhận hàng và hoàn tất đơn sớm (FR-ORDER-02).
+     */
+    @Transactional
+    public OrderResponse completeMyOrder(String userId, String orderId) {
+        Order order =
+                orderRepository
+                        .lock(orderId)
+                        .filter(o -> userId.equals(o.getUserId()))
+                        .orElseThrow(
+                                () ->
+                                        ApiException.notFound(
+                                                "ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
+        if (order.getStatus() != OrderStatus.DELIVERED) {
+            throw ApiException.conflict(
+                    "ORDER_NOT_COMPLETABLE",
+                    "Chỉ có thể hoàn tất đơn khi đã nhận hàng (DELIVERED). Trạng thái hiện tại: "
+                            + order.getStatus());
+        }
+        order.setStatus(OrderStatus.COMPLETED);
+        outbox.add(
+                EventType.ORDER_STATUS_CHANGED,
+                new OrderStatusChanged(
+                        orderId, "DELIVERED", "COMPLETED", order.getPaymentMethod()));
+        log.info("Người mua userId={} xác nhận hoàn tất đơn {}", userId, orderId);
+        return OrderResponse.from(orderRepository.save(order));
+    }
+
     private Order mustFindOwn(String userId, String orderId) {
         return orderRepository
                 .findByIdAndUserId(orderId, userId)

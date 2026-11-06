@@ -30,9 +30,12 @@ public enum OrderStatus {
 	/** Đã bàn giao đơn vị vận chuyển. */
 	SHIPPED,
 
-	/** Người mua đã nhận hàng — đơn hoàn tất. */
+	/** Người mua đã nhận hàng. */
 	DELIVERED,
 
-	/** Người mua huỷ khi còn PENDING. */
+	/** Đơn đã hoàn tất sau 7 ngày hoặc người mua xác nhận hoàn tất (FR-ORD-02). */
+	COMPLETED,
+
+	/** Người mua hoặc hệ thống huỷ đơn. */
 	CANCELLED
 }

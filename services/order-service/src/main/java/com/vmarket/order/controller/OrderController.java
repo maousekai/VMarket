@@ -14,9 +14,13 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.vmarket.order.dto.CreateReturnRequest;
+import com.vmarket.order.dto.DisputeReturnRequest;
 import com.vmarket.order.dto.ErrorResponse;
 import com.vmarket.order.dto.OrderResponse;
 import com.vmarket.order.dto.PlaceOrderRequest;
+import com.vmarket.order.dto.ReturnResponse;
+import com.vmarket.order.service.OrderReturnService;
 import com.vmarket.order.service.OrderService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,6 +51,7 @@ import lombok.RequiredArgsConstructor;
 public class OrderController {
 
 	private final OrderService orderService;
+	private final OrderReturnService returnService;
 
 	@Operation(summary = "Đặt hàng từ giỏ hiện có (FR-ORDER-01)",
 			description = "Chụp toàn bộ giỏ thành đơn với địa chỉ giao hàng được chọn. "
@@ -105,5 +110,52 @@ public class OrderController {
 	@PutMapping("/{orderId}/cancel")
 	public OrderResponse cancelMyOrder(@AuthenticationPrincipal String userId, @PathVariable String orderId) {
 		return orderService.cancelMyOrder(userId, orderId);
+	}
+
+	@Operation(summary = "Người mua xác nhận đã nhận hàng và hoàn tất đơn sớm (FR-ORD-02)")
+	@PostMapping("/{orderId}/complete")
+	public OrderResponse completeMyOrder(@AuthenticationPrincipal String userId, @PathVariable String orderId) {
+		return orderService.completeMyOrder(userId, orderId);
+	}
+
+	@Operation(summary = "Tạo yêu cầu trả hàng cho đơn đã nhận trong vòng 7 ngày (FR-ORD-06)")
+	@PostMapping("/{orderId}/returns")
+	public ResponseEntity<ReturnResponse> createReturn(
+			@AuthenticationPrincipal String userId,
+			@PathVariable String orderId,
+			@Valid @RequestBody CreateReturnRequest request) {
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(returnService.createReturn(userId, orderId, request));
+	}
+
+	@Operation(summary = "Xem các yêu cầu trả hàng của một đơn (FR-ORD-06)")
+	@GetMapping("/{orderId}/returns")
+	public List<ReturnResponse> listReturnsForOrder(
+			@AuthenticationPrincipal String userId,
+			@PathVariable String orderId) {
+		return returnService.listReturnsForOrder(userId, orderId);
+	}
+
+	@Operation(summary = "Xem tất cả yêu cầu trả hàng của tôi (FR-ORD-06)")
+	@GetMapping("/returns/me")
+	public List<ReturnResponse> listMyReturns(@AuthenticationPrincipal String userId) {
+		return returnService.listMyReturns(userId);
+	}
+
+	@Operation(summary = "Chi tiết một yêu cầu trả hàng của tôi (FR-ORD-06)")
+	@GetMapping("/returns/{returnId}")
+	public ReturnResponse getMyReturn(
+			@AuthenticationPrincipal String userId,
+			@PathVariable String returnId) {
+		return returnService.getMyReturn(userId, returnId);
+	}
+
+	@Operation(summary = "Người mua khiếu nại lên Admin nếu Seller từ chối yêu cầu trả hàng (FR-ORD-07)")
+	@PostMapping("/returns/{returnId}/dispute")
+	public ReturnResponse disputeReturn(
+			@AuthenticationPrincipal String userId,
+			@PathVariable String returnId,
+			@Valid @RequestBody DisputeReturnRequest request) {
+		return returnService.disputeReturn(userId, returnId, request.reason());
 	}
 }

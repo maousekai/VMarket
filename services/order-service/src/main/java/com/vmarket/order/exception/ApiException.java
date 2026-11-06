@@ -36,6 +36,10 @@ public class ApiException extends RuntimeException {
 		return new ApiException(code, HttpStatus.CONFLICT, message);
 	}
 
+	public static ApiException forbidden(String code, String message) {
+		return new ApiException(code, HttpStatus.FORBIDDEN, message);
+	}
+
 	/** Service phụ thuộc chưa kết nối được — request chắc chắn chưa chạy, thử lại được. */
 	public static ApiException unavailable(String code, String message) {
 		return new ApiException(code, HttpStatus.SERVICE_UNAVAILABLE, message);

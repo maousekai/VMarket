@@ -42,8 +42,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("8");
-		assertThat(flyway.info().applied()).hasSize(8);
+		assertThat(current.getVersion().getVersion()).isEqualTo("9");
+		assertThat(flyway.info().applied()).hasSize(9);
 	}
 
 	@Test
@@ -58,6 +58,17 @@ class FlywayMigrationTest {
 					"quantity", "unit_price", "line_total" }) {
 				assertThat(columnExists(c, "order_items", column))
 						.as("order_items.%s", column).isTrue();
+			}
+			for (String column : new String[] { "order_id", "user_id", "shop_id", "status",
+					"reason", "evidence_urls", "seller_note", "admin_note", "refund_amount",
+					"created_at", "updated_at", "resolved_at" }) {
+				assertThat(columnExists(c, "order_returns", column))
+						.as("order_returns.%s", column).isTrue();
+			}
+			for (String column : new String[] { "return_id", "order_item_id", "product_id", "variant_id",
+					"quantity", "unit_price", "line_total" }) {
+				assertThat(columnExists(c, "order_return_items", column))
+						.as("order_return_items.%s", column).isTrue();
 			}
 			// V8 - địa chỉ hai cấp: district được phép NULL.
 			assertThat(columnIsNullable(c, "orders", "district")).isTrue();
