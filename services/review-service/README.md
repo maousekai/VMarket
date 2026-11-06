@@ -111,5 +111,5 @@ cd services
 Test chạy trên H2 (PostgreSQL mode) với migration Flyway thật; Order/Shop Service và
 RabbitMQ được mock. `ReviewConcurrencyPostgresTest` chạy các case race trên PostgreSQL thật bằng
 Testcontainers (tạo đánh giá trùng đồng thời, ẩn đồng thời, hai publisher cùng sản phẩm, skip
-locked) và tự bỏ qua khi máy không có Docker. Docker Desktop bản mới trên Windows cần thêm
-`-DargLine="-Dapi.version=1.44"` khi chạy local.
+locked) và tự bỏ qua khi máy không có Docker. `src/test/resources/docker-java.properties` ghim
+`api.version=1.44` vì Docker Engine 29+ từ chối API mặc định của Testcontainers 1.21.
