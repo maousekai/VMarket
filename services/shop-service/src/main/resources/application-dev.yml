@@ -9,6 +9,8 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:vmarket_shop}
 
 app:
+  # PHAI trung INTERNAL_API_KEY dev cua notification-service.
+  internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
   downstream:
     internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
   # MinIO chay trong docker compose voi credential local trong .env.example.
@@ -21,7 +23,3 @@ auth:
     # PHAI trung voi gia tri dev cua auth-service, neu khong token do auth-service
     # phat ra se bi shop-service tu choi voi chu ky khong hop le.
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
-
-app:
-  # PHAI trung INTERNAL_API_KEY dev cua notification-service.
-  internal-api-key: ${INTERNAL_API_KEY:dev-only-internal-api-key-change-me-0123456789}
