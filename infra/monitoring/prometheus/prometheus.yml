@@ -35,11 +35,11 @@ scrape_configs:
         labels: { service: user-service }
       - targets: ["shop-service:8083"]
         labels: { service: shop-service }
+      - targets: ["product-service:8084"]
+        labels: { service: product-service }
       - targets: ["order-service:8086"]
         labels: { service: order-service }
       # ---- Chay local bang mvnw (tren may host) ----
-      - targets: ["host.docker.internal:8084"]
-        labels: { service: product-service }
       - targets: ["host.docker.internal:8085"]
         labels: { service: cart-service }
       - targets: ["host.docker.internal:8087"]

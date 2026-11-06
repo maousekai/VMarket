@@ -16,7 +16,7 @@ curl http://localhost:8102/api/ai/chat/health   # hoặc qua gateway: http://loc
 
 Container đọc cấu hình LLM/embedding từ `services/chatbot-service/.env` nếu file tồn tại; các biến kết nối
 (MongoDB, JWT secret, URL service) do `docker-compose.yml` đặt và luôn ghi đè file đó. order-service và
-product-service chưa container hóa nên chatbot gọi chúng qua `host.docker.internal`.
+product-service chạy trong cùng network nên chatbot gọi chúng qua tên service.
 
 ## Chạy local
 

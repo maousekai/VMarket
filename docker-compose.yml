@@ -389,11 +389,11 @@ services:
       # shop-service chi VERIFY token do auth-service ky (HS256 doi xung) - PHAI
       # trung AUTH_JWT_SECRET cua block auth-service, lech la moi API tra 401.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
-      # Dashboard + enrich tên/avatar: user-service/order-service chay trong compose,
-      # product-service chua container hoa -> goi qua may host.
+      # Dashboard + enrich tên/avatar: user-service/order-service/product-service
+      # chay trong compose, goi truc tiep qua ten service.
       USER_SERVICE_URL: http://user-service:8082
       ORDER_SERVICE_URL: http://order-service:8086
-      PRODUCT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8084
+      PRODUCT_SERVICE_URL: http://product-service:8084
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
       # MinIO - upload logo / anh bia. Cung bo bien voi user-service.
       MINIO_ENDPOINT: http://minio:9000
@@ -405,8 +405,6 @@ services:
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${SHOP_SERVICE_PORT:-8083}:8083"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -459,6 +457,41 @@ services:
       retries: 10
       start_period: 40s
 
+  # Product Service (PBL6-39) - catalog, ton kho, outbox su kien.
+  # MongoDB replica set rs0 (transaction cho outbox) + RabbitMQ.
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    container_name: VMarket-product-service
+    networks:
+      - vmarket-network
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_product
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      # PHAI TRUNG AUTH_JWT_SECRET cua auth-service de verify access token.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
+      # order-service / shop-service goi /internal/** bang cung khoa nay.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
+    ports:
+      # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
+      - "${PRODUCT_SERVICE_PORT:-8084}:8084"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8084/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   # Chatbot Service (PBL6-18) - FastAPI, chi can MongoDB. Cau hinh LLM/embedding
   # (tuy chon) doc tu services/chatbot-service/.env neu co; cac bien ket noi ben
   # duoi luon ghi de file do. Chua co LLM thi chatbot tra loi o che do trich dan.
@@ -480,9 +513,9 @@ services:
       # Chatbot tu verify token do auth-service ky - PHAI trung AUTH_JWT_SECRET.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-insecure-secret-change-me-please-0123456789}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
-      # product-service chua container hoa -> goi qua may host.
+      # product-service cung chay trong compose -> goi qua ten service.
       ORDER_SERVICE_URL: http://order-service:8086
-      PRODUCT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8084
+      PRODUCT_SERVICE_URL: http://product-service:8084
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-only-internal-api-key-change-me-0123456789}
     ports:
       - "${CHATBOT_SERVICE_PORT:-8102}:8102"
@@ -520,6 +553,7 @@ services:
       AUTH_SERVICE_URL: http://auth-service:8081
       USER_SERVICE_URL: http://user-service:8082
       SHOP_SERVICE_URL: http://shop-service:8083
+      PRODUCT_SERVICE_URL: http://product-service:8084
       ORDER_SERVICE_URL: http://order-service:8086
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
