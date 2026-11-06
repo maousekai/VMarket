@@ -23,7 +23,7 @@ class NotificationTemplatesTest {
 
 	private static OrderSnapshot order(String paymentMethod) {
 		return new OrderSnapshot("o1", "buyer-1", "PENDING", new BigDecimal("1250000.00"), paymentMethod,
-				List.of(new OrderSnapshot.Item("p1", "shop-1", 1)));
+				List.of("shop-1"));
 	}
 
 	@Test

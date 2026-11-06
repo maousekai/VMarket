@@ -49,16 +49,36 @@ public class RecipientResolver {
 	}
 
 	/**
-	 * shopId → ownerId của các gian hàng trong đơn. Lỗi mạng khi tra shop-service được
-	 * ném ra để event bus retry; shop không tồn tại thì bỏ qua (có log).
+	 * Kết quả tra chủ gian hàng của một đơn.
+	 *
+	 * @param owners  shopId → ownerId đã tra được
+	 * @param failure lỗi đầu tiên khi tra (shop-service lỗi / timeout), {@code null} nếu không có
 	 */
-	public Map<String, String> sellers(OrderSnapshot order) {
-		Map<String, String> result = new LinkedHashMap<>();
+	public record SellerLookup(Map<String, String> owners, RuntimeException failure) {
+	}
+
+	/**
+	 * shopId → ownerId của các gian hàng trong đơn. KHÔNG ném lỗi: shop-service lỗi chỉ
+	 * làm thiếu shop đó, lỗi được trả trong {@link SellerLookup#failure()} để consumer gửi
+	 * xong cho buyer / các seller tra được rồi mới ném ra cho event bus retry. Shop không
+	 * tồn tại thì bỏ qua (có log), không retry.
+	 */
+	public SellerLookup sellers(OrderSnapshot order) {
+		Map<String, String> owners = new LinkedHashMap<>();
+		RuntimeException failure = null;
 		for (String shopId : order.shopIds()) {
-			ownerOf(shopId).ifPresentOrElse(ownerId -> result.put(shopId, ownerId),
-					() -> log.warn("Không tìm thấy chủ gian hàng {} — không báo Seller cho đơn {}", shopId, order.id()));
+			try {
+				ownerOf(shopId).ifPresentOrElse(ownerId -> owners.put(shopId, ownerId),
+						() -> log.warn("Không tìm thấy chủ gian hàng {} — không báo Seller cho đơn {}", shopId,
+								order.id()));
+			} catch (RuntimeException ex) {
+				log.warn("Tra chủ gian hàng {} của đơn {} thất bại: {}", shopId, order.id(), ex.getMessage());
+				if (failure == null) {
+					failure = ex;
+				}
+			}
 		}
-		return result;
+		return new SellerLookup(owners, failure);
 	}
 
 	private Optional<String> ownerOf(String shopId) {

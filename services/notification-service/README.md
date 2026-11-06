@@ -42,7 +42,10 @@ và binding `ReviewCreated`.
 Mọi API nội bộ dùng header `X-Internal-Api-Key` (= `INTERNAL_API_KEY`), timeout 2s kết nối / 5s đọc.
 
 - **Buyer / gian hàng của đơn**: `GET {ORDER_SERVICE_URL}/internal/notification/orders/{id}` — endpoint chỉ đọc,
-  **không** `SELECT ... FOR UPDATE` (khác `/internal/delivery/orders/{id}` của Delivery).
+  **không** `SELECT ... FOR UPDATE` (khác `/internal/delivery/orders/{id}` của Delivery). Chỉ trả `id`, `userId`,
+  `status`, `totalAmount`, `paymentMethod`, `shopIds` — không có tên / số điện thoại / địa chỉ / ghi chú người nhận.
+- Tra chủ gian hàng lỗi (shop-service down) **không** chặn buyer: vẫn gửi cho buyer và các seller đã biết chủ, sau đó
+  mới ném lỗi để event bus retry (lần retry bỏ qua người đã nhận nhờ dedup).
 - **Chủ gian hàng**: bản chiếu `shop_owners` (shopId → ownerId) dựng từ `ShopApproved` / `ShopSuspended`.
   Chưa có trong bản chiếu (gian hàng duyệt trước khi Notification chạy) → tra
   `GET {SHOP_SERVICE_URL}/internal/shops/{shopId}/owner` rồi lưu cache (`eventTimestamp = 0` để sự kiện sau ghi đè).

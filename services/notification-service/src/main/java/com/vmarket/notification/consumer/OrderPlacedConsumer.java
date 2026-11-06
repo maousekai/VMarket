@@ -13,6 +13,7 @@ import com.vmarket.notification.service.NotificationDispatcher;
 import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
+import com.vmarket.notification.service.RecipientResolver.SellerLookup;
 
 /**
  * OrderPlaced → Buyer: xác nhận đặt hàng (in-app + push + email). Seller: báo đơn mới ngay với
@@ -47,11 +48,14 @@ public class OrderPlacedConsumer implements EventConsumer<OrderPlaced> {
 		recipients.order(event.orderId()).ifPresent(order -> {
 			List<Delivery> deliveries = new ArrayList<>();
 			deliveries.add(new Delivery(order.userId(), templates.orderPlaced(order)));
+			RuntimeException lookupFailure = null;
 			if (order.isCod()) {
-				recipients.sellers(order).forEach(
+				SellerLookup sellers = recipients.sellers(order);
+				sellers.owners().forEach(
 						(shopId, ownerId) -> deliveries.add(new Delivery(ownerId, templates.newOrder(order, shopId))));
+				lookupFailure = sellers.failure();
 			}
-			dispatcher.deliverAll(deliveries, envelope);
+			dispatcher.deliverAll(deliveries, envelope, lookupFailure);
 		});
 	}
 }

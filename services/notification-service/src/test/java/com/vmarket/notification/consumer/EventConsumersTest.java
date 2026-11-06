@@ -47,6 +47,7 @@ class EventConsumersTest {
 	private static NotificationDispatcher dispatcherMock() {
 		NotificationDispatcher mock = mock(NotificationDispatcher.class);
 		org.mockito.Mockito.doCallRealMethod().when(mock).deliverAll(any(), any());
+		org.mockito.Mockito.doCallRealMethod().when(mock).deliverAll(any(), any(), any());
 		return mock;
 	}
 	private final InternalClients clients = mock(InternalClients.class);
@@ -57,8 +58,7 @@ class EventConsumersTest {
 
 	private OrderSnapshot order(String paymentMethod) {
 		OrderSnapshot order = new OrderSnapshot("o1", "buyer-1", "PENDING", new BigDecimal("100000"), paymentMethod,
-				List.of(new OrderSnapshot.Item("p1", "shop-1", 1), new OrderSnapshot.Item("p2", "shop-1", 2),
-						new OrderSnapshot.Item("p3", "shop-unknown", 1)));
+				List.of("shop-1", "shop-1", "shop-unknown"));
 		when(clients.order("o1")).thenReturn(Optional.of(order));
 		when(shopOwners.findById("shop-1"))
 				.thenReturn(Optional.of(new ShopOwner("shop-1", "seller-1", "Gốm", 1L, null)));
@@ -213,6 +213,20 @@ class EventConsumersTest {
 				recipients).handle(new PaymentSucceeded("o1"), envelope)).hasMessage("Brevo down");
 
 		// Seller vẫn được xử lý; lỗi buyer ném ra SAU cùng để event bus retry.
+		verify(dispatcher).deliver(eq("seller-1"), argThat(type(NotificationType.NEW_ORDER)), eq(envelope));
+	}
+
+	@Test
+	void shopServiceOutageStillNotifiesBuyerAndKnownSellerThenRetries() {
+		order("PAYOS");
+		when(clients.shopOwner("shop-unknown"))
+				.thenThrow(new org.springframework.web.client.ResourceAccessException("shop-service down"));
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> new PaymentSucceededConsumer(dispatcher, templates,
+				recipients).handle(new PaymentSucceeded("o1"), envelope)).hasMessage("shop-service down");
+
+		// Buyer không phụ thuộc shop-service; seller đã biết chủ vẫn nhận. Lỗi ném ra sau để retry.
+		verify(dispatcher).deliver(eq("buyer-1"), argThat(type(NotificationType.PAYMENT_SUCCEEDED)), eq(envelope));
 		verify(dispatcher).deliver(eq("seller-1"), argThat(type(NotificationType.NEW_ORDER)), eq(envelope));
 	}
 

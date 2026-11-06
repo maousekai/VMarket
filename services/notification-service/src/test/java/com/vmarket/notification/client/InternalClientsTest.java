@@ -32,8 +32,7 @@ class InternalClientsTest {
 		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/internal/notification/orders/o1", ex -> reply(ex, 200, """
 				{"id":"o1","status":"PENDING","userId":"buyer-1","totalAmount":125000.00,"paymentMethod":"COD",
-				 "recipientName":"An","items":[{"productId":"p1","shopId":"s1","quantity":1,"unitPrice":1},
-				 {"productId":"p2","shopId":"s1","quantity":1},{"productId":"p3","shopId":"s2","quantity":1}]}"""));
+				 "shopIds":["s1","s1","s2"]}"""));
 		server.createContext("/internal/notification/orders/missing", ex -> reply(ex, 404, "{}"));
 		server.createContext("/internal/notification/orders/boom", ex -> reply(ex, 503, "{}"));
 		server.createContext("/internal/users/u1/contact", ex -> reply(ex, 200,

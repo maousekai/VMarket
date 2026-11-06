@@ -13,6 +13,7 @@ import com.vmarket.notification.service.NotificationDispatcher;
 import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
+import com.vmarket.notification.service.RecipientResolver.SellerLookup;
 
 /**
  * OrderStatusChanged → Buyer: cập nhật trạng thái (in-app + push + email) cho PROCESSING /
@@ -57,13 +58,16 @@ public class OrderStatusChangedConsumer implements EventConsumer<OrderStatusChan
 			if (buyerMessage != null) {
 				deliveries.add(new Delivery(order.userId(), buyerMessage));
 			}
+			RuntimeException lookupFailure = null;
 			if (sellerRelevant) {
-				recipients.sellers(order).forEach((shopId, ownerId) -> deliveries.add(new Delivery(ownerId,
+				SellerLookup sellers = recipients.sellers(order);
+				lookupFailure = sellers.failure();
+				sellers.owners().forEach((shopId, ownerId) -> deliveries.add(new Delivery(ownerId,
 						"CANCELLED".equals(event.status())
 								? templates.sellerOrderCancelled(order.id(), shopId)
 								: templates.sellerOrderDelivered(order.id(), shopId))));
 			}
-			dispatcher.deliverAll(deliveries, envelope);
+			dispatcher.deliverAll(deliveries, envelope, lookupFailure);
 		});
 	}
 }

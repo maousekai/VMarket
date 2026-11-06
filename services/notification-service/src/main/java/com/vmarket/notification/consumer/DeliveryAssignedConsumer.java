@@ -13,6 +13,7 @@ import com.vmarket.notification.service.NotificationDispatcher;
 import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
+import com.vmarket.notification.service.RecipientResolver.SellerLookup;
 
 /**
  * DeliveryAssigned → Shipper: chuyến mới (in-app + push); Seller: đơn đã có shipper, chuẩn bị
@@ -47,8 +48,14 @@ public class DeliveryAssignedConsumer implements EventConsumer<DeliveryAssigned>
 	public void handle(DeliveryAssigned event, EventEnvelope envelope) {
 		List<Delivery> deliveries = new ArrayList<>();
 		deliveries.add(new Delivery(event.shipperId(), templates.shipperAssigned(event.orderId(), event.assignmentId())));
-		recipients.order(event.orderId()).ifPresent(order -> recipients.sellers(order).forEach((shopId,
-				ownerId) -> deliveries.add(new Delivery(ownerId, templates.sellerDeliveryAssigned(order.id(), shopId)))));
-		dispatcher.deliverAll(deliveries, envelope);
+		RuntimeException lookupFailure = null;
+		var order = recipients.order(event.orderId());
+		if (order.isPresent()) {
+			SellerLookup sellers = recipients.sellers(order.get());
+			sellers.owners().forEach((shopId, ownerId) -> deliveries
+					.add(new Delivery(ownerId, templates.sellerDeliveryAssigned(order.get().id(), shopId))));
+			lookupFailure = sellers.failure();
+		}
+		dispatcher.deliverAll(deliveries, envelope, lookupFailure);
 	}
 }

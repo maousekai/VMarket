@@ -13,6 +13,7 @@ import com.vmarket.notification.service.NotificationDispatcher;
 import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
+import com.vmarket.notification.service.RecipientResolver.SellerLookup;
 
 /**
  * PaymentSucceeded → Buyer: thanh toán thành công (in-app + push + email); Seller: đơn mới
@@ -47,9 +48,10 @@ public class PaymentSucceededConsumer implements EventConsumer<PaymentSucceeded>
 		recipients.order(event.orderId()).ifPresent(order -> {
 			List<Delivery> deliveries = new ArrayList<>();
 			deliveries.add(new Delivery(order.userId(), templates.paymentSucceeded(order)));
-			recipients.sellers(order).forEach(
+			SellerLookup sellers = recipients.sellers(order);
+			sellers.owners().forEach(
 					(shopId, ownerId) -> deliveries.add(new Delivery(ownerId, templates.newOrder(order, shopId))));
-			dispatcher.deliverAll(deliveries, envelope);
+			dispatcher.deliverAll(deliveries, envelope, sellers.failure());
 		});
 	}
 }

@@ -56,7 +56,15 @@ public class NotificationDispatcher {
 	 * mới ném lỗi đầu tiên để event bus retry; lần retry bỏ qua những người đã xong nhờ dedup.
 	 */
 	public void deliverAll(List<Delivery> deliveries, EventEnvelope envelope) {
-		RuntimeException first = null;
+		deliverAll(deliveries, envelope, null);
+	}
+
+	/**
+	 * Như {@link #deliverAll(List, EventEnvelope)}, kèm một lỗi xảy ra TRƯỚC khi gửi (vd tra
+	 * chủ gian hàng thất bại): vẫn gửi hết danh sách hiện có rồi mới ném lỗi đó để retry.
+	 */
+	public void deliverAll(List<Delivery> deliveries, EventEnvelope envelope, RuntimeException earlierFailure) {
+		RuntimeException first = earlierFailure;
 		for (Delivery delivery : deliveries) {
 			try {
 				deliver(delivery.recipientId(), delivery.message(), envelope);

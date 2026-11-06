@@ -2,13 +2,13 @@ package com.vmarket.notification.client;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
- * Phần dữ liệu đơn hàng Notification cần (người mua, gian hàng, tổng tiền), đọc từ
- * {@code GET /internal/delivery/orders/{id}} của order-service.
+ * Dữ liệu đơn hàng Notification cần (người mua, gian hàng, tổng tiền), đọc từ
+ * {@code GET /internal/notification/orders/{id}} của order-service. Endpoint đó cố ý
+ * không trả thông tin cá nhân của người nhận.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record OrderSnapshot(
@@ -17,18 +17,10 @@ public record OrderSnapshot(
 		String status,
 		BigDecimal totalAmount,
 		String paymentMethod,
-		List<Item> items) {
+		List<String> shopIds) {
 
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record Item(String productId, String shopId, int quantity) {
-	}
-
-	/** Danh sách shopId không trùng, giữ thứ tự xuất hiện. */
-	public List<String> shopIds() {
-		if (items == null) {
-			return List.of();
-		}
-		return items.stream().map(Item::shopId).filter(Objects::nonNull).distinct().toList();
+	public OrderSnapshot {
+		shopIds = shopIds == null ? List.of() : shopIds.stream().filter(s -> s != null).distinct().toList();
 	}
 
 	public boolean isCod() {
