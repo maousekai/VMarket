@@ -77,15 +77,16 @@ public class OrderDeliveryBridge {
     /**
      * Đọc snapshot KHÔNG khoá dòng cho notification-service (PBL6-23). Notification gọi
      * một lần cho mỗi sự kiện; dùng {@link #snapshot} (SELECT ... FOR UPDATE) sẽ tranh
-     * chấp row lock với luồng huỷ đơn / bàn giao.
+     * chấp row lock với luồng huỷ đơn / bàn giao. Chỉ trả {@link OrderNotificationView}
+     * (không có dữ liệu cá nhân của người nhận).
      */
     @Transactional(readOnly = true)
-    public JsonNode view(String id) {
+    public OrderNotificationView view(String id) {
         Order order =
                 orders.findById(id)
                         .orElseThrow(
                                 () -> ApiException.notFound("ORDER_NOT_FOUND", "Không có đơn hàng"));
-        return internalSnapshot(order);
+        return OrderNotificationView.from(order);
     }
 
     @Transactional

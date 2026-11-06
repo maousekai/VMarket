@@ -64,7 +64,14 @@ class OrderDeliveryBridgeTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value("buyer"))
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
-                .andExpect(jsonPath("$.totalAmount").value(100000));
+                .andExpect(jsonPath("$.totalAmount").value(100000))
+                .andExpect(jsonPath("$.shopIds").isArray())
+                // Không lộ dữ liệu cá nhân người nhận cho notification-service.
+                .andExpect(jsonPath("$.recipientName").doesNotExist())
+                .andExpect(jsonPath("$.phone").doesNotExist())
+                .andExpect(jsonPath("$.streetAddress").doesNotExist())
+                .andExpect(jsonPath("$.note").doesNotExist())
+                .andExpect(jsonPath("$.items").doesNotExist());
         mvc.perform(
                         get("/internal/notification/orders/{id}", "missing-order")
                                 .header("X-Internal-Api-Key", key.getInternalApiKey()))
