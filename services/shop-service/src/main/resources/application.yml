@@ -49,6 +49,10 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # Khoa API noi bo /internal/** (PBL6-23): notification-service tra chu gian hang.
+  # Dung CHUNG INTERNAL_API_KEY voi cac service khac. Khong co mac dinh o file nen ->
+  # thieu bien la fail luc khoi dong (gia tri gia cho local o application-dev.yml).
+  internal-api-key: ${INTERNAL_API_KEY}
   # Event bus (shared-events - PBL6-39): shop-service CHI PHAT su kien nen de
   # listen=false (mac dinh) - khong khai bao queue, khong mo ket noi consumer.
   # Exchange mac dinh: vmarket.events (docs/event-bus.md).

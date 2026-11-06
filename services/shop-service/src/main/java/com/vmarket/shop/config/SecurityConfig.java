@@ -80,6 +80,9 @@ public class SecurityConfig {
 				.formLogin(form -> form.disable())
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(PUBLIC_PATHS).permitAll()
+						// API nội bộ (PBL6-23): controller tự kiểm tra X-Internal-Api-Key;
+						// gateway chỉ định tuyến /api/shops/** nên client ngoài không tới được.
+						.requestMatchers("/internal/**").permitAll()
 						.requestMatchers("/api/shops/admin", "/api/shops/admin/**").hasRole("ADMIN")
 						.requestMatchers("/api/shops/me", "/api/shops/me/**").authenticated()
 						.requestMatchers(HttpMethod.POST, "/api/shops").hasRole("BUYER")

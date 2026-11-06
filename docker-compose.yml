@@ -381,6 +381,9 @@ services:
       # shop-service chi VERIFY token do auth-service ky (HS256 doi xung) - PHAI
       # trung AUTH_JWT_SECRET cua block auth-service, lech la moi API tra 401.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # API noi bo /internal/** cho notification-service (PBL6-23) - PHAI trung
+      # INTERNAL_API_KEY cua notification-service.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${SHOP_SERVICE_PORT:-8083}:8083"

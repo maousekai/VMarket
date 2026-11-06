@@ -21,6 +21,7 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:5173
+  internal-api-key: test-internal-key-0123456789
 
 auth:
   jwt:
