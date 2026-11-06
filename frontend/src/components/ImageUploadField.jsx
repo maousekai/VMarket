@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { imageUrlOrEmpty } from '../utils/shop'
+import Modal from './Modal'
 import './imageUploadField.css'
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
@@ -36,6 +37,8 @@ function UploadIcon() {
 // Image picker that keeps two paths open at once:
 //   - choose a file (uploaded later by the form on Save, never on selection)
 //   - paste an existing http(s) URL, exactly like the old URL-only fields
+// The frame itself is the only trigger: clicking it opens a small chooser so the
+// two sources are explicit instead of exposing a second form next to the image.
 // The component owns no persistence: `file` and `value` are controlled by the form.
 export default function ImageUploadField({
   label,
@@ -48,14 +51,18 @@ export default function ImageUploadField({
   error,
   disabled = false,
   required = false,
+  showRemove = true,
 }) {
   const fileId = useId()
   const urlId = useId()
   const inputRef = useRef(null)
+  const urlInputRef = useRef(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewFailed, setPreviewFailed] = useState(false)
   const [localError, setLocalError] = useState('')
-  const [urlMode, setUrlMode] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerMode, setPickerMode] = useState('menu')
+  const [draftUrl, setDraftUrl] = useState('')
 
   useEffect(() => {
     if (!file) {
@@ -74,15 +81,54 @@ export default function ImageUploadField({
 
   useEffect(() => setPreviewFailed(false), [previewUrl, value])
 
-  // A URL validation error is only visible with the URL field open.
+  // Switching from the source menu to the URL step replaces the focused button,
+  // so move focus to the field the user now needs.
   useEffect(() => {
-    if (error && !file) setUrlMode(true)
-  }, [error, file])
+    if (pickerOpen && pickerMode === 'url') urlInputRef.current?.focus()
+  }, [pickerOpen, pickerMode])
 
   const storedUrl = imageUrlOrEmpty(value)
   const shownUrl = previewUrl || storedUrl
   const message = error || localError
   const hasImage = Boolean(shownUrl) && !previewFailed
+
+  function openPicker() {
+    if (disabled) return
+    setDraftUrl(value)
+    setPickerMode('menu')
+    setLocalError('')
+    setPickerOpen(true)
+  }
+
+  function closePicker() {
+    setPickerOpen(false)
+    setPickerMode('menu')
+    setLocalError('')
+  }
+
+  function pickFile() {
+    closePicker()
+    inputRef.current?.click()
+  }
+
+  function openUrl() {
+    setDraftUrl(value)
+    setLocalError('')
+    setPickerMode('url')
+  }
+
+  function applyUrl() {
+    const next = draftUrl.trim()
+    if (!next) {
+      setLocalError('Vui lòng nhập đường dẫn ảnh.')
+      return
+    }
+    setLocalError('')
+    // A pasted URL replaces the pending file.
+    onFileChange(null)
+    onChange(next)
+    closePicker()
+  }
 
   function chooseFile(nextFile) {
     if (disabled) return
@@ -117,75 +163,51 @@ export default function ImageUploadField({
       }`}
     >
       <div className="image-field__head">
-        <div>
-          <span className="image-field__label">
-            {label}
-            {required && <span aria-hidden="true"> *</span>}
-          </span>
-        </div>
+        <span className="image-field__label">
+          {label}
+          {required && <span aria-hidden="true"> *</span>}
+        </span>
         <span className={`image-field__status${file ? ' is-new' : ''}`}>
           {file ? 'Ảnh mới' : storedUrl ? 'Đã đặt' : 'Chưa có ảnh'}
         </span>
       </div>
 
-      <div className="image-field__body">
+      <button
+        type="button"
+        className="image-field__drop"
+        aria-label={`Chọn ${label.toLocaleLowerCase('vi')}`}
+        disabled={disabled}
+        onClick={openPicker}
+      >
+        {hasImage ? (
+          <>
+            <img
+              src={shownUrl}
+              alt=""
+              onError={() => setPreviewFailed(true)}
+              className={shape === 'square' ? 'is-square' : 'is-cover'}
+            />
+            <span className="image-field__overlay">Đổi ảnh</span>
+          </>
+        ) : (
+          <span className="image-field__placeholder">
+            <UploadIcon />
+            <strong>Thêm ảnh</strong>
+            <small>JPEG, PNG hoặc WebP</small>
+          </span>
+        )}
+      </button>
+
+      {showRemove && (value || file) && (
         <button
           type="button"
-          className="image-field__drop"
-          aria-label={`Chọn ${label.toLocaleLowerCase('vi')}`}
+          className="link-button link-button--danger image-field__remove"
           disabled={disabled}
-          onClick={() => inputRef.current?.click()}
+          onClick={remove}
         >
-          {hasImage ? (
-            <>
-              <img
-                src={shownUrl}
-                alt=""
-                onError={() => setPreviewFailed(true)}
-                className={shape === 'square' ? 'is-square' : 'is-cover'}
-              />
-              <span className="image-field__overlay">Chọn ảnh khác</span>
-            </>
-          ) : (
-            <span className="image-field__placeholder">
-              <UploadIcon />
-              <strong>Tải ảnh lên</strong>
-              <small>JPEG, PNG hoặc WebP</small>
-            </span>
-          )}
+          Xoá ảnh
         </button>
-
-        <div className="image-field__tools">
-          <button
-            type="button"
-            className="account-button account-button--secondary image-field__button"
-            disabled={disabled}
-            onClick={() => inputRef.current?.click()}
-          >
-            {hasImage || file ? 'Chọn ảnh khác' : 'Chọn ảnh'}
-          </button>
-          {(value || file) && (
-            <button
-              type="button"
-              className="link-button link-button--danger"
-              disabled={disabled}
-              onClick={remove}
-            >
-              Xoá ảnh
-            </button>
-          )}
-          <button
-            type="button"
-            className="link-button image-field__url-toggle"
-            aria-expanded={urlMode}
-            disabled={disabled}
-            onClick={() => setUrlMode((open) => !open)}
-          >
-            {urlMode ? 'Ẩn đường dẫn' : 'Dùng đường dẫn'}
-          </button>
-          {file && <span className="image-field__filename">{file.name}</span>}
-        </div>
-      </div>
+      )}
 
       <input
         ref={inputRef}
@@ -198,32 +220,79 @@ export default function ImageUploadField({
         onChange={onFileInput}
       />
 
-      {urlMode && (
-        <div className="image-field__url">
-          <label htmlFor={urlId}>Đường dẫn ảnh</label>
-          <input
-            id={urlId}
-            type="url"
-            inputMode="url"
-            value={value}
-            maxLength={500}
-            disabled={disabled}
-            placeholder="https://example.com/anh-cua-toi.jpg"
-            aria-invalid={error ? 'true' : undefined}
-            onChange={(event) => {
-              setLocalError('')
-              // A pasted URL replaces the pending file.
-              onFileChange(null)
-              onChange(event.target.value)
-            }}
-          />
-        </div>
-      )}
-
-      {message && (
+      {message && !pickerOpen && (
         <p className="account-field__error image-field__error" role="alert">
           {message}
         </p>
+      )}
+
+      {pickerOpen && (
+        <Modal title={`Chọn ${label.toLocaleLowerCase('vi')}`} onClose={closePicker}>
+          {pickerMode === 'menu' ? (
+            <div className="image-picker">
+              <button
+                type="button"
+                className="image-picker__option"
+                aria-label="Tải ảnh từ máy"
+                data-autofocus
+                onClick={pickFile}
+              >
+                <strong>Tải ảnh từ máy</strong>
+                <span>Chọn tệp JPEG, PNG hoặc WebP, tối đa {maxSizeMb} MB.</span>
+              </button>
+              <button
+                type="button"
+                className="image-picker__option"
+                aria-label="Dùng đường dẫn ảnh"
+                onClick={openUrl}
+              >
+                <strong>Dùng đường dẫn ảnh</strong>
+                <span>Dán URL http(s) của ảnh đã có sẵn trên internet.</span>
+              </button>
+            </div>
+          ) : (
+            <div className="image-picker__url">
+              <label htmlFor={urlId}>Đường dẫn ảnh</label>
+              <input
+                id={urlId}
+                ref={urlInputRef}
+                type="url"
+                inputMode="url"
+                value={draftUrl}
+                maxLength={500}
+                data-autofocus
+                placeholder="https://example.com/anh-cua-toi.jpg"
+                aria-invalid={error || localError ? 'true' : undefined}
+                onChange={(event) => {
+                  setLocalError('')
+                  setDraftUrl(event.target.value)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  applyUrl()
+                }}
+              />
+              {localError && (
+                <p className="account-field__error" role="alert">
+                  {localError}
+                </p>
+              )}
+              <div className="account-actions">
+                <button type="button" className="account-button" onClick={applyUrl}>
+                  Dùng ảnh này
+                </button>
+                <button
+                  type="button"
+                  className="account-button account-button--secondary"
+                  onClick={() => setPickerMode('menu')}
+                >
+                  Quay lại
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   )

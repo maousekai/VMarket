@@ -47,10 +47,18 @@ function renderPage(page = <ProfilePage />, overrides = {}) {
 }
 
 const openDialog = () => fireEvent.click(screen.getByRole('button', { name: 'Đổi ảnh đại diện' }))
-const openUrlField = () => fireEvent.click(screen.getByRole('button', { name: 'Dùng đường dẫn' }))
+const openUrlField = () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Chọn ảnh đại diện' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Dùng đường dẫn ảnh' }))
+}
 const field = () => screen.getByLabelText('Đường dẫn ảnh')
 const change = (value) => fireEvent.change(field(), { target: { value } })
-const saveAvatar = () => fireEvent.click(screen.getByRole('button', { name: 'Lưu ảnh' }))
+const saveAvatar = () => {
+  if (screen.queryByRole('button', { name: 'Dùng ảnh này' })) {
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng ảnh này' }))
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu ảnh' }))
+}
 const imageFile = (name = 'avatar.png') =>
   new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' })
 const chooseFile = (file = imageFile()) =>
@@ -142,9 +150,11 @@ describe('Change avatar dialog', () => {
       change(bad)
       saveAvatar()
       expect(value.saveProfile).not.toHaveBeenCalled()
+      openUrlField()
       expect(field().getAttribute('aria-invalid')).toBe('true')
       change('https://example.com/ok.png')
-      expect(field().getAttribute('aria-invalid')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Dùng ảnh này' }))
+      expect(screen.queryByRole('alert')).toBeNull()
     },
   )
 

@@ -88,6 +88,7 @@ export default function AvatarDialog({ profile, saveProfile, onClose }) {
           maxSizeMb={2}
           error={fieldError}
           disabled={saving}
+          showRemove={false}
         />
         {error && !fieldError && (
           <p className="account-notice account-notice--error" role="alert">

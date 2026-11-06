@@ -37,18 +37,11 @@
   border-color: #bae6fd;
 }
 
-.image-field__body {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  min-width: 0;
-}
-
 .image-field__drop {
   position: relative;
   display: grid;
   place-items: center;
-  flex-shrink: 0;
+  justify-self: start;
   padding: 0;
   overflow: hidden;
   background:
@@ -85,32 +78,10 @@
   border-radius: 16px;
 }
 
-/* A cover is wide, so the tools sit under it instead of squeezing beside it. */
-.image-field--cover .image-field__body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-
-.image-field--cover .image-field__tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  padding-top: 0;
-}
-
 .image-field__drop img {
   width: 100%;
   height: 100%;
   display: block;
-}
-
-.image-field__drop img.is-square {
-  object-fit: cover;
-}
-
-.image-field__drop img.is-cover {
   object-fit: cover;
 }
 
@@ -167,63 +138,9 @@
   opacity: 1;
 }
 
-.image-field__tools {
-  display: grid;
-  align-content: start;
-  justify-items: start;
-  gap: 10px;
-  min-width: 0;
-  padding-top: 4px;
-}
-
-.image-field__button {
-  min-height: 40px;
-  padding: 8px 14px;
-  font-size: 13px;
-}
-
-.image-field__url-toggle {
+.image-field__remove {
+  justify-self: start;
   font-size: 12px;
-}
-
-.image-field__filename {
-  max-width: 220px;
-  overflow: hidden;
-  font-size: 11px;
-  color: var(--color-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.image-field__url {
-  display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  background: #f8fafc;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-}
-
-.image-field__url label {
-  font-size: 12px;
-  font-weight: 700;
-  color: #374151;
-}
-
-.image-field__url input {
-  width: 100%;
-  height: 42px;
-  padding: 0 12px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--color-text);
-  background: white;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-}
-
-.image-field__url input[aria-invalid='true'] {
-  border-color: #dc2626;
 }
 
 .image-field__error {
@@ -252,24 +169,74 @@
   border: 0;
 }
 
+/* Chooser shown after clicking the image frame. */
+.image-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.image-picker__option {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  text-align: left;
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.image-picker__option:hover,
+.image-picker__option:focus-visible {
+  background: #f0f9ff;
+  border-color: var(--color-primary);
+}
+
+.image-picker__option strong {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.image-picker__option span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.image-picker__url {
+  display: grid;
+  gap: 6px;
+}
+
+.image-picker__url label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.image-picker__url input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.image-picker__url .account-actions {
+  margin-top: 8px;
+}
+
 @media (max-width: 560px) {
-  .image-field__body {
-    display: grid;
-    gap: 14px;
-  }
   .image-field--square .image-field__drop {
     width: 132px;
     height: 132px;
     border-radius: 22px;
-  }
-  .image-field__tools {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px 16px;
-    padding-top: 0;
-  }
-  .image-field__filename {
-    max-width: 100%;
   }
 }

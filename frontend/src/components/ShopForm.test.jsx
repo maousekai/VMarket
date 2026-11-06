@@ -92,14 +92,26 @@ describe('ShopForm media', () => {
     expect(deleteMyShopMedia).not.toHaveBeenCalled()
   })
 
+  it('opens the source chooser from the image frame', () => {
+    render(<ShopForm initial={shop} onSubmit={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chọn logo' }))
+
+    expect(screen.getByRole('dialog', { name: 'Chọn logo' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tải ảnh từ máy' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Dùng đường dẫn ảnh' })).toBeTruthy()
+  })
+
   it('keeps the URL input path working without uploading a file', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(<ShopForm initial={shop} onSubmit={onSubmit} />)
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Dùng đường dẫn' })[0])
-    fireEvent.change(screen.getAllByLabelText('Đường dẫn ảnh')[0], {
+    fireEvent.click(screen.getByRole('button', { name: 'Chọn logo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng đường dẫn ảnh' }))
+    fireEvent.change(screen.getByLabelText('Đường dẫn ảnh'), {
       target: { value: 'https://cdn.example.com/new-logo.webp' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng ảnh này' }))
     fireEvent.click(screen.getByRole('button', { name: 'Lưu hồ sơ' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
