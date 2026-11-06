@@ -80,6 +80,12 @@ Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. `MINIO_
 hai và password phải dài ít nhất 8 ký tự; không có credential mặc định. Giữ nguyên
 `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
+`AUTH_JWT_SECRET` và `INTERNAL_API_KEY` cũng không có giá trị mặc định trong
+`docker-compose.yml`: thiếu thì các service dùng chúng (auth, user, shop, order,
+product, gateway, chatbot) dừng lúc khởi động thay vì chạy bằng secret công khai.
+Nếu `.env` có từ trước, thêm hai biến này theo `.env.example` (tối thiểu 32 ký tự;
+môi trường thật dùng chuỗi ngẫu nhiên).
+
 ```bash
 # Bộ nhẹ mặc định (~1.75GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ + MinIO
 docker compose up -d postgres mongo mongo-init-replica redis rabbitmq minio

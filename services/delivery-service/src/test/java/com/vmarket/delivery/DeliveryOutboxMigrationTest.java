@@ -16,7 +16,7 @@ import java.util.UUID;
 
 class DeliveryOutboxMigrationTest {
     @Test
-    void existingPendingEventsSurviveUpgradeAndNewEventsGetRetryDefaults() {
+    void existingPendingEventsSurviveUpgradeAndNewEventsGetRetryDefaults() throws Exception {
         String url =
                 "jdbc:h2:mem:outbox-upgrade-"
                         + UUID.randomUUID()
@@ -45,9 +45,23 @@ class DeliveryOutboxMigrationTest {
                 "insert into route_logs (id,assignment_id,sequence,latitude,longitude,recorded_at)"
                         + " values ('old-point',?,7,16,108,CURRENT_TIMESTAMP)",
                 a.getId());
+        jdbc.update(
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
+                        + " values ('s-empty', 'k-empty', 'Shipper Empty', '0900000000', 'da nang', '', true, CURRENT_TIMESTAMP)");
+        jdbc.update(
+                "insert into delivery_assignments (id, order_id, buyer_id, status, attempt, payment_method, cod_amount, province, district, order_snapshot, created_at, updated_at)"
+                        + " values ('a-empty', 'o-empty', 'b-1', 'WAITING_ASSIGNMENT', 1, 'COD', 0, 'da nang', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
         var flyway = Flyway.configure().dataSource(url, "sa", "").load();
         flyway.migrate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        try (var c = new DriverManagerDataSource(url, "sa", "").getConnection()) {
+            assertThat(columnIsNullable(c, "shippers", "district")).isTrue();
+            assertThat(columnIsNullable(c, "delivery_assignments", "district")).isTrue();
+            assertThat(columnIsNullable(c, "shippers", "province")).isFalse();
+            assertThat(columnIsNullable(c, "delivery_assignments", "province")).isFalse();
+        }
+        assertThat(jdbc.queryForObject("select district from shippers where id='s-empty'", String.class)).isNull();
+        assertThat(jdbc.queryForObject("select district from delivery_assignments where id='a-empty'", String.class)).isNull();
         assertThat(jdbc.queryForObject("select payload from delivery_outbox", String.class))
                 .isEqualTo("{\"pending\":true}");
         assertThat(jdbc.queryForObject("select retry_attempts from delivery_outbox", Integer.class))
@@ -70,5 +84,20 @@ class DeliveryOutboxMigrationTest {
                                         + " next_attempt_at<=CURRENT_TIMESTAMP",
                                 Integer.class))
                 .isEqualTo(2);
+    }
+
+    private static boolean columnIsNullable(java.sql.Connection c, String table, String column)
+            throws Exception {
+        var meta = c.getMetaData();
+        for (String t : new String[] {table, table.toUpperCase()}) {
+            for (String col : new String[] {column, column.toUpperCase()}) {
+                try (var rs = meta.getColumns(null, null, t, col)) {
+                    if (rs.next()) {
+                        return rs.getInt("NULLABLE") == java.sql.DatabaseMetaData.columnNullable;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("Không tìm thấy cột " + table + "." + column);
     }
 }
