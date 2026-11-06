@@ -55,6 +55,25 @@ class OrderDeliveryBridgeTest {
     }
 
     @Test
+    void notificationReadNeedsKeyAndDoesNotChangeOrder() throws Exception {
+        mvc.perform(get("/internal/notification/orders/{id}", order.getId()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(
+                        get("/internal/notification/orders/{id}", order.getId())
+                                .header("X-Internal-Api-Key", key.getInternalApiKey()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("buyer"))
+                .andExpect(jsonPath("$.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.totalAmount").value(100000));
+        mvc.perform(
+                        get("/internal/notification/orders/{id}", "missing-order")
+                                .header("X-Internal-Api-Key", key.getInternalApiKey()))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("select count(*) from event_outbox", Integer.class))
+                .isZero();
+    }
+
+    @Test
     void internalKeyGuardsSnapshotAndPaymentInventoryReadiness() throws Exception {
         mvc.perform(get("/internal/delivery/orders/{id}", order.getId()))
                 .andExpect(status().isUnauthorized());
