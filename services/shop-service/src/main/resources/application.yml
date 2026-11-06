@@ -55,6 +55,10 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+  # Khoa API noi bo /internal/** (PBL6-23): notification-service tra chu gian hang.
+  # Dung CHUNG INTERNAL_API_KEY voi cac service khac. Khong co mac dinh o file nen ->
+  # thieu bien la fail luc khoi dong (gia tri gia cho local o application-dev.yml).
+  internal-api-key: ${INTERNAL_API_KEY}
   # Kho anh MinIO (services/shared-media). Thieu credential la fail luc khoi dong;
   # gia tri dev nam o application-dev.yml.
   media:

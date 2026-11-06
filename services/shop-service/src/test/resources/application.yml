@@ -21,6 +21,7 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:5173
+  internal-api-key: test-internal-key-0123456789
   # Khong goi MinIO trong test hien co; S3Client chi duoc tao (khong ket noi).
   media:
     endpoint: http://minio.test:9000

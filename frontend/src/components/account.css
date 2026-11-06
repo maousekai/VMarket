@@ -44,18 +44,109 @@
   letter-spacing: 0.45px;
   line-height: 13.5px;
 }
-.app-header__navigation {
-  margin-right: auto;
+.header-search {
+  flex: 1 1 540px;
+  max-width: 540px;
+  display: flex;
+  min-width: 0;
 }
-.app-header__navigation a {
-  color: white;
+.header-search__field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 12px;
+  background: var(--color-surface-muted);
+  border: 0.8px solid var(--color-border);
+  border-right: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  color: var(--color-text);
+}
+.header-search__field:focus-within {
+  outline: 3px solid #60a5fa;
+  outline-offset: 2px;
+}
+.header-search__icon {
+  flex-shrink: 0;
+}
+.header-search__field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
   font-size: 13px;
+  outline: none;
+}
+.header-search__field input::placeholder {
+  color: var(--color-muted);
+}
+.header-search__field input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+.header-search__submit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--gradient-primary);
+  color: white;
+  font-size: 14px;
   font-weight: 600;
-  text-decoration: none;
-  padding: 10px 0;
+  white-space: nowrap;
+}
+.header-search__submit:hover {
+  background: linear-gradient(160deg, #03376b, #0864b5);
+}
+.app-header__pending,
+.app-header__auth-links,
+.app-header .account-menu {
+  margin-left: auto;
 }
 .app-header__pending {
   font-size: 13px;
+}
+.category-nav {
+  min-height: 38px;
+  background: var(--color-surface);
+  border-top: 0.8px solid var(--color-surface-muted);
+}
+.category-nav__list {
+  width: var(--content-width);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  /* "safe" keeps the first items reachable when the strip overflows and scrolls. */
+  justify-content: safe center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.category-nav__list::-webkit-scrollbar {
+  display: none;
+}
+.category-nav__link {
+  display: block;
+  padding: 8px 14px;
+  border-bottom: 1.6px solid transparent;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19.5px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.category-nav__link:hover,
+.category-nav__link[aria-current='page'] {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  text-decoration: none;
 }
 .app-header__auth-links {
   display: flex;
@@ -548,12 +639,19 @@
   }
   .app-header__inner {
     gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 0;
   }
-  .app-header__navigation {
-    flex: 1;
+  /* Search drops to its own full-width row under the brand and account controls. */
+  .header-search {
+    order: 1;
+    flex-basis: 100%;
+    max-width: none;
   }
-  .app-header__navigation a {
-    display: none;
+  .category-nav__list {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0 8px;
   }
   .account-menu__name {
     max-width: 110px;

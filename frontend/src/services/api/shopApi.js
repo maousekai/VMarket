@@ -18,7 +18,7 @@ export const getRecentOrders = async (limit = 5) =>
   (await apiClient.get('/api/shops/me/recent-orders', { params: { limit } })).data
 
 export const getPublicShop = async (shopId) =>
-  (await apiClient.get(`/api/shops/${encodeURIComponent(shopId)}`)).data
+  (await apiClient.get(`/api/shops/${encodeURIComponent(shopId)}`, { skipAuth: true })).data
 
 const adminUrl = '/api/shops/admin'
 

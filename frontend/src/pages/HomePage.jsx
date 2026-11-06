@@ -1,12 +1,24 @@
-import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
-import illustration from '../assets/auth/da-nang.png'
+import FeaturedShops from '../components/FeaturedShops'
 import FormMessage from '../components/FormMessage'
+import HeroCarousel from '../components/HeroCarousel'
+import ProductGrid from '../components/ProductGrid'
+import SectionHeader from '../components/SectionHeader'
+import { ACTIVE_CITY } from '../data/city'
+import { homeBanners } from '../data/homeBanners'
+import { useFeaturedShops, useHomeProducts } from '../hooks/useCatalog'
+import { PRODUCT_SORT } from '../services/api/productApi'
+import '../components/home.css'
 
 export default function HomePage() {
   const auth = useAuth()
+  const feed = useHomeProducts(auth.session?.userId)
+  const shops = useFeaturedShops()
+  // Only call it "for you" when the picks really are personal.
+  const personal = feed.status === 'ready' && feed.data.source === 'personal'
+
   return (
-    <main className="page">
+    <main className="home">
       {auth.bootstrapState === 'error' && (
         <div className="session-notice">
           <FormMessage error={auth.error} />
@@ -15,39 +27,37 @@ export default function HomePage() {
           </button>
         </div>
       )}
-      <section className="welcome">
-        <div>
-          <h1>
-            Chợ trực tuyến
-            <br />
-            Đà Nẵng
-          </h1>
-          <p>
-            Mua sắm dễ dàng, giao hàng nhanh. Kết nối với cộng đồng người mua và nhà bán ngay tại
-            thành phố của bạn.
-          </p>
-          <div className="welcome-actions">
-            {auth.session ? (
-              <Link
-                className="button button--primary"
-                to={auth.session.status === 'PENDING' ? '/verify-email' : '/profile'}
-              >
-                {auth.session.status === 'PENDING' ? 'Xác thực tài khoản' : 'Hồ sơ của tôi'}
-              </Link>
-            ) : (
-              <>
-                <Link className="button button--primary" to="/register">
-                  Tham gia VMarket
-                </Link>
-                <Link className="button button--secondary" to="/login">
-                  Đăng nhập
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-        <img src={illustration} width="455" height="315" alt="Cầu Rồng Đà Nẵng bên sông Hàn" />
+      <h1 className="visually-hidden">VMarket — Chợ trực tuyến {ACTIVE_CITY.name}</h1>
+      <HeroCarousel slides={homeBanners} />
+      <section className="home-section" aria-labelledby="home-products-title">
+        <SectionHeader
+          id="home-products-title"
+          title={personal ? 'Sản phẩm dành cho bạn' : `Bán chạy tại ${ACTIVE_CITY.name}`}
+          badge={
+            personal
+              ? 'Gợi ý dành cho bạn'
+              : auth.session
+                ? 'Được mua nhiều nhất'
+                : 'Gợi ý cho khách mới'
+          }
+          linkTo={`/search?sort=${PRODUCT_SORT.bestSelling}`}
+          linkLabel="Xem thêm"
+        />
+        <ProductGrid
+          status={feed.status}
+          products={feed.data?.products}
+          error={feed.error}
+          onRetry={feed.reload}
+          emptyMessage="Các nhà bán đang lên kệ sản phẩm. Quay lại sau nhé!"
+        />
       </section>
+      <FeaturedShops
+        title={`Cửa Hàng Nổi Bật Tại ${ACTIVE_CITY.name}`}
+        status={shops.status}
+        shops={shops.data}
+        error={shops.error}
+        onRetry={shops.reload}
+      />
     </main>
   )
 }

@@ -58,7 +58,7 @@ COD lấy từ số tiền Order trả về, không nhận giá tiền do ngư�
 
 `DeliveryAssigned` và `DeliveryStatusChanged(orderId,status,version)` được lưu cùng trạng thái trong SQL outbox. Order chỉ áp dụng phiên bản mới hơn, không quay ngược đơn terminal; outbox Order phát OrderStatusChanged sau giao dịch. Chỉ xoá outbox khi RabbitMQ xác nhận ACK và không trả về thông điệp không có route. Consumer phải chấp nhận gửi lại. Nhóm vận hành theo dõi/replay dead-letter khi có lỗi kéo dài.
 
-Delivery khai báo queue durable `notification-service.delivery-assigned`, binding `DeliveryAssigned` và dead-letter queue, để publisher confirms có route ngay cả khi Notification chưa chạy. Notification vẫn cần triển khai consumer của queue này; khai báo queue không đồng nghĩa đã gửi thông báo tới người dùng.
+Delivery khai báo queue durable `notification-service.delivery-assigned`, binding `DeliveryAssigned` và dead-letter queue, để publisher confirms có route ngay cả khi Notification chưa chạy. Notification (PBL6-23) tiêu thụ đúng queue này và báo cho shipper và người bán; xem [README notification-service](../services/notification-service/README.md).
 
 Outbox Delivery chỉ lấy tối đa 100 bản ghi đã đến hạn. Mỗi bản ghi được khóa bằng `FOR UPDATE SKIP LOCKED` trong transaction gửi/xóa, áp dụng cho cả kênh sự kiện và tracking. Khi lỗi, lùi lần thử từ 5 giây, tăng gấp đôi và giới hạn 5 phút. Sau 10 lỗi chuyển sang `DEAD`, giữ nguyên payload và loại lỗi, ngừng tự retry. Vì vậy cả batch lỗi không chặn sự kiện hợp lệ phía sau. Lịch retry sống qua khởi động lại.
 

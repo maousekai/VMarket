@@ -161,9 +161,9 @@ park phía outbox của Product Catalog (xem `§7`).
 | `ProductModerationRequested` | Product Catalog | Notification/Admin workflow |
 | `PaymentSucceeded` / `PaymentFailed` | Payment | Order, Notification |
 | `DeliveryAssigned` | Delivery | Notification |
-| `DeliveryStatusChanged` | Delivery | Order |
+| `DeliveryStatusChanged` | Delivery | Order, Notification (chỉ `FAILED`) |
 | `CodCollected` | Delivery | Payment (PBL6-19) |
-| `ReviewCreated` | Review | Notification, Product |
+| `ReviewCreated` | Review | Product (Notification chờ payload có `shopId`/`sellerId`) |
 | `ReturnRequested` / `ReturnResolved` | Order | Payment, Product, Notification |
 | `UserBehaviorTracked` | Gateway / Clients | Recommendation |
 

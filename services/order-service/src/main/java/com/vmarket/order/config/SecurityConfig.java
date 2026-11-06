@@ -61,6 +61,8 @@ public class SecurityConfig {
 						.requestMatchers(PUBLIC_PATHS).permitAll()
 						.requestMatchers("/internal/delivery/**").permitAll()
 						.requestMatchers("/internal/orders/**").permitAll()
+						// Notification (PBL6-23): tự kiểm tra X-Internal-Api-Key trong controller.
+						.requestMatchers("/internal/notification/**").permitAll()
 						.requestMatchers("/api/orders/admin/**").hasRole("ADMIN")
 						.anyRequest().authenticated())
 				// Đặt trước filter đăng nhập bằng form/username-password để danh tính
