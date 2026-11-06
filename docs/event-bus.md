@@ -310,8 +310,11 @@ Luồng: **Product Catalog (Java)** phát → **AI Search (Python)** nhận.
 - Product nhận `ReviewCreated(reviewId, productId, ratingAverage, ratingCount)`;
   payload mang aggregate mới nhất để xử lý lặp không cộng điểm hai lần.
   Review Service (PBL6-22) phát qua outbox khi có đánh giá mới **và** khi admin
-  ẩn/khôi phục đánh giá; aggregate chỉ tính đánh giá đang hiển thị và được tính lúc
-  phát, nên bản tin sau cùng luôn khớp dữ liệu đã commit.
+  ẩn/khôi phục đánh giá — dù tên là `ReviewCreated`, ý nghĩa thực tế là "aggregate điểm
+  của sản phẩm đã thay đổi" (có thể đổi tên thành `ProductRatingChanged` ở ticket sau).
+  Aggregate chỉ tính đánh giá đang hiển thị, được tính lúc phát dưới khoá theo sản phẩm
+  nên nhiều replica vẫn cho bản tin sau cùng khớp dữ liệu đã commit. Điểm gian hàng chưa
+  có sự kiện — tính on-the-fly qua `GET /api/reviews/shops/{shopId}/summary`.
 - Product nhận `OrderStatusChanged`; trạng thái `CANCELLED` hoàn giữ kho, còn đơn
   COD chuyển sang `CONFIRMED`/`PREPARING` sẽ chốt kho. Thanh toán online tiếp tục
   chốt qua `PaymentSucceeded` theo FR-PROD-02.
