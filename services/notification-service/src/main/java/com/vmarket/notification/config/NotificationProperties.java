@@ -14,7 +14,7 @@ import lombok.Setter;
 @ConfigurationProperties(prefix = "app.notification")
 public class NotificationProperties {
 
-	/** Khoá gọi API nội bộ của order-service và auth-service. */
+	/** Khoá gọi API nội bộ của order-service, auth-service và shop-service. */
 	@NotBlank
 	private String internalApiKey;
 
@@ -23,6 +23,9 @@ public class NotificationProperties {
 
 	@NotBlank
 	private String authUrl = "http://localhost:8081";
+
+	@NotBlank
+	private String shopUrl = "http://localhost:8083";
 
 	/** Gốc URL frontend để dựng link trong email. */
 	@NotBlank

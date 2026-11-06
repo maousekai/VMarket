@@ -28,6 +28,7 @@ public class DeviceToken {
 		ANDROID, IOS, WEB
 	}
 
+	/** ULID (quy ước khoá chính của dự án), sinh ở tầng ứng dụng. */
 	@Id
 	private String id;
 

@@ -56,6 +56,8 @@ class NotificationDispatcherTest {
 		assertThat(saved.getValue().getDedupKey()).isEqualTo("evt-1:buyer-1:ORDER_PLACED");
 		assertThat(saved.getValue().isRead()).isFalse();
 		assertThat(saved.getValue().getCreatedAt()).isEqualTo(Instant.parse("2026-11-05T10:00:00Z"));
+		// ULID: 26 ký tự Crockford base32.
+		assertThat(saved.getValue().getId()).matches("[0-9A-HJKMNP-TV-Z]{26}");
 
 		ArgumentCaptor<Map<String, String>> data = ArgumentCaptor.captor();
 		verify(push).sendToUser(eq("buyer-1"), eq("Tiêu đề"), eq("Nội dung"), data.capture());
@@ -105,6 +107,38 @@ class NotificationDispatcherTest {
 
 		verify(repository).insert(any(Notification.class));
 		verifyNoInteractions(push, email);
+	}
+
+	@Test
+	void perShopMessagesGetSeparateKeysForSameOwner() {
+		NotificationMessage shopA = new NotificationMessage(NotificationType.NEW_ORDER, "t", "b", null,
+				Map.of("orderId", "o1", "shopId", "shop-a"), false, null);
+		NotificationMessage shopB = new NotificationMessage(NotificationType.NEW_ORDER, "t", "b", null,
+				Map.of("orderId", "o1", "shopId", "shop-b"), false, null);
+
+		assertThat(NotificationDispatcher.dedupKey("seller-1", shopA, envelope))
+				.isEqualTo("evt-1:seller-1:NEW_ORDER:shop-a")
+				.isNotEqualTo(NotificationDispatcher.dedupKey("seller-1", shopB, envelope));
+		assertThat(NotificationDispatcher.dedupKey("buyer-1", withEmail, envelope))
+				.isEqualTo("evt-1:buyer-1:ORDER_PLACED");
+	}
+
+	@Test
+	void deliverAllContinuesAfterFailureThenRethrowsFirst() {
+		when(repository.existsByDedupKey(any())).thenReturn(false);
+		org.mockito.Mockito.doThrow(new EmailDeliveryException("buyer email down")).when(email)
+				.send(eq("buyer-1"), any(), any(), any());
+		NotificationMessage sellerMessage = new NotificationMessage(NotificationType.NEW_ORDER, "t", "b", null,
+				Map.of("shopId", "s1"), false, null);
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> dispatcher.deliverAll(java.util.List.of(
+				new NotificationDispatcher.Delivery("buyer-1", withEmail),
+				new NotificationDispatcher.Delivery("seller-1", sellerMessage)), envelope))
+				.hasMessage("buyer email down");
+
+		ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+		verify(repository, org.mockito.Mockito.times(2)).insert(saved.capture());
+		assertThat(saved.getAllValues()).extracting(Notification::getUserId).containsExactly("buyer-1", "seller-1");
 	}
 
 	@Test

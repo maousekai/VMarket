@@ -71,11 +71,13 @@ app:
       - ProductModerated
       - ReturnResolved
   notification:
-    # Khoa API noi bo: goi order-service (tra nguoi mua / gian hang cua don) va
-    # auth-service (tra email nguoi nhan). PHAI trung INTERNAL_API_KEY cua 2 service do.
+    # Khoa API noi bo: goi order-service (nguoi mua / gian hang cua don),
+    # auth-service (email nguoi nhan) va shop-service (chu gian hang).
+    # PHAI trung INTERNAL_API_KEY cua 3 service do.
     internal-api-key: ${INTERNAL_API_KEY}
     order-url: ${ORDER_SERVICE_URL:http://localhost:8086}
     auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+    shop-url: ${SHOP_SERVICE_URL:http://localhost:8083}
     # Link trong email tro ve frontend.
     frontend-url: ${FRONTEND_URL:http://localhost:5173}
     email:

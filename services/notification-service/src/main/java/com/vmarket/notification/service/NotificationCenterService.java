@@ -13,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import com.github.f4b6a3.ulid.UlidCreator;
 import com.vmarket.notification.domain.DeviceToken;
 import com.vmarket.notification.domain.Notification;
 import com.vmarket.notification.dto.NotificationResponse;
@@ -89,6 +90,7 @@ public class NotificationCenterService {
 		mongo.upsert(
 				Query.query(Criteria.where("token").is(token)),
 				new Update().set("userId", userId).set("platform", platform).set("updatedAt", now)
+						.setOnInsert("_id", UlidCreator.getMonotonicUlid().toString())
 						.setOnInsert("createdAt", now),
 				DeviceToken.class);
 	}

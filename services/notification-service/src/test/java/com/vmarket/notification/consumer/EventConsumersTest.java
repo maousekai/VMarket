@@ -41,7 +41,14 @@ import com.vmarket.notification.service.RecipientResolver;
 /** Định tuyến sự kiện → đúng người nhận, đúng loại thông báo. */
 class EventConsumersTest {
 
-	private final NotificationDispatcher dispatcher = mock(NotificationDispatcher.class);
+	private final NotificationDispatcher dispatcher = dispatcherMock();
+
+	/** deliverAll chạy thật (gọi deliver trên mock) để verify từng người nhận. */
+	private static NotificationDispatcher dispatcherMock() {
+		NotificationDispatcher mock = mock(NotificationDispatcher.class);
+		org.mockito.Mockito.doCallRealMethod().when(mock).deliverAll(any(), any());
+		return mock;
+	}
 	private final InternalClients clients = mock(InternalClients.class);
 	private final ShopOwnerRepository shopOwners = mock(ShopOwnerRepository.class);
 	private final RecipientResolver recipients = new RecipientResolver(clients, shopOwners, Clock.systemUTC());
@@ -175,6 +182,38 @@ class EventConsumersTest {
 		recipients.rememberShopOwner("shop-9", "owner-old", "Cũ", envelope);
 
 		verify(shopOwners, never()).save(any());
+	}
+
+	@Test
+	void unknownShopOwnerIsFetchedFromShopServiceAndCached() {
+		order("COD");
+		when(clients.shopOwner("shop-unknown"))
+				.thenReturn(Optional.of(new com.vmarket.notification.client.ShopOwnerInfo("shop-unknown", "seller-2", "Mới")));
+
+		new OrderPlacedConsumer(dispatcher, templates, recipients).handle(new OrderPlaced("o1", List.of()), envelope);
+
+		verify(dispatcher).deliver(eq("seller-2"), argThat(type(NotificationType.NEW_ORDER)), eq(envelope));
+		ArgumentCaptor<ShopOwner> cached = ArgumentCaptor.forClass(ShopOwner.class);
+		verify(shopOwners).save(cached.capture());
+		assertThat(cached.getValue().getShopId()).isEqualTo("shop-unknown");
+		assertThat(cached.getValue().getOwnerId()).isEqualTo("seller-2");
+		// eventTimestamp 0: sự kiện ShopApproved/Suspended sau này luôn ghi đè cache.
+		assertThat(cached.getValue().getEventTimestamp()).isZero();
+		// shop-1 đã có trong bản chiếu nên không gọi shop-service.
+		verify(clients, never()).shopOwner("shop-1");
+	}
+
+	@Test
+	void buyerEmailFailureDoesNotBlockSeller() {
+		order("PAYOS");
+		org.mockito.Mockito.doThrow(new IllegalStateException("Brevo down")).when(dispatcher)
+				.deliver(eq("buyer-1"), any(), any());
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> new PaymentSucceededConsumer(dispatcher, templates,
+				recipients).handle(new PaymentSucceeded("o1"), envelope)).hasMessage("Brevo down");
+
+		// Seller vẫn được xử lý; lỗi buyer ném ra SAU cùng để event bus retry.
+		verify(dispatcher).deliver(eq("seller-1"), argThat(type(NotificationType.NEW_ORDER)), eq(envelope));
 	}
 
 	@Test

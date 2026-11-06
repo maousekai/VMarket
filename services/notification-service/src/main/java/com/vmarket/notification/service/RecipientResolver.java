@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import com.vmarket.events.EventEnvelope;
 import com.vmarket.notification.client.InternalClients;
 import com.vmarket.notification.client.OrderSnapshot;
+import com.vmarket.notification.client.ShopOwnerInfo;
 import com.vmarket.notification.domain.ShopOwner;
 import com.vmarket.notification.repository.ShopOwnerRepository;
 
@@ -18,7 +19,11 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Tìm người nhận cho sự kiện chỉ mang {@code orderId} / {@code shopId}:
- * người mua lấy từ order-service, chủ gian hàng lấy từ bản chiếu {@link ShopOwner}.
+ * <ul>
+ *   <li>Người mua và gian hàng của đơn: order-service.</li>
+ *   <li>Chủ gian hàng: bản chiếu {@link ShopOwner}; chưa có (shop duyệt trước khi
+ *       Notification chạy) thì tra shop-service rồi lưu cache vào bản chiếu.</li>
+ * </ul>
  */
 @Slf4j
 @Service
@@ -43,19 +48,29 @@ public class RecipientResolver {
 		return order;
 	}
 
-	/** shopId → ownerId của các gian hàng trong đơn mà Notification đã biết chủ. */
+	/**
+	 * shopId → ownerId của các gian hàng trong đơn. Lỗi mạng khi tra shop-service được
+	 * ném ra để event bus retry; shop không tồn tại thì bỏ qua (có log).
+	 */
 	public Map<String, String> sellers(OrderSnapshot order) {
 		Map<String, String> result = new LinkedHashMap<>();
 		for (String shopId : order.shopIds()) {
-			Optional<ShopOwner> owner = shopOwners.findById(shopId);
-			if (owner.isPresent() && owner.get().getOwnerId() != null) {
-				result.put(shopId, owner.get().getOwnerId());
-			} else {
-				log.warn("Chưa biết chủ gian hàng {} (chưa nhận ShopApproved) — không báo Seller cho đơn {}",
-						shopId, order.id());
-			}
+			ownerOf(shopId).ifPresentOrElse(ownerId -> result.put(shopId, ownerId),
+					() -> log.warn("Không tìm thấy chủ gian hàng {} — không báo Seller cho đơn {}", shopId, order.id()));
 		}
 		return result;
+	}
+
+	private Optional<String> ownerOf(String shopId) {
+		Optional<ShopOwner> cached = shopOwners.findById(shopId);
+		if (cached.isPresent() && cached.get().getOwnerId() != null) {
+			return Optional.of(cached.get().getOwnerId());
+		}
+		Optional<ShopOwnerInfo> fetched = clients.shopOwner(shopId);
+		fetched.filter(info -> info.ownerId() != null).ifPresent(info ->
+				// eventTimestamp = 0: mọi sự kiện ShopApproved/ShopSuspended sau này đều ghi đè.
+				shopOwners.save(new ShopOwner(shopId, info.ownerId(), info.name(), 0L, Instant.now(clock))));
+		return fetched.map(ShopOwnerInfo::ownerId);
 	}
 
 	/** Cập nhật bản chiếu chủ gian hàng; bỏ qua sự kiện cũ hơn bản đang lưu. */

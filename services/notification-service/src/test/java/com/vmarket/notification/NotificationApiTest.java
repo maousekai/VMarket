@@ -77,6 +77,10 @@ class NotificationApiTest {
 				.andExpect(status().isUnauthorized());
 		mvc.perform(get("/api/notifications").header("X-User-Id", "u1"))
 				.andExpect(status().isUnauthorized());
+		String noExpiry = "Bearer " + Jwts.builder().subject("u1").issuer("auth-service")
+				.signWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8))).compact();
+		mvc.perform(get("/api/notifications").header("Authorization", noExpiry))
+				.andExpect(status().isUnauthorized());
 		verifyNoInteractions(service);
 	}
 

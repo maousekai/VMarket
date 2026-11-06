@@ -1,5 +1,8 @@
 package com.vmarket.notification.consumer;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 
 import com.vmarket.events.EventConsumer;
@@ -7,6 +10,7 @@ import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderStatusChanged;
 import com.vmarket.notification.service.NotificationDispatcher;
+import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
 
@@ -49,16 +53,17 @@ public class OrderStatusChangedConsumer implements EventConsumer<OrderStatusChan
 			return;
 		}
 		recipients.order(event.orderId()).ifPresent(order -> {
+			List<Delivery> deliveries = new ArrayList<>();
 			if (buyerMessage != null) {
-				dispatcher.deliver(order.userId(), buyerMessage, envelope);
+				deliveries.add(new Delivery(order.userId(), buyerMessage));
 			}
 			if (sellerRelevant) {
-				recipients.sellers(order).forEach((shopId, ownerId) -> dispatcher.deliver(ownerId,
+				recipients.sellers(order).forEach((shopId, ownerId) -> deliveries.add(new Delivery(ownerId,
 						"CANCELLED".equals(event.status())
 								? templates.sellerOrderCancelled(order.id(), shopId)
-								: templates.sellerOrderDelivered(order.id(), shopId),
-						envelope));
+								: templates.sellerOrderDelivered(order.id(), shopId))));
 			}
+			dispatcher.deliverAll(deliveries, envelope);
 		});
 	}
 }

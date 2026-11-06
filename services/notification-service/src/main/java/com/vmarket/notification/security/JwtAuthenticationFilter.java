@@ -67,6 +67,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 					.build()
 					.parseSignedClaims(token)
 					.getPayload();
+			// jjwt chỉ kiểm tra exp khi claim có mặt — token không có hạn bị từ chối.
+			if (claims.getExpiration() == null) {
+				log.debug("Access token thiếu claim exp — coi như chưa đăng nhập");
+				return;
+			}
 			String userId = claims.getSubject();
 			if (userId == null || userId.isBlank()) {
 				return;

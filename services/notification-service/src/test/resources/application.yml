@@ -19,4 +19,5 @@ app:
     internal-api-key: test-internal-key
     order-url: http://localhost:18086
     auth-url: http://localhost:18081
+    shop-url: http://localhost:18083
     frontend-url: http://localhost:5173

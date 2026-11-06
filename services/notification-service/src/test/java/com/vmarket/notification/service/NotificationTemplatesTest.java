@@ -71,7 +71,24 @@ class NotificationTemplatesTest {
 	@Test
 	void moneyFormatsVnd() {
 		assertThat(NotificationTemplates.money(new BigDecimal("0"))).isEqualTo("0 ₫");
-		assertThat(NotificationTemplates.money(null)).isEqualTo("0 ₫");
 		assertThat(NotificationTemplates.money(new BigDecimal("25000"))).isEqualTo("25.000 ₫");
+	}
+
+	@Test
+	void missingAmountIsOmittedInsteadOfZero() {
+		OrderSnapshot noAmount = new OrderSnapshot("o1", "buyer-1", "PENDING", null, "COD", List.of());
+
+		assertThat(templates.orderPlaced(noAmount).body()).doesNotContain("₫").startsWith("Đơn hàng o1 đã được đặt");
+		assertThat(templates.paymentSucceeded(noAmount).body()).startsWith("Thanh toán cho đơn hàng o1");
+	}
+
+	@Test
+	void paymentFailureCodesAreTranslatedAndUnknownCodesHidden() {
+		assertThat(templates.paymentFailed("o1", "EXPIRED").body()).endsWith(": phiên thanh toán đã hết hạn.");
+		assertThat(templates.paymentFailed("o1", "CANCELLED").body()).contains("giao dịch đã bị huỷ");
+		assertThat(templates.paymentFailed("o1", "RETRYABLE").body()).contains("thử lại sau");
+		assertThat(templates.paymentFailed("o1", "PAYOS_WEIRD_STATE").body())
+				.isEqualTo("Thanh toán cho đơn hàng o1 không thành công.");
+		assertThat(templates.paymentFailed("o1", null).body()).doesNotContain("null");
 	}
 }

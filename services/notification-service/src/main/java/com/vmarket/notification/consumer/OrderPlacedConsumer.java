@@ -1,5 +1,8 @@
 package com.vmarket.notification.consumer;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 
 import com.vmarket.events.EventConsumer;
@@ -7,6 +10,7 @@ import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderPlaced;
 import com.vmarket.notification.service.NotificationDispatcher;
+import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
 
@@ -41,11 +45,13 @@ public class OrderPlacedConsumer implements EventConsumer<OrderPlaced> {
 	@Override
 	public void handle(OrderPlaced event, EventEnvelope envelope) {
 		recipients.order(event.orderId()).ifPresent(order -> {
-			dispatcher.deliver(order.userId(), templates.orderPlaced(order), envelope);
+			List<Delivery> deliveries = new ArrayList<>();
+			deliveries.add(new Delivery(order.userId(), templates.orderPlaced(order)));
 			if (order.isCod()) {
 				recipients.sellers(order).forEach(
-						(shopId, ownerId) -> dispatcher.deliver(ownerId, templates.newOrder(order, shopId), envelope));
+						(shopId, ownerId) -> deliveries.add(new Delivery(ownerId, templates.newOrder(order, shopId))));
 			}
+			dispatcher.deliverAll(deliveries, envelope);
 		});
 	}
 }

@@ -15,8 +15,9 @@ import lombok.Setter;
 /**
  * Nhật ký email giao dịch (FR-NOTI-02) — collection {@code email_logs}.
  *
- * <p>Một bản ghi cho mỗi {@code dedupKey}: lần gửi lại sau lỗi cập nhật chính bản ghi
- * đó ({@code attempts}++), email đã {@code SENT} thì không gửi lần hai.
+ * <p>Một bản ghi cho mỗi {@code dedupKey} (unique). Bản ghi được tạo ở trạng thái
+ * {@code SENDING} TRƯỚC khi gọi provider để chỉ một tiến trình được gửi; lần gửi lại sau
+ * lỗi cập nhật chính bản ghi đó ({@code attempts}++). Xem {@code EmailService}.
  */
 @Document("email_logs")
 @Getter
@@ -27,9 +28,11 @@ import lombok.Setter;
 public class EmailLog {
 
 	public enum Status {
-		SENT, FAILED, SKIPPED
+		/** Đã có tiến trình giành quyền gửi, đang gọi provider. */
+		SENDING, SENT, FAILED, SKIPPED
 	}
 
+	/** ULID (quy ước khoá chính của dự án), sinh ở tầng ứng dụng. */
 	@Id
 	private String id;
 

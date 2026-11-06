@@ -1,5 +1,8 @@
 package com.vmarket.notification.consumer;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 
 import com.vmarket.events.EventConsumer;
@@ -7,6 +10,7 @@ import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.EventType;
 import com.vmarket.events.DeliveryAssigned;
 import com.vmarket.notification.service.NotificationDispatcher;
+import com.vmarket.notification.service.NotificationDispatcher.Delivery;
 import com.vmarket.notification.service.NotificationTemplates;
 import com.vmarket.notification.service.RecipientResolver;
 
@@ -41,8 +45,10 @@ public class DeliveryAssignedConsumer implements EventConsumer<DeliveryAssigned>
 
 	@Override
 	public void handle(DeliveryAssigned event, EventEnvelope envelope) {
-		dispatcher.deliver(event.shipperId(), templates.shipperAssigned(event.orderId(), event.assignmentId()), envelope);
+		List<Delivery> deliveries = new ArrayList<>();
+		deliveries.add(new Delivery(event.shipperId(), templates.shipperAssigned(event.orderId(), event.assignmentId())));
 		recipients.order(event.orderId()).ifPresent(order -> recipients.sellers(order).forEach((shopId,
-				ownerId) -> dispatcher.deliver(ownerId, templates.sellerDeliveryAssigned(order.id(), shopId), envelope)));
+				ownerId) -> deliveries.add(new Delivery(ownerId, templates.sellerDeliveryAssigned(order.id(), shopId)))));
+		dispatcher.deliverAll(deliveries, envelope);
 	}
 }

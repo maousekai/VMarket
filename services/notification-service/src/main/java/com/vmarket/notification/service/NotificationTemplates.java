@@ -31,10 +31,10 @@ public class NotificationTemplates {
 
 	public NotificationMessage orderPlaced(OrderSnapshot order) {
 		String link = orderLink(order.id());
-		String amount = money(order.totalAmount());
+		String amount = order.totalAmount() == null ? "" : " (" + money(order.totalAmount()) + ")";
 		String body = order.isCod()
-				? "Đơn hàng " + order.id() + " (" + amount + ") đã được đặt thành công. Bạn sẽ thanh toán khi nhận hàng."
-				: "Đơn hàng " + order.id() + " (" + amount + ") đã được tạo. Vui lòng hoàn tất thanh toán để người bán xử lý đơn.";
+				? "Đơn hàng " + order.id() + amount + " đã được đặt thành công. Bạn sẽ thanh toán khi nhận hàng."
+				: "Đơn hàng " + order.id() + amount + " đã được tạo. Vui lòng hoàn tất thanh toán để người bán xử lý đơn.";
 		return new NotificationMessage(NotificationType.ORDER_PLACED, "Đặt hàng thành công", body, link,
 				Map.of("orderId", order.id()), true,
 				email("Xác nhận đặt hàng #" + order.id(), "Cảm ơn bạn đã đặt hàng tại VMarket", body, link,
@@ -43,7 +43,8 @@ public class NotificationTemplates {
 
 	public NotificationMessage paymentSucceeded(OrderSnapshot order) {
 		String link = orderLink(order.id());
-		String body = "Thanh toán " + money(order.totalAmount()) + " cho đơn hàng " + order.id()
+		String amount = order.totalAmount() == null ? "" : " " + money(order.totalAmount());
+		String body = "Thanh toán" + amount + " cho đơn hàng " + order.id()
 				+ " thành công. Người bán sẽ sớm xác nhận đơn.";
 		return new NotificationMessage(NotificationType.PAYMENT_SUCCEEDED, "Thanh toán thành công", body, link,
 				Map.of("orderId", order.id()), true,
@@ -52,8 +53,9 @@ public class NotificationTemplates {
 	}
 
 	public NotificationMessage paymentFailed(String orderId, String reason) {
+		String explanation = paymentFailureReason(reason);
 		String body = "Thanh toán cho đơn hàng " + orderId + " không thành công"
-				+ (reason == null || reason.isBlank() ? "." : " (" + reason + ").");
+				+ (explanation == null ? "." : ": " + explanation + ".");
 		return new NotificationMessage(NotificationType.PAYMENT_FAILED, "Thanh toán không thành công", body,
 				orderLink(orderId), Map.of("orderId", orderId), true, null);
 	}
@@ -178,10 +180,27 @@ public class NotificationTemplates {
 		};
 	}
 
-	static String money(BigDecimal amount) {
-		if (amount == null) {
-			return "0 ₫";
+	/**
+	 * Mã lý do từ payment-service ({@code PaymentFailed.reason}) → câu cho người mua.
+	 * Mã lạ trả {@code null} để không lộ mã kỹ thuật.
+	 */
+	static String paymentFailureReason(String reason) {
+		if (reason == null) {
+			return null;
 		}
+		return switch (reason) {
+			case "EXPIRED" -> "phiên thanh toán đã hết hạn";
+			case "CANCELLED" -> "giao dịch đã bị huỷ";
+			case "RETRYABLE" -> "cổng thanh toán đang gặp sự cố, vui lòng thử lại sau";
+			default -> null;
+		};
+	}
+
+	/**
+	 * Số tiền VND (order-service trả {@code BigDecimal} VND, chưa có trường currency nên ký
+	 * hiệu ₫ đang cố định). Người gọi bỏ phần số tiền khỏi câu khi {@code amount == null}.
+	 */
+	static String money(BigDecimal amount) {
 		DecimalFormat format = new DecimalFormat("#,##0", DecimalFormatSymbols.getInstance(Locale.forLanguageTag("vi-VN")));
 		return format.format(amount) + " ₫";
 	}

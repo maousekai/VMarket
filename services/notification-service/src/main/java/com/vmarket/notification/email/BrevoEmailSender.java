@@ -1,5 +1,6 @@
 package com.vmarket.notification.email;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -11,6 +12,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import com.vmarket.notification.client.InternalClients;
 import com.vmarket.notification.config.NotificationProperties;
 
 /**
@@ -32,6 +34,8 @@ public class BrevoEmailSender implements EmailSender {
 			throw new IllegalStateException("app.notification.email.provider=brevo nhưng thiếu BREVO_API_KEY");
 		}
 		this.restClient = builder.clone()
+				// Không có timeout thì một request treo giữ listener thread của event bus mãi.
+				.requestFactory(InternalClients.timeouts(Duration.ofSeconds(3), Duration.ofSeconds(10)))
 				.baseUrl(SEND_URL)
 				.defaultHeader("api-key", apiKey)
 				.defaultHeader("accept", MediaType.APPLICATION_JSON_VALUE)

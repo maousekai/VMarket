@@ -33,6 +33,7 @@ import lombok.Setter;
 @AllArgsConstructor
 public class Notification {
 
+	/** ULID (quy ước khoá chính của dự án), sinh ở tầng ứng dụng. */
 	@Id
 	private String id;
 

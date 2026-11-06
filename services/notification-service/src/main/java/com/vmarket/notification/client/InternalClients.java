@@ -12,7 +12,8 @@ import org.springframework.web.client.RestClient;
 import com.vmarket.notification.config.NotificationProperties;
 
 /**
- * Gọi API nội bộ (khoá {@code X-Internal-Api-Key}) của order-service và auth-service.
+ * Gọi API nội bộ (khoá {@code X-Internal-Api-Key}) của order-service, auth-service và
+ * shop-service.
  *
  * <p>404 → {@link Optional#empty()} (dữ liệu không tồn tại, thử lại cũng vô ích); lỗi
  * mạng / 5xx được ném ra để event bus retry rồi đưa vào DLQ.
@@ -24,43 +25,46 @@ public class InternalClients {
 
 	private final RestClient order;
 	private final RestClient auth;
+	private final RestClient shop;
 
 	public InternalClients(NotificationProperties properties, RestClient.Builder builder) {
+		this.order = client(builder, properties.getOrderUrl(), properties.getInternalApiKey());
+		this.auth = client(builder, properties.getAuthUrl(), properties.getInternalApiKey());
+		this.shop = client(builder, properties.getShopUrl(), properties.getInternalApiKey());
+	}
+
+	/** Timeout ngắn để một service treo không giữ listener thread của event bus. */
+	public static SimpleClientHttpRequestFactory timeouts(Duration connect, Duration read) {
 		SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-		factory.setConnectTimeout(Duration.ofSeconds(2));
-		factory.setReadTimeout(Duration.ofSeconds(5));
-		this.order = builder.clone()
-				.requestFactory(factory)
-				.baseUrl(properties.getOrderUrl())
-				.defaultHeader(KEY_HEADER, properties.getInternalApiKey())
-				.build();
-		this.auth = builder.clone()
-				.requestFactory(factory)
-				.baseUrl(properties.getAuthUrl())
-				.defaultHeader(KEY_HEADER, properties.getInternalApiKey())
+		factory.setConnectTimeout(connect);
+		factory.setReadTimeout(read);
+		return factory;
+	}
+
+	private static RestClient client(RestClient.Builder builder, String baseUrl, String key) {
+		return builder.clone()
+				.requestFactory(timeouts(Duration.ofSeconds(2), Duration.ofSeconds(5)))
+				.baseUrl(baseUrl)
+				.defaultHeader(KEY_HEADER, key)
 				.build();
 	}
 
+	/** Snapshot đơn qua endpoint đọc KHÔNG khoá dòng của order-service. */
 	public Optional<OrderSnapshot> order(String orderId) {
-		try {
-			return Optional.ofNullable(order.get()
-					.uri("/internal/delivery/orders/{id}", orderId)
-					.retrieve()
-					.body(OrderSnapshot.class));
-		} catch (HttpClientErrorException ex) {
-			if (ex.getStatusCode() == HttpStatus.NOT_FOUND) {
-				return Optional.empty();
-			}
-			throw ex;
-		}
+		return get(order, "/internal/notification/orders/{id}", orderId, OrderSnapshot.class);
 	}
 
 	public Optional<UserContact> contact(String userId) {
+		return get(auth, "/internal/users/{id}/contact", userId, UserContact.class);
+	}
+
+	public Optional<ShopOwnerInfo> shopOwner(String shopId) {
+		return get(shop, "/internal/shops/{id}/owner", shopId, ShopOwnerInfo.class);
+	}
+
+	private static <T> Optional<T> get(RestClient client, String uri, String id, Class<T> type) {
 		try {
-			return Optional.ofNullable(auth.get()
-					.uri("/internal/users/{id}/contact", userId)
-					.retrieve()
-					.body(UserContact.class));
+			return Optional.ofNullable(client.get().uri(uri, id).retrieve().body(type));
 		} catch (HttpClientErrorException ex) {
 			if (ex.getStatusCode() == HttpStatus.NOT_FOUND) {
 				return Optional.empty();
