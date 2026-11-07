@@ -17,6 +17,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -34,7 +35,13 @@ import lombok.Setter;
  * product-service — SRS mục 5 quy định database-per-service.
  */
 @Entity
-@Table(name = "orders")
+@Table(
+		name = "orders",
+		uniqueConstraints = {
+			@UniqueConstraint(
+					name = "idx_orders_user_idempotency",
+					columnNames = {"user_id", "idempotency_key"})
+		})
 @Getter
 @Setter
 @NoArgsConstructor
