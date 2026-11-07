@@ -327,4 +327,146 @@ class OrderReturnApiTest {
 		OrderReturn resolved = returnRepository.findById(returnId).orElseThrow();
 		assertThat(resolved.getStatus()).isEqualTo(ReturnStatus.RESOLVED);
 	}
+
+	@Test
+	void sellerCannotConfirmReceiptWhenDisputed() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String body = """
+				{
+				  "reason": "Hàng lỗi",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isCreated());
+
+		String returnId = returnRepository.findAll().get(0).getId();
+
+		// Seller từ chối -> REJECTED
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/reject")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.param("shopId", SHOP_ID)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Không phải lỗi do shop\"}"))
+				.andExpect(status().isOk());
+
+		// Buyer khiếu nại -> DISPUTED
+		mockMvc.perform(post("/api/orders/returns/" + returnId + "/dispute")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Đã kiểm tra kỹ video mở hộp\"}"))
+				.andExpect(status().isOk());
+
+		// Seller cố tình xác nhận nhận hàng khi đang DISPUTED -> bị chặn 409 INVALID_RETURN_STATUS
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/confirm-receipt")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.param("shopId", SHOP_ID))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("INVALID_RETURN_STATUS"));
+	}
+
+	@Test
+	void adminCannotResolveWhenPending() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String body = """
+				{
+				  "reason": "Hàng lỗi",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isCreated());
+
+		String returnId = returnRepository.findAll().get(0).getId();
+
+		// Admin cố phân xử khi yêu cầu vẫn đang PENDING (chưa DISPUTED) -> bị chặn 409
+		mockMvc.perform(post("/api/orders/admin/returns/" + returnId + "/resolve")
+				.header(HttpHeaders.AUTHORIZATION, adminToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"approved\":true,\"restock\":true,\"note\":\"Admin can thiệp sớm\"}"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("INVALID_RETURN_STATUS"));
+	}
+
+	@Test
+	void buyerCannotCompleteOrderWhenActiveReturnExists() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String body = """
+				{
+				  "reason": "Hàng không ưng ý",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isCreated());
+
+		// Buyer cố hoàn tất đơn khi Return đang PENDING -> bị chặn 409 ORDER_HAS_ACTIVE_RETURN
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/complete")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("ORDER_HAS_ACTIVE_RETURN"));
+	}
+
+	@Test
+	void concurrentReturnCreation_isSerializedAndItemOnlyReturnedOnce() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String body = """
+				{
+				  "reason": "Hàng bị rách",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		int threads = 2;
+		java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+		java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(threads);
+		java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+		java.util.List<Integer> statuses = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+		for (int i = 0; i < threads; i++) {
+			executor.submit(() -> {
+				ready.countDown();
+				try {
+					start.await();
+					var res = mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+							.header(HttpHeaders.AUTHORIZATION, buyerToken())
+							.contentType(MediaType.APPLICATION_JSON)
+							.content(body))
+							.andReturn();
+					statuses.add(res.getResponse().getStatus());
+				} catch (Exception e) {
+					// ignore
+				}
+			});
+		}
+
+		ready.await();
+		start.countDown();
+		executor.shutdown();
+		executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
+
+		// Đúng 1 request thành công (201 Created), request còn lại bị xung đột (409 Conflict)
+		assertThat(statuses).containsExactlyInAnyOrder(201, 409);
+		assertThat(returnRepository.findByOrderId(order.getId())).hasSize(1);
+	}
 }

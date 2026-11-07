@@ -51,11 +51,11 @@ class FlywayMigrationTest {
 		try (Connection c = dataSource.getConnection()) {
 			for (String column : new String[] { "user_id", "status", "recipient_name", "phone",
 					"province", "district", "ward", "street_address", "note", "total_amount",
-					"created_at", "updated_at", "idempotency_key" }) {
+					"created_at", "updated_at", "idempotency_key", "delivered_at" }) {
 				assertThat(columnExists(c, "orders", column)).as("orders.%s", column).isTrue();
 			}
 			for (String column : new String[] { "order_id", "product_id", "variant_id", "shop_id",
-					"quantity", "unit_price", "line_total" }) {
+					"quantity", "unit_price", "line_total", "confirmed" }) {
 				assertThat(columnExists(c, "order_items", column))
 						.as("order_items.%s", column).isTrue();
 			}

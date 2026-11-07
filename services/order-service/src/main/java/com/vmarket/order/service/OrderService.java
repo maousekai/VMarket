@@ -15,8 +15,10 @@ import com.vmarket.order.dto.PlaceOrderRequest;
 import com.vmarket.order.entity.Order;
 import com.vmarket.order.entity.OrderItem;
 import com.vmarket.order.entity.OrderStatus;
+import com.vmarket.order.entity.ReturnStatus;
 import com.vmarket.order.exception.ApiException;
 import com.vmarket.order.repository.OrderRepository;
+import com.vmarket.order.repository.OrderReturnRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +65,7 @@ public class OrderService {
     private final OrderPaymentProperties paymentTiming;
 
     private final OrderRepository orderRepository;
+    private final OrderReturnRepository returnRepository;
     private final UserServiceClient userServiceClient;
     private final CartServiceClient cartServiceClient;
     private final com.vmarket.order.event.Outbox outbox;
@@ -299,6 +302,16 @@ public class OrderService {
                     "ORDER_NOT_COMPLETABLE",
                     "Chỉ có thể hoàn tất đơn khi đã nhận hàng (DELIVERED). Trạng thái hiện tại: "
                             + order.getStatus());
+        }
+        if (returnRepository.existsByOrderIdAndStatusIn(
+                orderId,
+                List.of(
+                        ReturnStatus.PENDING,
+                        ReturnStatus.APPROVED,
+                        ReturnStatus.DISPUTED))) {
+            throw ApiException.conflict(
+                    "ORDER_HAS_ACTIVE_RETURN",
+                    "Đơn hàng đang có yêu cầu trả hàng chưa giải quyết, không thể hoàn tất đơn.");
         }
         order.setStatus(OrderStatus.COMPLETED);
         outbox.add(

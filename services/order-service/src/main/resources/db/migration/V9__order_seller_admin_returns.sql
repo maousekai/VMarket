@@ -39,3 +39,7 @@ CREATE INDEX idx_order_return_items_return_id ON order_return_items (return_id);
 CREATE INDEX idx_order_items_shop_id ON order_items (shop_id);
 CREATE INDEX idx_orders_status_updated ON orders (status, updated_at);
 
+ALTER TABLE orders ADD COLUMN delivered_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE order_items ADD COLUMN confirmed BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX idx_orders_status_delivered ON orders (status, delivered_at);
+

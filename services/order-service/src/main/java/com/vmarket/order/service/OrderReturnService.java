@@ -3,6 +3,7 @@ package com.vmarket.order.service;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +59,9 @@ public class OrderReturnService {
 	 */
 	@Transactional
 	public ReturnResponse createReturn(String userId, String orderId, CreateReturnRequest request) {
-		Order order = orderRepository.findByIdAndUserId(orderId, userId)
+		// Khóa đơn hàng với pessimistic lock để chống race condition khi tạo yêu cầu trả hàng đồng thời
+		Order order = orderRepository.lock(orderId)
+				.filter(o -> userId.equals(o.getUserId()))
 				.orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
 
 		if (order.getStatus() != OrderStatus.DELIVERED) {
@@ -67,8 +70,8 @@ public class OrderReturnService {
 							+ order.getStatus());
 		}
 
-		long daysSinceDelivered = Duration.between(order.getUpdatedAt(), clock.instant()).toDays();
-		if (daysSinceDelivered > 7) {
+		Instant deliveredAt = order.getDeliveredAt() != null ? order.getDeliveredAt() : order.getUpdatedAt();
+		if (clock.instant().isAfter(deliveredAt.plus(Duration.ofDays(7)))) {
 			throw ApiException.conflict("RETURN_WINDOW_EXPIRED",
 					"Đã quá thời hạn 7 ngày kể từ khi nhận hàng để tạo yêu cầu trả hàng");
 		}
@@ -271,9 +274,9 @@ public class OrderReturnService {
 		if (!targetShopId.equals(r.getShopId())) {
 			throw ApiException.forbidden("FORBIDDEN", "Yêu cầu không thuộc gian hàng của bạn");
 		}
-		if (r.getStatus() != ReturnStatus.APPROVED && r.getStatus() != ReturnStatus.DISPUTED) {
+		if (r.getStatus() != ReturnStatus.APPROVED) {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
-					"Chỉ có thể xác nhận nhận hàng khi yêu cầu đã được duyệt (APPROVED/DISPUTED). Trạng thái hiện tại: " + r.getStatus());
+					"Chỉ có thể xác nhận nhận hàng khi yêu cầu đã được người bán chấp thuận (APPROVED). Trạng thái hiện tại: " + r.getStatus());
 		}
 
 		r.setStatus(ReturnStatus.RESOLVED);
@@ -310,9 +313,9 @@ public class OrderReturnService {
 		OrderReturn r = returnRepository.lock(returnId)
 				.orElseThrow(() -> ApiException.notFound("RETURN_NOT_FOUND", "Không tìm thấy yêu cầu trả hàng"));
 
-		if (r.getStatus() != ReturnStatus.DISPUTED && r.getStatus() != ReturnStatus.PENDING) {
+		if (r.getStatus() != ReturnStatus.DISPUTED) {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
-					"Chỉ có thể phân xử yêu cầu ở trạng thái DISPUTED hoặc PENDING. Trạng thái hiện tại: " + r.getStatus());
+					"Chỉ có thể phân xử yêu cầu ở trạng thái DISPUTED (khiếu nại). Trạng thái hiện tại: " + r.getStatus());
 		}
 
 		if (request.approved()) {

@@ -164,6 +164,87 @@ class SellerOrderApiTest {
 	}
 
 	@Test
+	void sellerAccessOtherShop_returnsForbidden() throws Exception {
+		// Token thuộc SHOP_1 nhưng client truyền param shopId=SHOP_2 (tấn công IDOR)
+		mockMvc.perform(get("/api/orders/seller")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.param("shopId", SHOP_2))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.error.code").value("FORBIDDEN_SHOP_ACCESS"));
+	}
+
+	@Test
+	void multiShopOrder_eachShopConfirms_transitionsToProcessingWhenAllConfirmed() throws Exception {
+		// Tạo đơn hàng gồm 2 item từ SHOP_1 và SHOP_2
+		Order order = new Order();
+		order.setUserId(OTHER_USER);
+		order.setStatus(OrderStatus.PENDING);
+		order.setPaymentMethod("COD");
+		order.setRecipientName("Người mua");
+		order.setPhone("0987654321");
+		order.setProvince("Đà Nẵng");
+		order.setDistrict("Hải Châu");
+		order.setWard("Thạch Thang");
+		order.setStreetAddress("123 Lê Duẩn");
+		order.setTotalAmount(new BigDecimal("300000.00"));
+
+		OrderItem item1 = new OrderItem();
+		item1.setOrder(order);
+		item1.setProductId("01JBQ9PROD0000000000000001");
+		item1.setShopId(SHOP_1);
+		item1.setQuantity(1);
+		item1.setUnitPrice(new BigDecimal("100000.00"));
+		item1.setLineTotal(new BigDecimal("100000.00"));
+		order.getItems().add(item1);
+
+		OrderItem item2 = new OrderItem();
+		item2.setOrder(order);
+		item2.setProductId("01JBQ9PROD0000000000000002");
+		item2.setShopId(SHOP_2);
+		item2.setQuantity(1);
+		item2.setUnitPrice(new BigDecimal("200000.00"));
+		item2.setLineTotal(new BigDecimal("200000.00"));
+		order.getItems().add(item2);
+
+		order = orderRepository.save(order);
+
+		// 1. Seller 1 (SHOP_1) xác nhận đơn -> mặt hàng của SHOP_1 được confirmed, đơn vẫn PENDING vì SHOP_2 chưa xác nhận
+		mockMvc.perform(post("/api/orders/seller/" + order.getId() + "/confirm")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.param("shopId", SHOP_1))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("PENDING"))
+				.andExpect(jsonPath("$.shopConfirmed").value(true));
+
+		Order check1 = orderRepository.findById(order.getId()).orElseThrow();
+		assertThat(check1.getStatus()).isEqualTo(OrderStatus.PENDING);
+
+		// Seller 1 cố tình xác nhận lần 2 -> bị chặn 409 SHOP_ALREADY_CONFIRMED
+		mockMvc.perform(post("/api/orders/seller/" + order.getId() + "/confirm")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.param("shopId", SHOP_1))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("SHOP_ALREADY_CONFIRMED"));
+
+		// 2. Đổi mock shopServiceClient sang SHOP_2 cho Seller 2
+		String seller2Token = TestTokens.bearer(TestTokens.accessToken(SECRET, "01JBQ9SELLER00000000000002", List.of("SELLER")));
+		when(shopServiceClient.getMyShop(seller2Token))
+				.thenReturn(new ShopServiceClient.ShopView(SHOP_2, "01JBQ9SELLER00000000000002", "Cửa hàng B", "APPROVED"));
+
+		// Seller 2 (SHOP_2) xác nhận đơn -> tất cả mặt hàng đã confirmed -> đơn chuyển thành PROCESSING
+		mockMvc.perform(post("/api/orders/seller/" + order.getId() + "/confirm")
+				.header(HttpHeaders.AUTHORIZATION, seller2Token)
+				.param("shopId", SHOP_2))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("PROCESSING"))
+				.andExpect(jsonPath("$.shopConfirmed").value(true));
+
+		Order check2 = orderRepository.findById(order.getId()).orElseThrow();
+		assertThat(check2.getStatus()).isEqualTo(OrderStatus.PROCESSING);
+		assertThat(outboxRepository.count()).isEqualTo(1);
+	}
+
+	@Test
 	void buyerCallingSellerEndpoint_returnsForbidden() throws Exception {
 		mockMvc.perform(get("/api/orders/seller")
 				.header(HttpHeaders.AUTHORIZATION, buyerToken()))

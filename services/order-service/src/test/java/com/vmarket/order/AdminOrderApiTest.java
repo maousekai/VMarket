@@ -121,6 +121,20 @@ class AdminOrderApiTest {
 	}
 
 	@Test
+	void adminListOrders_filtersByBothUserIdAndStatus() throws Exception {
+		createTestOrder(OrderStatus.PENDING);
+		createTestOrder(OrderStatus.PROCESSING);
+
+		mockMvc.perform(get("/api/orders/admin")
+				.header(HttpHeaders.AUTHORIZATION, adminToken())
+				.param("userId", BUYER_USER)
+				.param("status", "PROCESSING"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.content.length()").value(1))
+				.andExpect(jsonPath("$.content[0].status").value("PROCESSING"));
+	}
+
+	@Test
 	void adminGetOrder_returnsDetail() throws Exception {
 		Order order = createTestOrder(OrderStatus.SHIPPED);
 

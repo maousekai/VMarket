@@ -17,6 +17,7 @@ public record SellerOrderResponse(
 		String streetAddress,
 		String note,
 		BigDecimal shopTotalAmount,
+		boolean shopConfirmed,
 		Instant createdAt,
 		Instant updatedAt,
 		String paymentMethod,
@@ -30,6 +31,7 @@ public record SellerOrderResponse(
 		BigDecimal shopTotal = shopItems.stream()
 				.map(SellerOrderItemResponse::lineTotal)
 				.reduce(BigDecimal.ZERO, BigDecimal::add);
+		boolean shopConfirmed = !shopItems.isEmpty() && shopItems.stream().allMatch(SellerOrderItemResponse::confirmed);
 
 		return new SellerOrderResponse(
 				order.getId(),
@@ -42,6 +44,7 @@ public record SellerOrderResponse(
 				order.getStreetAddress(),
 				order.getNote(),
 				shopTotal,
+				shopConfirmed,
 				order.getCreatedAt(),
 				order.getUpdatedAt(),
 				order.getPaymentMethod(),

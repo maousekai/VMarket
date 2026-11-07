@@ -34,7 +34,9 @@ public class AdminOrderService {
 		Pageable pageable = PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 100));
 		Page<Order> orders;
 
-		if (userId != null && !userId.isBlank()) {
+		if (userId != null && !userId.isBlank() && status != null) {
+			orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId.trim(), status, pageable);
+		} else if (userId != null && !userId.isBlank()) {
 			orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId.trim(), pageable);
 		} else if (status != null) {
 			orders = orderRepository.findByStatusOrderByCreatedAtDesc(status, pageable);

@@ -44,8 +44,12 @@ public class OrderCompletionJob {
 	@Scheduled(fixedDelayString = "${app.order.completion-delay:60000}")
 	public void run() {
 		Instant cutoff = clock.instant().minus(RETURN_WINDOW);
-		List<Order> deliveredOrders = orderRepository.findByStatusAndUpdatedAtLessThanEqual(
+		List<Order> deliveredOrders = orderRepository.findByStatusAndDeliveredAtLessThanEqual(
 				OrderStatus.DELIVERED, cutoff);
+		if (deliveredOrders.isEmpty()) {
+			deliveredOrders = orderRepository.findByStatusAndUpdatedAtLessThanEqual(
+					OrderStatus.DELIVERED, cutoff);
+		}
 
 		for (Order order : deliveredOrders) {
 			try {

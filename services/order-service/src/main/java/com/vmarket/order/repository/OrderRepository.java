@@ -60,6 +60,10 @@ public interface OrderRepository extends JpaRepository<Order, String> {
 
 	Page<Order> findByUserIdOrderByCreatedAtDesc(String userId, Pageable pageable);
 
+	Page<Order> findByUserIdAndStatusOrderByCreatedAtDesc(String userId, OrderStatus status, Pageable pageable);
+
 	// --- [Tự động hoàn tất đơn] FR-ORD-02 ---
 	List<Order> findByStatusAndUpdatedAtLessThanEqual(OrderStatus status, Instant cutoff);
+
+	List<Order> findByStatusAndDeliveredAtLessThanEqual(OrderStatus status, Instant cutoff);
 }

@@ -1,10 +1,5 @@
 package com.vmarket.order.client;
 
-import java.net.ConnectException;
-import java.net.NoRouteToHostException;
-import java.net.UnknownHostException;
-import java.net.http.HttpConnectTimeoutException;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.web.client.ResourceAccessException;

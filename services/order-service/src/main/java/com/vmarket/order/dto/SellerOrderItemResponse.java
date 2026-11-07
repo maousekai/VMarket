@@ -10,7 +10,8 @@ public record SellerOrderItemResponse(
 		String variantId,
 		int quantity,
 		BigDecimal unitPrice,
-		BigDecimal lineTotal) {
+		BigDecimal lineTotal,
+		boolean confirmed) {
 
 	public static SellerOrderItemResponse from(OrderItem item) {
 		return new SellerOrderItemResponse(
@@ -19,6 +20,7 @@ public record SellerOrderItemResponse(
 				item.getVariantId(),
 				item.getQuantity(),
 				item.getUnitPrice(),
-				item.getLineTotal());
+				item.getLineTotal(),
+				item.isConfirmed());
 	}
 }
