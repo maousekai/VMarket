@@ -14,17 +14,19 @@ import java.util.Locale;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.ImageOutputStream;
 
 /**
  * Kiểm tra và chuẩn hoá ảnh upload.
  *
  * <p>Không bao giờ lưu nguyên byte người dùng gửi lên: mọi ảnh được giải mã rồi mã hoá
- * lại, nhờ vậy EXIF/GPS bị loại bỏ và kích thước tối đa do server quyết định. Header
- * được kiểm tra trước khi gọi {@link ImageIO} để chặn sớm SVG/GIF và các định dạng
- * không nằm trong danh sách cho phép.
+ * lại, nhờ vậy EXIF/GPS bị loại bỏ và kích thước tối đa do server quyết định. Định
+ * dạng được nhận diện từ magic byte để chặn sớm SVG/GIF và chọn đúng
+ * {@link ImageReader}; kích thước được đọc từ header trước khi giải mã toàn bộ ảnh.
  */
 public class ImageProcessor {
 
@@ -54,31 +56,69 @@ public class ImageProcessor {
 					"Không hỗ trợ ảnh động. Vui lòng chọn ảnh tĩnh JPEG, PNG hoặc WebP");
 		}
 
-		BufferedImage image = read(input);
-		long pixels = (long) image.getWidth() * image.getHeight();
-		if (pixels > ImageKind.maxPixels()) {
-			throw new MediaException(MediaException.Reason.IMAGE_TOO_LARGE,
-					"Ảnh quá lớn về kích thước. Vui lòng chọn ảnh dưới "
-							+ (ImageKind.maxPixels() / 1_000_000) + " megapixel");
-		}
+		BufferedImage image = read(input, format);
 
 		return kind.square() ? square(image, kind) : cover(image, kind);
 	}
 
-	private BufferedImage read(byte[] input) {
-		try {
-			BufferedImage image = ImageIO.read(new ByteArrayInputStream(input));
-			if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
-				throw new MediaException(MediaException.Reason.INVALID_IMAGE,
-						"Không đọc được ảnh. Vui lòng chọn file JPEG, PNG hoặc WebP hợp lệ");
+	/**
+	 * Đọc kích thước từ header trước khi giải mã. Ảnh nén rất tốt (ví dụ PNG
+	 * 12.000×12.000 chỉ vài trăm KB) có thể làm cạn heap nếu gọi {@code read(0)}
+	 * trước khi kiểm tra giới hạn megapixel.
+	 */
+	private BufferedImage read(byte[] input, Format format) {
+		try (ImageInputStream stream = ImageIO.createImageInputStream(
+				new ByteArrayInputStream(input))) {
+			if (stream == null) {
+				throw invalidImage();
 			}
-			return image;
+
+			Iterator<ImageReader> readers = ImageIO.getImageReadersByFormatName(
+					format.name().toLowerCase(Locale.ROOT));
+			if (!readers.hasNext()) {
+				throw invalidImage();
+			}
+
+			ImageReader reader = readers.next();
+			try {
+				reader.setInput(stream, false, true);
+				int width = reader.getWidth(0);
+				int height = reader.getHeight(0);
+				if (width <= 0 || height <= 0) {
+					throw invalidImage();
+				}
+				if ((long) width * height > ImageKind.maxPixels()) {
+					throw imageTooLarge();
+				}
+
+				BufferedImage image = reader.read(0);
+				if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
+					throw invalidImage();
+				}
+				if ((long) image.getWidth() * image.getHeight() > ImageKind.maxPixels()) {
+					throw imageTooLarge();
+				}
+				return image;
+			} finally {
+				reader.dispose();
+			}
 		} catch (MediaException ex) {
 			throw ex;
 		} catch (IOException | RuntimeException ex) {
 			throw new MediaException(MediaException.Reason.INVALID_IMAGE,
 					"Không đọc được ảnh. Vui lòng chọn file JPEG, PNG hoặc WebP hợp lệ", ex);
 		}
+	}
+
+	private static MediaException invalidImage() {
+		return new MediaException(MediaException.Reason.INVALID_IMAGE,
+				"Không đọc được ảnh. Vui lòng chọn file JPEG, PNG hoặc WebP hợp lệ");
+	}
+
+	private static MediaException imageTooLarge() {
+		return new MediaException(MediaException.Reason.IMAGE_TOO_LARGE,
+				"Ảnh quá lớn về kích thước. Vui lòng chọn ảnh dưới "
+						+ (ImageKind.maxPixels() / 1_000_000) + " megapixel");
 	}
 
 	private ProcessedImage square(BufferedImage source, ImageKind kind) {

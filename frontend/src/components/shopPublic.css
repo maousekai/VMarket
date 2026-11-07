@@ -234,6 +234,20 @@
     background-position: -100% 0;
   }
 }
+.shop-public__more {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+.shop-public__more .account-notice {
+  width: 100%;
+  margin: 0;
+  text-align: center;
+}
+.shop-public__more-button {
+  min-width: 190px;
+}
 .shop-public__empty {
   display: grid;
   gap: 5px;

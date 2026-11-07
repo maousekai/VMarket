@@ -35,13 +35,15 @@ export default function AvatarDialog({ profile, saveProfile, onClose }) {
         avatarUrl: uploadedUrl || avatarUrl,
       })
     } catch (failure) {
+      const apiError = getApiError(failure)
       // The profile was not saved: remove the object we just uploaded so it does
       // not become an orphan. Never delete the URL already stored on the profile:
       // content-addressed keys mean re-uploading the same image returns that URL.
-      if (uploadedUrl && uploadedUrl !== (profile.avatarUrl || '')) {
+      // An unknown outcome (timeout / network / 5xx) may mean the save committed,
+      // so leave the object for the server-side reference guard to protect.
+      if (uploadedUrl && uploadedUrl !== (profile.avatarUrl || '') && !apiError.retryable) {
         deleteMyMedia(uploadedUrl).catch(() => {})
       }
-      const apiError = getApiError(failure)
       setFieldError(apiError.fieldErrors.avatarUrl || '')
       setError(apiError.message)
       setSaving(false)

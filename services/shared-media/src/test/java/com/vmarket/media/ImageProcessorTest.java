@@ -9,6 +9,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import javax.imageio.ImageIO;
@@ -57,6 +58,22 @@ class ImageProcessorTest {
 		assertThatThrownBy(() -> processor.process(new byte[0], ImageKind.AVATAR))
 				.isInstanceOfSatisfying(MediaException.class,
 						ex -> assertThat(ex.getReason()).isEqualTo(MediaException.Reason.FILE_REQUIRED));
+	}
+
+	@Test
+	void tuChoiAnhNenNhoVuotMegapixelTruocKhiGiaiMa() throws IOException {
+		byte[] compressed;
+		try (InputStream in = getClass().getResourceAsStream(
+				"/images/compressed-12000x12000.png")) {
+			assertThat(in).isNotNull();
+			compressed = in.readAllBytes();
+		}
+
+		// Chi ~140 KB nhưng giải mã sẽ cần 576 MB nếu đọc trước khi kiểm tra kích thước.
+		assertThat(compressed.length).isLessThan(200_000);
+		assertThatThrownBy(() -> processor.process(compressed, ImageKind.AVATAR))
+				.isInstanceOfSatisfying(MediaException.class,
+						ex -> assertThat(ex.getReason()).isEqualTo(MediaException.Reason.IMAGE_TOO_LARGE));
 	}
 
 	@Test

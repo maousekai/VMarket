@@ -228,6 +228,24 @@ describe('Change avatar dialog', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Không lưu được.')
   })
 
+  it('does not delete the uploaded avatar when the save outcome is unknown', async () => {
+    const uploaded = 'http://localhost:9000/vmarket-media/avatars/buyer-one/new.png'
+    uploadMyAvatar.mockResolvedValue({ url: uploaded })
+    renderPage(<ProfilePage />, {
+      saveProfile: vi.fn().mockRejectedValue({
+        code: 'ECONNABORTED',
+        message: 'timeout of 10000ms exceeded',
+      }),
+    })
+    openDialog()
+    await screen.findByRole('dialog')
+    chooseFile()
+    saveAvatar()
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Không thể kết nối máy chủ')
+    expect(deleteMyMedia).not.toHaveBeenCalled()
+  })
+
   it('does not delete the stored avatar when re-uploading the same image fails', async () => {
     uploadMyAvatar.mockResolvedValue({ url: profile.avatarUrl })
     renderPage(<ProfilePage />, {

@@ -13,7 +13,9 @@ import com.vmarket.media.MediaStorage;
 import com.vmarket.media.MediaUploadResponse;
 import com.vmarket.media.ProcessedImage;
 import com.vmarket.media.StoredMedia;
+import com.vmarket.user.entity.UserProfile;
 import com.vmarket.user.exception.ApiException;
+import com.vmarket.user.repository.UserProfileRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -30,6 +32,7 @@ public class UserMediaService {
 
 	private final ImageProcessor imageProcessor;
 	private final MediaStorage mediaStorage;
+	private final UserProfileRepository profileRepository;
 
 	public MediaUploadResponse uploadAvatar(String userId, MultipartFile file) {
 		if (file == null || file.isEmpty()) {
@@ -52,6 +55,11 @@ public class UserMediaService {
 	}
 
 	public void deleteMedia(String userId, String url) {
+		UserProfile profile = profileRepository.findByUserId(userId).orElse(null);
+		if (profile != null && url != null && url.equals(profile.getAvatarUrl())) {
+			throw ApiException.conflict("MEDIA_IN_USE",
+					"Ảnh đang được dùng làm ảnh đại diện của hồ sơ");
+		}
 		try {
 			mediaStorage.deleteByUrl(url, avatarPrefix(userId));
 		} catch (MediaException ex) {

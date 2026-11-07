@@ -77,6 +77,12 @@ export default function ShopForm({
   const [submitAttempt, setSubmitAttempt] = useState(0)
   const formRef = useRef(null)
   const feedbackRef = useRef(null)
+  // URL đã lưu trên hồ sơ lúc mở form. So sánh với baseline này (không phải URL
+  // đang gõ) để không dọn nhầm ảnh content-addressed vẫn đang được hồ sơ dùng.
+  const savedMediaRef = useRef({
+    logoUrl: initial?.logoUrl || '',
+    coverUrl: initial?.coverUrl || '',
+  })
   const hasFieldErrors = Object.values(fieldErrors).some(Boolean)
 
   // Submit happens at the bottom of a long form. Without this, a validation error
@@ -148,20 +154,25 @@ export default function ShopForm({
         const result = await uploadMyShopLogo(logoFile)
         // Content-addressed keys: re-uploading the current image returns the URL
         // that is already stored. That URL must never be removed by cleanup.
-        if (result.url !== body.logoUrl) uploadedUrls.push(result.url)
+        if (result.url !== savedMediaRef.current.logoUrl) uploadedUrls.push(result.url)
         body.logoUrl = result.url
       }
       if (coverFile) {
         setUploadStage('uploading')
         const result = await uploadMyShopCover(coverFile)
-        if (result.url !== body.coverUrl) uploadedUrls.push(result.url)
+        if (result.url !== savedMediaRef.current.coverUrl) uploadedUrls.push(result.url)
         body.coverUrl = result.url
       }
       setUploadStage('saving')
       await onSubmit(body)
     } catch (failure) {
-      if (uploadedUrls.length) discardUploaded(uploadedUrls, deleteMyShopMedia)
       const apiError = getApiError(failure)
+      // Chỉ dọn khi server từ chối rõ ràng (4xx) — timeout, mất mạng hoặc 5xx
+      // có thể xảy ra sau khi transaction đã commit, xoá tiếp sẽ làm hỏng ảnh
+      // đang dùng. Backend vẫn kiểm tra tham chiếu lần nữa.
+      if (uploadedUrls.length && !apiError.retryable) {
+        discardUploaded(uploadedUrls, deleteMyShopMedia)
+      }
       setFieldErrors(apiError.fieldErrors)
       setError(apiError.message)
       setSubmitAttempt((value) => value + 1)

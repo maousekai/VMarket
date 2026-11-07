@@ -13,7 +13,9 @@ import com.vmarket.media.MediaStorage;
 import com.vmarket.media.MediaUploadResponse;
 import com.vmarket.media.ProcessedImage;
 import com.vmarket.media.StoredMedia;
+import com.vmarket.shop.entity.Shop;
 import com.vmarket.shop.exception.ApiException;
+import com.vmarket.shop.repository.ShopRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,6 +33,7 @@ public class ShopMediaService {
 
 	private final ImageProcessor imageProcessor;
 	private final MediaStorage mediaStorage;
+	private final ShopRepository shopRepository;
 
 	public MediaUploadResponse uploadLogo(String ownerId, MultipartFile file) {
 		return upload(ownerId, file, ImageKind.LOGO, "logo");
@@ -41,6 +44,12 @@ public class ShopMediaService {
 	}
 
 	public void deleteMedia(String ownerId, String url) {
+		Shop shop = shopRepository.findByOwnerId(ownerId).orElse(null);
+		if (shop != null && url != null
+				&& (url.equals(shop.getLogoUrl()) || url.equals(shop.getCoverUrl()))) {
+			throw ApiException.conflict("MEDIA_IN_USE",
+					"Ảnh đang được dùng làm logo hoặc ảnh bìa của gian hàng");
+		}
 		try {
 			mediaStorage.deleteByUrl(url, mediaPrefix(ownerId));
 		} catch (MediaException ex) {

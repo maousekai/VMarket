@@ -85,6 +85,32 @@ describe('ShopForm media', () => {
     })
     render(<ShopForm initial={shop} onSubmit={onSubmit} />)
 
+    // Clear the draft first: cleanup must compare with the saved URL, not the draft.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Xoá ảnh' })[0])
+    fireEvent.change(screen.getByLabelText('Tệp logo'), { target: { files: [imageFile()] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu hồ sơ' }))
+
+    await screen.findByRole('alert')
+    expect(deleteMyShopMedia).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['timeout', { code: 'ECONNABORTED', message: 'timeout of 10000ms exceeded' }],
+    [
+      '5xx',
+      {
+        response: {
+          status: 503,
+          data: { error: { code: 'UNAVAILABLE', message: 'Máy chủ bận.' } },
+        },
+      },
+    ],
+  ])('does not clean up an upload after an unknown %s outcome', async (_label, failure) => {
+    const uploaded = 'http://localhost:9000/vmarket-media/shops/u1/logo/new.png'
+    uploadMyShopLogo.mockResolvedValue({ url: uploaded })
+    const onSubmit = vi.fn().mockRejectedValue(failure)
+    render(<ShopForm initial={shop} onSubmit={onSubmit} />)
+
     fireEvent.change(screen.getByLabelText('Tệp logo'), { target: { files: [imageFile()] } })
     fireEvent.click(screen.getByRole('button', { name: 'Lưu hồ sơ' }))
 

@@ -66,4 +66,18 @@
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<!-- Giữ heap nhỏ để test ảnh nén 12.000×12.000 bắt được hồi quy
+					gọi read(0) trước khi kiểm tra megapixel. -->
+					<argLine>-Xmx128m</argLine>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
 </project>

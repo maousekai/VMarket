@@ -102,10 +102,14 @@ public class UserProfileController {
 
 	@Operation(summary = "Xoá ảnh đại diện vừa tải lên",
 			description = "Chỉ xoá được ảnh thuộc thư mục avatars/{userId} của chính người dùng. "
-					+ "Dùng để dọn ảnh khi lưu hồ sơ thất bại; URL ngoài hệ thống bị bỏ qua.")
+					+ "Dùng để dọn ảnh khi lưu hồ sơ thất bại; URL ngoài hệ thống bị bỏ qua. "
+					+ "Ảnh đang là avatar của hồ sơ sẽ bị từ chối.")
 	@ApiResponses({
 			@ApiResponse(responseCode = "204", description = "Đã xoá (hoặc ảnh không còn)"),
 			@ApiResponse(responseCode = "400", description = "URL không hợp lệ (INVALID_MEDIA_URL)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "409", description = "Ảnh đang được hồ sơ tham chiếu "
+					+ "(MEDIA_IN_USE)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "503", description = "Kho ảnh không khả dụng "
 					+ "(MEDIA_STORAGE_UNAVAILABLE)",

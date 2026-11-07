@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getApiError } from '../services/api/apiClient'
 import { listProducts } from '../services/api/productApi'
@@ -9,6 +9,31 @@ import '../components/account.css'
 import '../components/shopPublic.css'
 
 const PAGE_SIZE = 12
+
+const initialProducts = {
+  status: 'loading',
+  rows: [],
+  total: 0,
+  page: 0,
+  totalPages: 0,
+  loadingMore: false,
+  loadMoreError: null,
+}
+
+function productPageState(page) {
+  const rows = Array.isArray(page?.content) ? page.content : []
+  const total = page?.totalElements ?? rows.length
+  const totalPages = page?.totalPages ?? (total > 0 ? Math.ceil(total / PAGE_SIZE) : 0)
+  return {
+    status: 'ready',
+    rows,
+    total,
+    page: page?.page ?? 0,
+    totalPages,
+    loadingMore: false,
+    loadMoreError: null,
+  }
+}
 
 function ShopLogo({ shop }) {
   const logo = imageUrlOrEmpty(shop.logoUrl)
@@ -64,8 +89,9 @@ function priceLabel(product) {
 
 export default function ShopPublicPage() {
   const { shopId } = useParams()
+  const activeShopRef = useRef(shopId)
   const [shopState, setShopState] = useState({ status: 'loading', shop: null, error: null })
-  const [products, setProducts] = useState({ status: 'loading', rows: [], total: 0 })
+  const [products, setProducts] = useState(initialProducts)
 
   useEffect(() => {
     let current = true
@@ -84,19 +110,53 @@ export default function ShopPublicPage() {
 
   useEffect(() => {
     let current = true
-    setProducts({ status: 'loading', rows: [], total: 0 })
+    activeShopRef.current = shopId
+    setProducts(initialProducts)
     listProducts({ shopId, page: 0, size: PAGE_SIZE })
       .then((page) => {
-        if (current)
-          setProducts({ status: 'ready', rows: page.items || [], total: page.totalElements || 0 })
+        if (current) setProducts(productPageState(page))
       })
       .catch(() => {
-        if (current) setProducts({ status: 'unavailable', rows: [], total: 0 })
+        if (current) {
+          setProducts({
+            ...initialProducts,
+            status: 'unavailable',
+          })
+        }
       })
     return () => {
       current = false
+      if (activeShopRef.current === shopId) activeShopRef.current = null
     }
   }, [shopId])
+
+  async function loadMore() {
+    if (products.loadingMore || products.page + 1 >= products.totalPages) return
+
+    const nextPage = products.page + 1
+    const requestedShop = shopId
+    setProducts((current) => ({ ...current, loadingMore: true, loadMoreError: null }))
+    try {
+      const page = await listProducts({ shopId: requestedShop, page: nextPage, size: PAGE_SIZE })
+      if (activeShopRef.current !== requestedShop) return
+      setProducts((current) => {
+        if (activeShopRef.current !== requestedShop) return current
+        const next = productPageState(page)
+        const seen = new Set(current.rows.map((product) => product.id))
+        return {
+          ...next,
+          rows: [...current.rows, ...next.rows.filter((product) => !seen.has(product.id))],
+        }
+      })
+    } catch {
+      if (activeShopRef.current !== requestedShop) return
+      setProducts((current) => ({
+        ...current,
+        loadingMore: false,
+        loadMoreError: 'Không tải thêm được sản phẩm. Vui lòng thử lại.',
+      }))
+    }
+  }
 
   if (shopState.status === 'loading') {
     return (
@@ -127,6 +187,7 @@ export default function ShopPublicPage() {
   }
 
   const shop = shopState.shop
+  const hasMore = products.status === 'ready' && products.page + 1 < products.totalPages
 
   return (
     <main className="shop-public">
@@ -202,6 +263,25 @@ export default function ShopPublicPage() {
                   </div>
                 </article>
               ))}
+            </div>
+          )}
+          {(hasMore || products.loadingMore || products.loadMoreError) && (
+            <div className="shop-public__more">
+              {products.loadMoreError && (
+                <p className="account-notice account-notice--warning" role="alert">
+                  {products.loadMoreError}
+                </p>
+              )}
+              {hasMore && (
+                <button
+                  className="account-button account-button--secondary shop-public__more-button"
+                  type="button"
+                  disabled={products.loadingMore}
+                  onClick={loadMore}
+                >
+                  {products.loadingMore ? 'Đang tải…' : 'Tải thêm sản phẩm'}
+                </button>
+              )}
             </div>
           )}
         </section>

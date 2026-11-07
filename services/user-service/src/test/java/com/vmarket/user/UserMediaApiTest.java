@@ -128,6 +128,23 @@ class UserMediaApiTest {
 	}
 
 	@Test
+	void deleteMedia_anhDangLamAvatar_tra409() throws Exception {
+		UserProfile profile = new UserProfile();
+		profile.setUserId(USER_A);
+		profile.setFullName("Nguyễn Văn An");
+		profile.setAvatarUrl(AVATAR_URL);
+		profiles.save(profile);
+
+		mockMvc.perform(delete("/api/users/me/media")
+						.param("url", AVATAR_URL)
+						.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A)))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("MEDIA_IN_USE"));
+
+		verify(mediaStorage, never()).deleteByUrl(any(), any());
+	}
+
+	@Test
 	void updateProfile_xoaAnhCuSauKhiCommit() throws Exception {
 		UserProfile profile = new UserProfile();
 		profile.setUserId(USER_A);

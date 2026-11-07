@@ -3,6 +3,7 @@ package com.vmarket.shop;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -98,6 +99,32 @@ class ShopMediaApiTest extends ShopApiTestSupport {
 						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A)))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("INVALID_MEDIA_URL"));
+	}
+
+	@Test
+	void deleteMedia_anhDangDuocHoSoDung_tra409() throws Exception {
+		Map<String, Object> registration = validShop("Gốm Thanh Hà");
+		registration.put("logoUrl", LOGO_URL);
+		registration.put("coverUrl", COVER_URL);
+		mockMvc.perform(post("/api/shops")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(registration)))
+				.andExpect(status().isCreated());
+
+		mockMvc.perform(delete("/api/shops/me/media")
+						.param("url", LOGO_URL)
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A)))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("MEDIA_IN_USE"));
+
+		mockMvc.perform(delete("/api/shops/me/media")
+						.param("url", COVER_URL)
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A)))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("MEDIA_IN_USE"));
+
+		verify(mediaStorage, never()).deleteByUrl(any(), any());
 	}
 
 	@Test

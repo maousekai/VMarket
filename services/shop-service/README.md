@@ -41,7 +41,7 @@ chối — Admin phải chủ động "gỡ đình chỉ". Mọi bước (kể c
 | PUT | `/api/shops/me` | Đã đăng nhập | Cập nhật thông tin — **thay thế toàn bộ** |
 | POST | `/api/shops/me/logo` | Đã đăng nhập | Tải logo lên kho ảnh, trả `{ "url" }` |
 | POST | `/api/shops/me/cover` | Đã đăng nhập | Tải ảnh bìa lên kho ảnh, trả `{ "url" }` |
-| DELETE | `/api/shops/me/media?url=` | Đã đăng nhập | Dọn ảnh vừa tải nếu lưu hồ sơ thất bại |
+| DELETE | `/api/shops/me/media?url=` | Đã đăng nhập | Dọn ảnh vừa tải nếu lưu hồ sơ thất bại (409 nếu ảnh đang được hồ sơ dùng) |
 | POST | `/api/shops/me/resubmit` | Đã đăng nhập | Gửi lại hồ sơ bị từ chối |
 | GET | `/api/shops/me/status-history` | Đã đăng nhập | Lịch sử trạng thái của tôi |
 | GET | `/api/shops/admin?status=&keyword=&page=&size=` | ADMIN | Danh sách (lọc trạng thái, tên), mới nộp trước |
@@ -73,8 +73,10 @@ Body `POST /api/shops` và `PUT /api/shops/me`:
 
 Hai endpoint upload nhận `multipart/form-data` với trường `file` và **chỉ trả URL**,
 không ghi vào hồ sơ. Client tải ảnh trước, sau đó gửi URL trong `POST /api/shops`
-hoặc `PUT /api/shops/me`. Nếu lưu hồ sơ thất bại, client gọi
-`DELETE /api/shops/me/media?url=...` để dọn ảnh vừa tải.
+hoặc `PUT /api/shops/me`. Nếu lưu hồ sơ bị từ chối rõ ràng (4xx), client gọi
+`DELETE /api/shops/me/media?url=...` để dọn ảnh vừa tải; timeout, mất mạng hoặc 5xx
+có thể xảy ra sau khi transaction đã commit nên client không dọn. Endpoint xoá trả
+`409 MEDIA_IN_USE` nếu URL vẫn đang là logo/ảnh bìa của hồ sơ.
 
 | Loại | Kích thước tối đa | Chuẩn hoá |
 | --- | --- | --- |
