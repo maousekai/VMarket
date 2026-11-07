@@ -71,14 +71,19 @@ thấy `orderId` nhưng không có `buyerId`; admin và chính người viết t
 
 ## Sự kiện
 
-`ReviewCreated(reviewId, productId, ratingAverage, ratingCount)` phát qua outbox
+`ReviewCreated(reviewId, productId, ratingAverage, ratingCount, revision)` phát qua outbox
 (`review_outbox`) khi có đánh giá mới **và khi admin ẩn/khôi phục** — tên sự kiện giữ nguyên vì
 Product Service đã consume; ý nghĩa thực tế là "aggregate điểm của sản phẩm đã đổi". Payload là
 giá trị tuyệt đối nên consumer xử lý lặp vẫn đúng.
 
 - **Nhiều replica:** dòng outbox được claim bằng `FOR UPDATE SKIP LOCKED`, sau đó publisher
-  giữ khoá dòng `product_rating_locks` của sản phẩm rồi mới tính aggregate và publish. Hai
-  replica xử lý cùng sản phẩm vì vậy chạy tuần tự, bản tin publish sau luôn mới hơn.
+  `UPDATE product_rating_revisions SET revision = revision + 1` cho sản phẩm (giữ khoá dòng tới
+  hết transaction) rồi mới tính aggregate và publish. Hai replica xử lý cùng sản phẩm chạy tuần
+  tự và bản tin tính sau luôn có `revision` lớn hơn.
+- **Thứ tự theo revision, không theo đồng hồ:** Product Service chỉ áp dụng bản tin có
+  `revision` lớn hơn bản đã lưu. Timestamp envelope lấy từ đồng hồ từng replica (có thể lệch/lùi)
+  nên chỉ dùng để truy vết. Publish lỗi vẫn tiêu revision — dãy có thể nhảy cóc nhưng luôn tăng;
+  bản tin cũ hay được admin phát lại không ghi đè được bản mới.
 - **Lỗi phát:** thử lại với backoff luỹ thừa (5s → tối đa 5 phút), `last_error` lưu tên lỗi
   + message; quá 10 lần chuyển `DEAD`. Metric `vmarket.review.outbox.dead` / `.pending` /
   `.oldest.dead.age` xuất qua `/actuator/prometheus`, có dòng DEAD thì log `REVIEW_OUTBOX_DEAD`

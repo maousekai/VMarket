@@ -74,7 +74,6 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 	@BeforeEach
 	void startPool() {
 		pool = Executors.newFixedThreadPool(8);
-		jdbc.update("delete from product_rating_locks");
 	}
 
 	@AfterEach
@@ -179,6 +178,8 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 		ReviewCreated last = published.get(1);
 		assertThat(last.ratingCount()).isEqualTo(3);
 		assertThat(last.ratingAverage()).isEqualTo(4.0);
+		// Revision cấp dưới khoá: bản tính sau luôn lớn hơn, độc lập với đồng hồ replica.
+		assertThat(last.revision()).isGreaterThan(published.get(0).revision());
 		// Hai replica claim hai dòng khác nhau; còn đúng một dòng (của đánh giá thứ 3).
 		assertThat(jdbc.queryForObject("select count(*) from review_outbox", Long.class)).isEqualTo(1);
 	}

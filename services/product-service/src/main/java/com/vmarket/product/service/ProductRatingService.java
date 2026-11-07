@@ -25,22 +25,44 @@ public class ProductRatingService {
 		this.eventFactory = eventFactory;
 	}
 
+	/**
+	 * Đồng bộ aggregate đánh giá từ Review Service.
+	 *
+	 * <p>Thứ tự bản tin được quyết định bằng {@code revision} (tăng dần theo sản phẩm, cấp dưới khoá
+	 * DB bên Review Service), không bằng timestamp envelope: các replica của Review Service có đồng
+	 * hồ riêng, lệch hay lùi đồng hồ sẽ khiến aggregate mới mang timestamp nhỏ hơn. Bản tin cũ/phát
+	 * lại có revision ≤ revision đã lưu bị bỏ qua. {@code sourceUpdatedAt} chỉ còn để truy vết.
+	 *
+	 * <p>Bản tin trước khi có revision ({@code revision = 0}) chỉ áp dụng khi sản phẩm chưa từng nhận
+	 * bản có revision, theo quy tắc timestamp cũ.
+	 */
 	@Transactional
-	public void synchronize(String productId, double ratingAverage, long ratingCount, Instant sourceUpdatedAt) {
+	public void synchronize(String productId, double ratingAverage, long ratingCount, long revision,
+			Instant sourceUpdatedAt) {
 		if (productId == null || productId.isBlank() || !Double.isFinite(ratingAverage)
-				|| ratingAverage < 0 || ratingAverage > 5 || ratingCount < 0 || sourceUpdatedAt == null) {
+				|| ratingAverage < 0 || ratingAverage > 5 || ratingCount < 0 || revision < 0
+				|| sourceUpdatedAt == null) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_REVIEW_AGGREGATE",
 					"Aggregate đánh giá không hợp lệ");
 		}
 		Product product = repository.findById(productId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND",
 						"Không tìm thấy sản phẩm"));
-		if (product.getRatingUpdatedAt() != null && sourceUpdatedAt.isBefore(product.getRatingUpdatedAt())) return;
+		if (isStale(product, revision, sourceUpdatedAt)) return;
 		product.setRatingAverage(ratingAverage);
 		product.setRatingCount(ratingCount);
+		if (revision > 0) product.setRatingRevision(revision);
 		product.setRatingUpdatedAt(sourceUpdatedAt);
 		product.setUpdatedAt(Instant.now());
 		Product saved = repository.save(product);
 		publisher.publishUpdated(eventFactory.updated(saved));
+	}
+
+	private static boolean isStale(Product product, long revision, Instant sourceUpdatedAt) {
+		Long current = product.getRatingRevision();
+		if (revision > 0) return current != null && revision <= current;
+		// Bản tin cũ không có revision: bản có revision luôn thắng, còn lại so timestamp như trước.
+		return current != null
+				|| (product.getRatingUpdatedAt() != null && sourceUpdatedAt.isBefore(product.getRatingUpdatedAt()));
 	}
 }

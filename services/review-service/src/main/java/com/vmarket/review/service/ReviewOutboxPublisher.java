@@ -20,13 +20,16 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Đẩy dòng outbox lên Event Bus (FR-REV-02).
  *
- * <p><b>Aggregate tính lúc phát, dưới khoá theo sản phẩm.</b> Mỗi dòng được claim bằng
- * {@code FOR UPDATE SKIP LOCKED} (nhiều replica chia nhau hàng đợi), nhưng trước khi tính aggregate
- * còn phải giữ dòng {@code product_rating_locks} của sản phẩm đó. Hai replica xử lý hai dòng của
- * cùng sản phẩm vì vậy chạy tuần tự: replica sau chỉ tính khi replica trước đã publish và commit,
- * nên sự kiện publish sau luôn mang aggregate mới hơn (timestamp envelope cũng tăng dần — Product
- * Service giữ bản tin mới nhất). Không có khoá này, replica A có thể tính count=1, replica B tính
- * count=2 và publish trước, rồi A ghi đè bằng count=1.
+ * <p><b>Aggregate tính lúc phát, dưới khoá theo sản phẩm, kèm revision tăng dần.</b> Mỗi dòng được
+ * claim bằng {@code FOR UPDATE SKIP LOCKED} (nhiều replica chia nhau hàng đợi), sau đó publisher
+ * {@code UPDATE product_rating_revisions SET revision = revision + 1} cho sản phẩm đó — câu UPDATE
+ * giữ khoá dòng tới hết transaction và cấp revision mới. Hai replica xử lý cùng sản phẩm vì vậy chạy
+ * tuần tự, và bản tin tính sau luôn có revision lớn hơn. Product Service so <b>revision</b> (không
+ * so timestamp envelope — timestamp lấy từ đồng hồ từng replica, có thể lệch/lùi), nên aggregate mới
+ * không bị bỏ qua và bản tin cũ/phát lại không ghi đè được bản mới.
+ *
+ * <p>Publish lỗi thì revision đã cấp vẫn được commit cùng lúc ghi nhận lỗi — revision có thể nhảy
+ * cóc nhưng luôn tăng, đúng yêu cầu của consumer.
  *
  * <p>Transaction và các khoá được giữ trong lúc chờ broker confirm (tối đa
  * {@code app.events.confirm-timeout-millis}, xử lý tuần tự tối đa {@value #BATCH_LIMIT} dòng mỗi
@@ -82,11 +85,11 @@ public class ReviewOutboxPublisher {
 		var row = rows.get(0);
 		String id = (String) row.get("id");
 		String productId = (String) row.get("product_id");
-		lockProduct(productId);
+		long revision = lockAndNextRevision(productId);
 		try {
 			RatingSummary summary = ratings.productSummary(productId);
 			publisher.publish(EventType.REVIEW_CREATED, new ReviewCreated(
-					(String) row.get("review_id"), productId, summary.average(), summary.count()));
+					(String) row.get("review_id"), productId, summary.average(), summary.count(), revision));
 			jdbc.update("delete from review_outbox where id = ?", id);
 		} catch (RuntimeException ex) {
 			int attempts = ((Number) row.get("retry_attempts")).intValue() + 1;
@@ -101,12 +104,17 @@ public class ReviewOutboxPublisher {
 	}
 
 	/**
-	 * Giữ khoá ghi trên dòng của sản phẩm tới hết transaction. {@code ON CONFLICT DO NOTHING} tạo dòng
-	 * khoá ở lần đầu mà không lỗi khi hai replica cùng tạo.
+	 * Khoá dòng của sản phẩm tới hết transaction và cấp revision kế tiếp. {@code ON CONFLICT DO
+	 * NOTHING} tạo dòng ở lần đầu mà không lỗi khi hai replica cùng tạo; {@code UPDATE} lấy khoá ghi
+	 * nên replica khác (cùng sản phẩm) phải đợi tới khi transaction này commit.
 	 */
-	private void lockProduct(String productId) {
-		jdbc.update("insert into product_rating_locks (product_id) values (?) on conflict do nothing", productId);
-		jdbc.queryForList("select product_id from product_rating_locks where product_id = ? for update", productId);
+	private long lockAndNextRevision(String productId) {
+		jdbc.update("insert into product_rating_revisions (product_id, revision) values (?, 0) on conflict do nothing",
+				productId);
+		jdbc.update("update product_rating_revisions set revision = revision + 1 where product_id = ?", productId);
+		Long revision = jdbc.queryForObject("select revision from product_rating_revisions where product_id = ?",
+				Long.class, productId);
+		return revision == null ? 0 : revision;
 	}
 
 	/** Tên lớp + message đã cắt ngắn để debug được mà không phình cột. */

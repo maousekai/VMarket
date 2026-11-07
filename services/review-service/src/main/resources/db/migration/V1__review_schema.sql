@@ -51,7 +51,7 @@ CREATE TABLE seller_replies (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Outbox: chi luu productId; aggregate tinh LUC PHAT (duoi khoa product_rating_locks)
+-- Outbox: chi luu productId; aggregate tinh LUC PHAT (duoi khoa product_rating_revisions)
 -- de ban tin phat sau cung luon phan anh du lieu da commit moi nhat.
 CREATE TABLE review_outbox (
     id VARCHAR(26) PRIMARY KEY,
@@ -67,10 +67,11 @@ CREATE TABLE review_outbox (
 );
 CREATE INDEX idx_review_outbox_due ON review_outbox (state, next_attempt_at, created_at, id);
 
--- Khoa tuan tu hoa "tinh aggregate + publish" theo san pham giua nhieu replica:
--- replica nao giu khoa thi replica khac (cung san pham) phai doi den khi no commit,
--- nen su kien publish sau luon mang aggregate moi hon. Dung bang thuong (SELECT ...
--- FOR UPDATE) thay vi pg_advisory_xact_lock de chay duoc ca tren H2 khi test.
-CREATE TABLE product_rating_locks (
-    product_id VARCHAR(64) PRIMARY KEY
+-- Moi san pham mot dong: vua la KHOA tuan tu hoa "tinh aggregate + publish" giua nhieu
+-- replica (UPDATE giu khoa dong den het transaction), vua cap REVISION tang dan dua vao
+-- ReviewCreated. Consumer so revision thay vi timestamp envelope (dong ho tung replica co
+-- the lech/lui). Dung bang thuong thay vi pg_advisory_xact_lock de chay duoc ca tren H2.
+CREATE TABLE product_rating_revisions (
+    product_id VARCHAR(64) PRIMARY KEY,
+    revision BIGINT NOT NULL DEFAULT 0
 );

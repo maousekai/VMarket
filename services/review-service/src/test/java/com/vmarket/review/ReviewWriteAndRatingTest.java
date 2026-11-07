@@ -258,6 +258,8 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 		assertThat(event.productId()).isEqualTo(PRODUCT);
 		assertThat(event.ratingAverage()).isEqualTo(3.5);
 		assertThat(event.ratingCount()).isEqualTo(2);
+		// Lần publish lỗi đã tiêu revision 1; revision không bao giờ dùng lại.
+		assertThat(event.revision()).isEqualTo(2);
 		assertThat(jdbc.queryForObject("select count(*) from review_outbox", Long.class)).isEqualTo(1);
 
 		// Dòng thất bại chưa đến hạn thử lại -> không phát.
@@ -320,5 +322,32 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 		String id = createReview(BUYER, "order-1", PRODUCT, 5);
 		assertThat(id).matches("[0-9A-HJKMNP-TV-Z]{26}");
 		assertThat(jdbc.queryForObject("select id from review_outbox", String.class)).hasSize(26);
+	}
+
+	/** F-01: đồng hồ replica sau CHẬM hơn replica trước, revision vẫn tăng nên Product không bỏ qua. */
+	@Test
+	void revisionIncreasesEvenWhenReplicaClocksGoBackwards() throws Exception {
+		createReview(BUYER, "order-1", PRODUCT, 5);
+		createReview(BUYER, "order-2", PRODUCT, 3);
+		var fastClock = Clock.offset(clock, java.time.Duration.ofHours(2));
+		var slowClock = Clock.offset(clock, java.time.Duration.ofHours(1));
+		var replicaA = new ReviewOutboxPublisher(jdbc, publisher, ratingService, fastClock, transactionManager);
+		var replicaB = new ReviewOutboxPublisher(jdbc, publisher, ratingService, slowClock, transactionManager);
+		var tx = new TransactionTemplate(transactionManager);
+
+		tx.execute(s -> replicaA.publishOne());
+		tx.execute(s -> replicaB.publishOne());
+
+		ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+		verify(publisher, org.mockito.Mockito.times(2)).publish(eq(EventType.REVIEW_CREATED), payload.capture());
+		ReviewCreated first = (ReviewCreated) payload.getAllValues().get(0);
+		ReviewCreated second = (ReviewCreated) payload.getAllValues().get(1);
+		assertThat(second.revision()).isGreaterThan(first.revision());
+		assertThat(second.ratingCount()).isEqualTo(2);
+		// Sản phẩm khác có dãy revision riêng.
+		createReview(BUYER, "order-3", "product-2", 4);
+		tx.execute(s -> replicaB.publishOne());
+		verify(publisher, org.mockito.Mockito.times(3)).publish(eq(EventType.REVIEW_CREATED), payload.capture());
+		assertThat(((ReviewCreated) payload.getValue()).revision()).isEqualTo(1);
 	}
 }
