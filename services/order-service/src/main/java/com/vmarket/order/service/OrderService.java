@@ -126,22 +126,30 @@ public class OrderService {
             // Xung đột UNIQUE constraint (user_id, idempotency_key) do request song song commit trước
             if (trimmedKey != null) {
                 log.info(
-                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry). Đang nạp đơn đã commit...",
+                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry). Nạp lại đơn đã commit...",
                         trimmedKey,
                         userId);
-                for (int attempt = 0; attempt < 5; attempt++) {
-                    Optional<Order> existing =
-                            orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
-                    if (existing.isPresent()) {
-                        return OrderResponse.from(existing.get());
-                    }
-                    try {
-                        Thread.sleep(50);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+                // Do transaction thắng đã commit nên unique constraint mới xảy ra trên transaction này,
+                // nạp ngay đơn đã commit mà không cần polling cố định lâu.
+                Optional<Order> existing =
+                        orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+                if (existing.isPresent()) {
+                    return OrderResponse.from(existing.get());
                 }
+                // Dự phòng 1 lần thử lại rất ngắn (10ms) phòng trường hợp trễ đọc bất thường
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+                existing = orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+                if (existing.isPresent()) {
+                    return OrderResponse.from(existing.get());
+                }
+                log.warn(
+                        "Recovery idempotency thất bại cho key '{}', userId={}",
+                        trimmedKey,
+                        userId);
             }
             throw ex;
         }

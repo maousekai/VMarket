@@ -381,12 +381,27 @@ class OrderApiTest {
 
     @Test
     void placeOrderWithConcurrentRetriesReturnsSameOrder() throws Exception {
+        int threads = 6;
+        java.util.concurrent.CyclicBarrier cartBarrier =
+                new java.util.concurrent.CyclicBarrier(threads);
+
         when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
-        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        // Sử dụng CyclicBarrier trong getCart() để đảm bảo tất cả 6 threads đều vượt qua
+        // bước kiểm tra idempotency ban đầu và cùng lúc ập vào bước insert order, tái hiện 100%
+        // điều kiện race condition trên database unique constraint.
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenAnswer(
+                        invocation -> {
+                            try {
+                                cartBarrier.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                            } catch (Exception e) {
+                                throw new RuntimeException("Barrier timeout", e);
+                            }
+                            return cartWithItems();
+                        });
         when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
 
         String key = "concurrent-idempotency-key-" + System.currentTimeMillis();
-        int threads = 6;
         java.util.concurrent.ExecutorService executor =
                 java.util.concurrent.Executors.newFixedThreadPool(threads);
         java.util.concurrent.CountDownLatch readyLatch =
