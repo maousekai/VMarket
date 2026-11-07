@@ -9,6 +9,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import com.vmarket.order.client.CartServiceClient;
+import com.vmarket.order.client.ShopServiceClient;
 import com.vmarket.order.client.UserServiceClient;
 
 /**
@@ -41,6 +42,13 @@ public class DownstreamClientConfig {
 	@Bean
 	UserServiceClient userServiceClient(UserServiceProperties properties) {
 		return new UserServiceClient(builder(properties.getConnectTimeout(), properties.getReadTimeout())
+				.baseUrl(properties.getBaseUrl())
+				.build());
+	}
+
+	@Bean
+	ShopServiceClient shopServiceClient(ShopServiceProperties properties) {
+		return new ShopServiceClient(builder(properties.getConnectTimeout(), properties.getReadTimeout())
 				.baseUrl(properties.getBaseUrl())
 				.build());
 	}

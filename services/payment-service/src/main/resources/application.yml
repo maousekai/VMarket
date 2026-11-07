@@ -43,7 +43,7 @@ app:
     confirmed-publication: true
     listen: ${EVENTS_LISTEN:true}
     queue: payment-service.events
-    bindings: [OrderStatusChanged, CodCollected]
+    bindings: [OrderStatusChanged, CodCollected, ReturnResolved]
   payos:
     enabled: ${PAYOS_ENABLED:false}
     client-id: ${PAYOS_CLIENT_ID:}

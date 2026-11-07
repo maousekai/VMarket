@@ -42,8 +42,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("9");
-		assertThat(flyway.info().applied()).hasSize(9);
+		assertThat(current.getVersion().getVersion()).isEqualTo("10");
+		assertThat(flyway.info().applied()).hasSize(10);
 	}
 
 	@Test
@@ -51,13 +51,24 @@ class FlywayMigrationTest {
 		try (Connection c = dataSource.getConnection()) {
 			for (String column : new String[] { "user_id", "status", "recipient_name", "phone",
 					"province", "district", "ward", "street_address", "note", "total_amount",
-					"created_at", "updated_at", "idempotency_key" }) {
+					"created_at", "updated_at", "idempotency_key", "delivered_at" }) {
 				assertThat(columnExists(c, "orders", column)).as("orders.%s", column).isTrue();
 			}
 			for (String column : new String[] { "order_id", "product_id", "variant_id", "shop_id",
-					"quantity", "unit_price", "line_total" }) {
+					"quantity", "unit_price", "line_total", "confirmed" }) {
 				assertThat(columnExists(c, "order_items", column))
 						.as("order_items.%s", column).isTrue();
+			}
+			for (String column : new String[] { "order_id", "user_id", "shop_id", "status",
+					"reason", "evidence_urls", "seller_note", "admin_note", "refund_amount",
+					"created_at", "updated_at", "resolved_at" }) {
+				assertThat(columnExists(c, "order_returns", column))
+						.as("order_returns.%s", column).isTrue();
+			}
+			for (String column : new String[] { "return_id", "order_item_id", "product_id", "variant_id",
+					"quantity", "unit_price", "line_total" }) {
+				assertThat(columnExists(c, "order_return_items", column))
+						.as("order_return_items.%s", column).isTrue();
 			}
 			// V8 - địa chỉ hai cấp: district được phép NULL.
 			assertThat(columnIsNullable(c, "orders", "district")).isTrue();

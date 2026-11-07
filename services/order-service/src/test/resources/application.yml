@@ -35,6 +35,8 @@ app:
     internal-api-key: test-only-internal-api-key-0123456789-0123456789
   user-service:
     base-url: http://user-service.test:8082
+  shop-service:
+    base-url: http://shop-service.test:8083
 
 auth:
   jwt:
