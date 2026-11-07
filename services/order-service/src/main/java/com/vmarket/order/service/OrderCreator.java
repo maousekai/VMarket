@@ -7,13 +7,10 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderPlaced;
 import com.vmarket.events.StockItem;
-import com.vmarket.order.client.CartServiceClient;
 import com.vmarket.order.client.CartServiceClient.CartItemView;
 import com.vmarket.order.client.UserServiceClient.AddressView;
 import com.vmarket.order.config.OrderPaymentProperties;
@@ -37,6 +34,10 @@ import lombok.extern.slf4j.Slf4j;
  * violation trên {@code (user_id, idempotency_key)}) do retry đồng thời, transaction này
  * rollback độc lập để caller có thể bắt exception và truy vấn lại đơn đã được tạo thành công
  * bởi request song song thay vì gây 500 INTERNAL_ERROR.
+ *
+ * <p>Lưu ý: Không thực hiện gọi HTTP (như xoá giỏ qua cart-service) trong transaction hay
+ * trong transaction synchronization callback sau commit, nhằm giải phóng kết nối DB ngay
+ * lập tức về pool trước khi thực hiện I/O mạng.
  */
 @Slf4j
 @Component
@@ -46,7 +47,6 @@ public class OrderCreator {
     private final Clock clock;
     private final OrderPaymentProperties paymentTiming;
     private final OrderRepository orderRepository;
-    private final CartServiceClient cartServiceClient;
     private final Outbox outbox;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -117,49 +117,6 @@ public class OrderCreator {
                 order.getItems().size(),
                 total);
 
-        // Lấy snapshot các item đã checkout TRƯỚC khi đăng ký afterCommit
-        List<CartItemView> snapshot = List.copyOf(cartItems);
-        String orderId = saved.getId();
-
-        // Xoá giỏ SAU khi đơn đã COMMIT
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(
-                    new TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            removeCheckoutItemsFromCart(userId, orderId, snapshot);
-                        }
-                    });
-        } else {
-            removeCheckoutItemsFromCart(userId, orderId, snapshot);
-        }
-
         return OrderResponse.from(saved);
     }
-
-    private void removeCheckoutItemsFromCart(
-            String userId, String orderId, List<CartItemView> snapshot) {
-        int success = 0;
-        int failed = 0;
-        for (CartItemView item : snapshot) {
-            boolean ok =
-                    cartServiceClient.removeCartItem(userId, item.productId(), item.variantId());
-            if (ok) {
-                success++;
-            } else {
-                failed++;
-            }
-        }
-        if (failed == 0) {
-            log.info("Đã xoá {}/{} item khỏi giỏ cho userId={} (đơn {})", success, snapshot.size(), userId, orderId);
-        } else {
-            log.warn(
-                    "Xoá giỏ một phần cho userId={} (đơn {}): {} thành công, {} thất bại (người dùng có thể tự xoá)",
-                    userId,
-                    orderId,
-                    success,
-                    failed);
-        }
-    }
 }
-

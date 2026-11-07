@@ -469,32 +469,94 @@ class OrderApiTest {
     @Test
     void placeOrderConcurrentRetryWhenCartAlreadyEmptiedReturnsExistingOrder() throws Exception {
         when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
-        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
         when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
 
         String key = "retry-empty-cart-" + System.currentTimeMillis();
 
-        // Lần gọi 1 thành công tạo đơn
-        mockMvc.perform(
+        // Đồng bộ hóa để kiểm soát chính xác thứ tự race condition:
+        // 1. Request A bắt đầu -> kiểm tra idempotency (chưa có đơn) -> tiến hành đọc giỏ.
+        // 2. Khi Request A chạm vào getCart(), Request B xen vào tạo đơn hoàn tất với cùng key và làm rỗng giỏ.
+        // 3. Request A tiếp tục đọc giỏ và nhận kết quả rỗng (empty cart).
+        // 4. Request A kiểm tra lại idempotency -> phát hiện đơn Request B vừa commit -> trả về 201 Created (thay vì 400 CART_EMPTY).
+        java.util.concurrent.CountDownLatch aAtCart = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch bCommitted = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean aFirstCall = new java.util.concurrent.atomic.AtomicBoolean(true);
+
+        when(cartServiceClient.getCart(eq(ALICE))).thenAnswer(inv -> {
+            if (aFirstCall.compareAndSet(true, false)) {
+                // Request A đọc giỏ: báo hiệu B bắt đầu và tạm dừng chờ B tạo đơn xong
+                aAtCart.countDown();
+                try {
+                    bCommitted.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException("Timeout waiting for Request B", e);
+                }
+                // Lúc này B đã tạo đơn và dọn giỏ, trả về giỏ rỗng cho Request A
+                return new com.vmarket.order.client.CartServiceClient.CartView(
+                        ALICE, java.util.List.of(), 0, BigDecimal.ZERO);
+            }
+            // Request B đọc giỏ: trả về giỏ đầy đủ để tạo đơn thành công
+            return cartWithItems();
+        });
+
+        // Request A chạy bất đồng bộ trong background thread
+        java.util.concurrent.CompletableFuture<org.springframework.test.web.servlet.MvcResult> futureA =
+                java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return mockMvc.perform(
+                                post("/api/orders")
+                                        .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                        .header("Idempotency-Key", key)
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                                .andReturn();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        // Chờ Request A vượt qua bước check idempotency ban đầu và chạm vào getCart()
+        assertThat(aAtCart.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        // Request B tạo đơn với cùng key khi giỏ còn hàng -> commit đơn thành công
+        var resB = mockMvc.perform(
                         post("/api/orders")
                                 .header(HttpHeaders.AUTHORIZATION, aliceToken())
                                 .header("Idempotency-Key", key)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn();
+        String orderIdB = com.jayway.jsonpath.JsonPath.read(resB.getResponse().getContentAsString(), "$.id");
 
-        // Lần gọi 2 đến khi cart-service đã bị dọn sạch giỏ (rỗng)
-        when(cartServiceClient.getCart(eq(ALICE)))
-                .thenReturn(
-                        new com.vmarket.order.client.CartServiceClient.CartView(
-                                ALICE, java.util.List.of(), 0, BigDecimal.ZERO));
+        // Báo hiệu Request B đã commit xong
+        bCommitted.countDown();
 
-        // Retry với cùng key vẫn phải trả đơn cũ 201 thành công, KHÔNG ném 400 CART_EMPTY
+        // Request A hoàn tất: nhận giỏ rỗng nhưng phát hiện đơn B đã tạo -> trả về 201 Created cùng ID
+        org.springframework.test.web.servlet.MvcResult resA = futureA.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(resA.getResponse().getStatus()).isEqualTo(201);
+        String orderIdA = com.jayway.jsonpath.JsonPath.read(resA.getResponse().getContentAsString(), "$.id");
+        assertThat(orderIdA).isEqualTo(orderIdB);
+
+        // Database chỉ lưu duy nhất 1 đơn
+        var orders = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE);
+        assertThat(orders).hasSize(1);
+        assertThat(orders.get(0).getId()).isEqualTo(orderIdB);
+    }
+
+    @Test
+    void placeOrderWhenCartItemRemovalFailsPartially_orderStillCreatedSuccessfully() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        // Giả lập item đầu xoá thành công, item sau xoá thất bại (người dùng tự xoá hoặc thay đổi giỏ đồng thời)
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any()))
+                .thenReturn(true)
+                .thenReturn(false);
+
         mockMvc.perform(
                         post("/api/orders")
                                 .header(HttpHeaders.AUTHORIZATION, aliceToken())
-                                .header("Idempotency-Key", key)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())

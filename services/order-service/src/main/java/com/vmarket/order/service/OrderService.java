@@ -119,39 +119,90 @@ public class OrderService {
         }
 
         // 3. Thực hiện tạo đơn trong transaction độc lập (REQUIRES_NEW)
+        OrderResponse response;
         try {
-            return orderCreator.createOrderInTransaction(
+            response = orderCreator.createOrderInTransaction(
                     userId, address, cartItems, trimmedKey, request);
         } catch (DataIntegrityViolationException ex) {
-            // Xung đột UNIQUE constraint (user_id, idempotency_key) do request song song commit trước
-            if (trimmedKey != null) {
+            return recoverIdempotentOrderOrThrow(userId, trimmedKey, ex);
+        }
+
+        // 4. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
+        removeCheckoutItemsFromCart(userId, response.id(), cartItems);
+
+        return response;
+    }
+
+    private OrderResponse recoverIdempotentOrderOrThrow(
+            String userId, String trimmedKey, DataIntegrityViolationException ex) {
+        if (trimmedKey != null) {
+            // Trường hợp xung đột UNIQUE constraint trên (user_id, idempotency_key) do request retry đồng thời.
+            // Do transaction thắng đã commit nên transaction này mới nhận unique violation, query ngay đơn đã commit.
+            Optional<Order> existing =
+                    orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+            if (existing.isPresent()) {
                 log.info(
-                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry). Nạp lại đơn đã commit...",
+                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry) -> trả lại đơn đã commit {}",
                         trimmedKey,
-                        userId);
-                // Do transaction thắng đã commit nên unique constraint mới xảy ra trên transaction này,
-                // nạp ngay đơn đã commit mà không cần polling cố định lâu.
-                Optional<Order> existing =
-                        orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
-                if (existing.isPresent()) {
-                    return OrderResponse.from(existing.get());
-                }
-                // Dự phòng 1 lần thử lại rất ngắn (10ms) phòng trường hợp trễ đọc bất thường
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-                existing = orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
-                if (existing.isPresent()) {
-                    return OrderResponse.from(existing.get());
-                }
-                log.warn(
-                        "Recovery idempotency thất bại cho key '{}', userId={}",
-                        trimmedKey,
-                        userId);
+                        userId,
+                        existing.get().getId());
+                return OrderResponse.from(existing.get());
             }
-            throw ex;
+
+            // Thử lại 1 lần sau 10ms phòng trường hợp trễ đọc/replication
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            existing = orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+            if (existing.isPresent()) {
+                log.info(
+                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry) sau retry -> trả lại đơn đã commit {}",
+                        trimmedKey,
+                        userId,
+                        existing.get().getId());
+                return OrderResponse.from(existing.get());
+            }
+        }
+
+        // Nếu không tìm thấy đơn theo idempotencyKey, lỗi vi phạm ràng buộc không phải do retry hợp lệ
+        // (ví dụ lỗi NOT NULL, Foreign Key, hoặc dữ liệu bất thường khác). Log cảnh báo cụ thể và rethrow nguyên vẹn.
+        log.error(
+                "DataIntegrityViolationException không phải do concurrent retry Idempotency-Key cho userId={}: {}",
+                userId,
+                ex.getMessage(),
+                ex);
+        throw ex;
+    }
+
+    private void removeCheckoutItemsFromCart(
+            String userId, String orderId, List<CartItemView> snapshot) {
+        int success = 0;
+        int failed = 0;
+        for (CartItemView item : snapshot) {
+            boolean ok =
+                    cartServiceClient.removeCartItem(userId, item.productId(), item.variantId());
+            if (ok) {
+                success++;
+            } else {
+                failed++;
+            }
+        }
+        if (failed == 0) {
+            log.info(
+                    "Đã xoá {}/{} item khỏi giỏ cho userId={} (đơn {})",
+                    success,
+                    snapshot.size(),
+                    userId,
+                    orderId);
+        } else {
+            log.warn(
+                    "Xoá giỏ một phần cho userId={} (đơn {}): {} thành công, {} thất bại (người dùng có thể tự xoá hoặc đã thay đổi giỏ)",
+                    userId,
+                    orderId,
+                    success,
+                    failed);
         }
     }
 
