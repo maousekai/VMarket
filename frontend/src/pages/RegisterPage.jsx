@@ -28,7 +28,21 @@ export default function RegisterPage() {
   const beginAction = usePageAction()
   if (auth.session)
     return <Navigate to={auth.session.status === 'PENDING' ? '/verify-email' : '/'} replace />
-  const change = (event) => setValues({ ...values, [event.target.name]: event.target.value })
+  const confirmFilled = Boolean(values.confirmPassword)
+  const passwordsMatch = confirmFilled && values.confirmPassword === values.password
+  const confirmError =
+    fields.confirmPassword ||
+    (confirmFilled && !passwordsMatch ? 'Mật khẩu không trùng.' : undefined)
+  const change = (event) => {
+    const { name, value } = event.target
+    setValues((previous) => ({ ...previous, [name]: value }))
+    setFields((previous) => {
+      if (!previous[name]) return previous
+      const next = { ...previous }
+      delete next[name]
+      return next
+    })
+  }
   async function submit(event) {
     event.preventDefault()
     if (busy) return
@@ -106,7 +120,6 @@ export default function RegisterPage() {
             spellCheck={false}
             maxLength={50}
             error={fields.username}
-            hint="3–50 ký tự: chữ, số và . _ -"
             required
           />
           <FormField
@@ -159,7 +172,9 @@ export default function RegisterPage() {
           onChange={change}
           disabled={busy}
           autoComplete="new-password"
-          error={fields.confirmPassword}
+          error={confirmError}
+          hint={passwordsMatch ? 'Mật khẩu trùng khớp.' : undefined}
+          success={passwordsMatch}
           required
         />
         <button className="button button--primary" disabled={busy}>

@@ -6,6 +6,7 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.vmarket.media.MediaStorage;
 import com.vmarket.shop.dto.PublicShopResponse;
 import com.vmarket.shop.dto.ShopRequest;
 import com.vmarket.shop.dto.ShopResponse;
@@ -46,6 +47,7 @@ public class ShopService {
 	private final ShopStatusHistoryRepository historyRepository;
 	private final ShopStatusTransitioner transitioner;
 	private final ShopProfileAuditor profileAuditor;
+	private final MediaStorage mediaStorage;
 
 	/** FR-SHOP-01 — nộp hồ sơ mở gian hàng. Mỗi tài khoản một gian hàng. */
 	@Transactional
@@ -96,11 +98,15 @@ public class ShopService {
 		ensureNameAvailable(request.name(), shop.getId());
 
 		Map<String, String> before = ShopProfileAuditor.snapshot(shop);
+		String oldLogoUrl = shop.getLogoUrl();
+		String oldCoverUrl = shop.getCoverUrl();
 		apply(shop, request);
 		profileAuditor.record(shop, before, ShopProfileAuditor.snapshot(shop), ownerId);
 		// saveAndFlush: đụng @Version / UNIQUE thì lỗi bung ra ở đây (được dịch thành 409),
 		// và updatedAt trong response là giá trị thật đã ghi xuống.
 		Shop saved = shopRepository.saveAndFlush(shop);
+		cleanupReplacedImage(oldLogoUrl, saved.getLogoUrl(), ShopMediaService.logoPrefix(ownerId));
+		cleanupReplacedImage(oldCoverUrl, saved.getCoverUrl(), ShopMediaService.coverPrefix(ownerId));
 		log.info("Cập nhật gian hàng id={} ownerId={}", saved.getId(), ownerId);
 		return ShopResponse.from(saved);
 	}
@@ -168,5 +174,15 @@ public class ShopService {
 	/** "" và "chưa khai" không được trở thành hai trạng thái khác nhau trong CSDL. */
 	private static String blankToNull(String value) {
 		return value == null || value.isBlank() ? null : value.trim();
+	}
+
+	/**
+	 * Ảnh cũ chỉ bị xoá sau khi transaction commit. URL ngoài MinIO (ảnh legacy)
+	 * hoặc ảnh không đổi không khớp điều kiện nên được bỏ qua an toàn.
+	 */
+	private void cleanupReplacedImage(String oldUrl, String newUrl, String keyPrefix) {
+		if (oldUrl != null && !oldUrl.equals(newUrl)) {
+			MediaStorage.afterCommit(() -> mediaStorage.deleteQuietly(oldUrl, keyPrefix));
+		}
 	}
 }

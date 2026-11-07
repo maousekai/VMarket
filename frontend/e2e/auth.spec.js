@@ -602,7 +602,10 @@ test('buyer with pending shop sees actual review status; active seller opens sel
   await page.goto('/seller')
   await expect(page.getByText(/chờ.*duyệt/i).first()).toBeVisible()
   await openAccountMenu(page)
-  await page.getByRole('menuitem', { name: 'Đăng xuất', exact: true }).click()
+  await page
+    .getByRole('group', { name: 'Tài khoản' })
+    .getByRole('button', { name: 'Đăng xuất', exact: true })
+    .click()
   const active = await createAccount(page.request, { roles: ['SELLER'] })
   addShop(active.id, 'ACTIVE')
   await login(page, active)

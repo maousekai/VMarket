@@ -96,7 +96,7 @@ export default function AppHeader() {
     try {
       await logout()
       setOpen(false)
-      navigate('/login', { replace: true, state: { message: 'Bạn đã đăng xuất.' } })
+      navigate('/login', { replace: true, state: { toast: 'Bạn đã đăng xuất.' } })
     } catch (error) {
       setLogoutError(getApiError(error).message)
     } finally {

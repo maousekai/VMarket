@@ -33,6 +33,12 @@ spring:
     # cua Admin. Mac dinh 60s: RabbitMQ khong truy cap duoc (host sai, mang treo)
     # se giu request cua Admin toi 1 phut du trang thai gian hang da luu xong.
     connection-timeout: ${RABBITMQ_CONNECTION_TIMEOUT:5s}
+  servlet:
+    multipart:
+      # Anh bia toi da 5 MB; du phong overhead multipart. Gateway da gioi han
+      # 10 MB cho toan bo request.
+      max-file-size: 6MB
+      max-request-size: 7MB
 
 server:
   port: ${SERVER_PORT:8083}
@@ -53,6 +59,24 @@ app:
   # Dung CHUNG INTERNAL_API_KEY voi cac service khac. Khong co mac dinh o file nen ->
   # thieu bien la fail luc khoi dong (gia tri gia cho local o application-dev.yml).
   internal-api-key: ${INTERNAL_API_KEY}
+  # Kho anh MinIO (services/shared-media). Thieu credential la fail luc khoi dong;
+  # gia tri dev nam o application-dev.yml.
+  media:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-origin: ${MINIO_PUBLIC_ORIGIN:http://localhost:9000}
+    bucket: ${MINIO_BUCKET:vmarket-media}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
+    region: ${MINIO_REGION:us-east-1}
+  # Service downstream cho dashboard + enrich tên/avatar. Thiếu INTERNAL_API_KEY
+  # thi fail ngay luc khoi dong (xem DownstreamProperties).
+  downstream:
+    user-service-url: ${USER_SERVICE_URL:http://localhost:8082}
+    order-service-url: ${ORDER_SERVICE_URL:http://localhost:8086}
+    product-service-url: ${PRODUCT_SERVICE_URL:http://localhost:8084}
+    internal-api-key: ${INTERNAL_API_KEY}
+    connect-timeout: ${DOWNSTREAM_CONNECT_TIMEOUT:2s}
+    read-timeout: ${DOWNSTREAM_READ_TIMEOUT:5s}
   # Event bus (shared-events - PBL6-39): shop-service CHI PHAT su kien nen de
   # listen=false (mac dinh) - khong khai bao queue, khong mo ket noi consumer.
   # Exchange mac dinh: vmarket.events (docs/event-bus.md).

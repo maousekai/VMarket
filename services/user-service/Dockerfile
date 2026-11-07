@@ -47,6 +47,14 @@ WORKDIR /build
 COPY services/pom.xml ./pom.xml
 COPY services/${SERVICE_NAME}/pom.xml ${SERVICE_NAME}/pom.xml
 
+# shared-media (com.vmarket:shared-media) khong co tren Maven Central, nen phai
+# build + install vao .m2 truoc khi go-offline. Phai install ca parent POM vi
+# descriptor trong .m2 cua shared-media tro den parent nay.
+COPY services/shared-media/pom.xml shared-media/pom.xml
+COPY services/shared-media/src shared-media/src
+RUN mvn -B --no-transfer-progress -f pom.xml -N install -DskipTests \
+ && mvn -B --no-transfer-progress -f shared-media/pom.xml install -DskipTests
+
 # go-offline keo ve toan bo dependency + plugin can cho build.
 # Dependency nam han trong layer image (khong dung cache mount) de CI
 # tren runner moi tinh van tai lai duoc tu Docker layer cache.

@@ -4,8 +4,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.List;
+
+import com.vmarket.media.MediaStorage;
 import com.vmarket.user.dto.ProfileResponse;
 import com.vmarket.user.dto.UpdateProfileRequest;
+import com.vmarket.user.dto.UserProfileSummaryResponse;
 import com.vmarket.user.entity.UserProfile;
 import com.vmarket.user.repository.UserProfileRepository;
 
@@ -31,6 +36,7 @@ public class UserProfileService {
 
 	private final UserProfileRepository userProfileRepository;
 	private final UserProfileProvisioner provisioner;
+	private final MediaStorage mediaStorage;
 
 	/**
 	 * Cố ý <b>không</b> bọc {@code @Transactional}: đây là đường đọc nóng nhất của
@@ -51,6 +57,7 @@ public class UserProfileService {
 	@Transactional
 	public ProfileResponse updateProfile(String userId, UpdateProfileRequest request) {
 		UserProfile profile = getOrCreate(userId);
+		String oldAvatarUrl = profile.getAvatarUrl();
 
 		// Ngữ nghĩa THAY THẾ: trường không gửi = null = xoá. Xem javadoc của
 		// UpdateProfileRequest. Chuẩn hoá chuỗi rỗng thành null để "" và "chưa khai"
@@ -61,8 +68,18 @@ public class UserProfileService {
 		profile.setDateOfBirth(request.dateOfBirth());
 		profile.setGender(request.gender());
 
+		UserProfile saved = userProfileRepository.save(profile);
+		String newAvatarUrl = saved.getAvatarUrl();
+		if (oldAvatarUrl != null && !oldAvatarUrl.equals(newAvatarUrl)) {
+			// Ảnh cũ chỉ bị xoá SAU khi transaction commit: nếu update rollback,
+			// hồ sơ vẫn trỏ tới ảnh cũ và ảnh đó phải còn. URL ngoài MinIO (ảnh
+			// legacy) không khớp prefix nên deleteQuietly bỏ qua.
+			MediaStorage.afterCommit(() -> mediaStorage.deleteQuietly(
+					oldAvatarUrl, UserMediaService.avatarPrefix(userId)));
+		}
+
 		log.info("Cập nhật hồ sơ userId={}", userId);
-		return ProfileResponse.from(userProfileRepository.save(profile));
+		return ProfileResponse.from(saved);
 	}
 
 	/**
@@ -94,5 +111,20 @@ public class UserProfileService {
 
 	private static String blankToNull(String value) {
 		return (value == null || value.isBlank()) ? null : value.trim();
+	}
+
+	/** Tóm tắt hồ sơ theo lô; id không tồn tại bị bỏ qua thay vì làm hỏng cả request. */
+	@Transactional(readOnly = true)
+	public List<UserProfileSummaryResponse> summaries(Collection<String> userIds) {
+		List<String> uniqueIds = userIds.stream()
+				.filter(id -> id != null && !id.isBlank())
+				.distinct()
+				.toList();
+		if (uniqueIds.isEmpty()) {
+			return List.of();
+		}
+		return userProfileRepository.findByUserIdIn(uniqueIds).stream()
+				.map(UserProfileSummaryResponse::from)
+				.toList();
 	}
 }

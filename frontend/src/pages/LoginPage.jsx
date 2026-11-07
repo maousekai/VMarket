@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/AuthLayout'
 import FormField from '../components/FormField'
 import FormMessage from '../components/FormMessage'
+import Toast from '../components/Toast'
 import { useAuth } from '../auth/useAuth'
 import { validateLogin } from '../auth/validation'
 import { getApiError } from '../services/api/apiClient'
@@ -62,47 +63,50 @@ export default function LoginPage() {
     }
   }
   return (
-    <AuthLayout
-      title="Chào mừng trở lại"
-      description="Đăng nhập để khám phá chợ trực tuyến Đà Nẵng"
-      tabs
-    >
-      <FormMessage success>{location.state?.message}</FormMessage>
-      <FormMessage error={error} />
-      <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy}>
-        <FormField
-          label="Email"
-          name="email"
-          type="email"
-          value={values.email}
-          onChange={change}
-          disabled={busy}
-          autoComplete="username"
-          autoCapitalize="none"
-          spellCheck={false}
-          placeholder="example@gmail.com"
-          error={fields.email}
-          maxLength={320}
-          required
-        />
-        <FormField
-          label="Mật khẩu"
-          name="password"
-          type="password"
-          value={values.password}
-          onChange={change}
-          disabled={busy}
-          autoComplete="current-password"
-          error={fields.password}
-          required
-        />
-        <Link className="auth-forgot" to="/forgot-password" state={{ email: values.email }}>
-          Quên mật khẩu?
-        </Link>
-        <button className="button button--primary" disabled={busy}>
-          {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
-        </button>
-      </form>
-    </AuthLayout>
+    <>
+      <Toast message={location.state?.toast} />
+      <AuthLayout
+        title="Chào mừng trở lại"
+        description="Đăng nhập để khám phá chợ trực tuyến Đà Nẵng"
+        tabs
+      >
+        <FormMessage success>{location.state?.message}</FormMessage>
+        <FormMessage error={error} />
+        <form className="auth-form" onSubmit={submit} noValidate aria-busy={busy}>
+          <FormField
+            label="Email"
+            name="email"
+            type="email"
+            value={values.email}
+            onChange={change}
+            disabled={busy}
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="example@gmail.com"
+            error={fields.email}
+            maxLength={320}
+            required
+          />
+          <FormField
+            label="Mật khẩu"
+            name="password"
+            type="password"
+            value={values.password}
+            onChange={change}
+            disabled={busy}
+            autoComplete="current-password"
+            error={fields.password}
+            required
+          />
+          <Link className="auth-forgot" to="/forgot-password" state={{ email: values.email }}>
+            Quên mật khẩu?
+          </Link>
+          <button className="button button--primary" disabled={busy}>
+            {busy ? 'Đang đăng nhập…' : 'Đăng nhập'}
+          </button>
+        </form>
+      </AuthLayout>
+    </>
   )
 }

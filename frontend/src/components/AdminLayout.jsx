@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
-import { useHealth } from '../hooks/useHealth'
 import { adminSections } from '../pages/adminSections'
 import { getApiError } from '../services/api/apiClient'
 import brandBasket from '../assets/account/brand-basket.svg'
@@ -11,7 +10,6 @@ import './adminLayout.css'
 
 export default function AdminLayout() {
   const { session, userProfile, logout } = useAuth()
-  const { health, error: healthError, loading: healthLoading } = useHealth()
   const navigate = useNavigate()
   const menuRef = useRef(null)
   const menuButtonRef = useRef(null)
@@ -20,17 +18,6 @@ export default function AdminLayout() {
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState('')
   const name = userProfile?.fullName || session.username
-  const healthState = healthLoading ? 'loading' : healthError ? 'error' : 'online'
-  const healthLabel = healthLoading
-    ? 'Đang kiểm tra API…'
-    : healthError
-      ? 'Mất kết nối API'
-      : 'API trực tuyến'
-  const healthDetail = healthLoading
-    ? 'Đang kiểm tra kết nối'
-    : healthError
-      ? 'Kiểm tra API Gateway / Auth Service'
-      : `${health.service} · ${health.status}`
 
   useEffect(() => {
     if (!navOpen) return
@@ -64,7 +51,7 @@ export default function AdminLayout() {
     try {
       await logout()
       setMenuOpen(false)
-      navigate('/login', { replace: true, state: { message: 'Bạn đã đăng xuất.' } })
+      navigate('/login', { replace: true, state: { toast: 'Bạn đã đăng xuất.' } })
     } catch (error) {
       setLogoutError(getApiError(error).message)
     } finally {
@@ -103,20 +90,6 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
-        <div
-          className={`admin-sidebar__status admin-sidebar__status--${healthState}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span
-            className={`admin-sidebar__dot admin-sidebar__dot--${healthState}`}
-            aria-hidden="true"
-          />
-          <span>
-            <strong>{healthLabel}</strong>
-            <small>{healthDetail}</small>
-          </span>
-        </div>
       </aside>
       {navOpen && (
         <button
@@ -144,16 +117,6 @@ export default function AdminLayout() {
             <strong>VMarket Operations Console</strong>
           </div>
           <div className="admin-topbar__right">
-            <button
-              className="admin-topbar__bell"
-              type="button"
-              aria-label="Thông báo"
-              disabled
-              title="Chưa khả dụng"
-            >
-              <AdminIcon name="bell" size={16} />
-            </button>
-            <span className="admin-topbar__divider" aria-hidden="true" />
             <div className="admin-user" ref={menuRef}>
               <button
                 ref={menuButtonRef}
