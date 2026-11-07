@@ -23,6 +23,7 @@ spring:
     # Cho phep migrate tren DB da co bang (vmarket_order duoc tao san boi container)
     baseline-on-migrate: true
     baseline-version: 0
+    out-of-order: true
   rabbitmq:
     publisher-confirm-type: correlated
     publisher-returns: true
