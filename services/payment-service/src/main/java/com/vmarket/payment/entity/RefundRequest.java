@@ -17,8 +17,11 @@ public class RefundRequest {
     @Column(length = 36)
     private String id = UUID.randomUUID().toString();
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private Long paymentId;
+
+    @Column(length = 36)
+    private String returnId;
 
     @Column(nullable = false)
     private long amount;

@@ -32,10 +32,12 @@ CREATE TABLE order_return_items (
     variant_id      VARCHAR(26),
     quantity        INT          NOT NULL,
     unit_price      NUMERIC(12,2) NOT NULL,
-    line_total      NUMERIC(12,2) NOT NULL
+    line_total      NUMERIC(12,2) NOT NULL,
+    CONSTRAINT uq_order_return_items UNIQUE (return_id, order_item_id)
 );
 
 CREATE INDEX idx_order_return_items_return_id ON order_return_items (return_id);
+CREATE INDEX idx_order_returns_status_created ON order_returns (status, created_at);
 CREATE INDEX idx_order_items_shop_id ON order_items (shop_id);
 CREATE INDEX idx_orders_status_updated ON orders (status, updated_at);
 

@@ -39,7 +39,7 @@ import com.vmarket.order.repository.OrderReturnRepository;
 /**
  * Kiểm thử quy trình yêu cầu và xử lý trả hàng (FR-ORD-06, FR-ORD-07).
  */
-@SpringBootTest
+@SpringBootTest(properties = "app.jobs.enabled=true")
 @AutoConfigureMockMvc
 class OrderReturnApiTest {
 
@@ -53,6 +53,8 @@ class OrderReturnApiTest {
 	@Autowired private OrderRepository orderRepository;
 	@Autowired private OrderReturnRepository returnRepository;
 	@Autowired private OutboxRepository outboxRepository;
+	@Autowired private com.vmarket.order.service.OrderCompletionJob completionJob;
+	@Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
 	@MockitoBean private UserServiceClient userServiceClient;
 	@MockitoBean private CartServiceClient cartServiceClient;
@@ -468,5 +470,201 @@ class OrderReturnApiTest {
 		// Đúng 1 request thành công (201 Created), request còn lại bị xung đột (409 Conflict)
 		assertThat(statuses).containsExactlyInAnyOrder(201, 409);
 		assertThat(returnRepository.findByOrderId(order.getId())).hasSize(1);
+	}
+
+	@Test
+	void createReturn_rejectsDuplicateOrderItemInSingleRequest_returnsBadRequest() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String body = """
+				{
+				  "reason": "Hàng bị rách",
+				  "items": [
+				    { "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 },
+				    { "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }
+				  ]
+				}
+				""".formatted(orderItemId, orderItemId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("DUPLICATE_RETURN_ITEM"));
+	}
+
+	@Test
+	void orderComplete_thenBuyerDisputes_returnsConflict() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		// 1. Tạo yêu cầu trả hàng
+		String createBody = """
+				{
+				  "reason": "Hàng lỗi",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		var createRes = mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody))
+				.andExpect(status().isCreated())
+				.andReturn();
+
+		String returnId = com.jayway.jsonpath.JsonPath.read(createRes.getResponse().getContentAsString(), "$.id");
+
+		// 2. Seller từ chối -> Return thành REJECTED
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/reject")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Không nhận trả hàng\"}"))
+				.andExpect(status().isOk());
+
+		// 3. Buyer hoàn tất đơn hàng -> Order thành COMPLETED
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/complete")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
+				.andExpect(status().isOk());
+
+		// 4. Buyer cố khiếu nại Return sau khi đơn đã COMPLETED -> bị chặn 409 ORDER_ALREADY_COMPLETED
+		mockMvc.perform(post("/api/orders/returns/" + returnId + "/dispute")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Vẫn muốn khiếu nại\"}"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("ORDER_ALREADY_COMPLETED"));
+	}
+
+	@Test
+	void adminRejectsDispute_buyerCannotDisputeAgain() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		// 1. Tạo và Seller từ chối
+		String createBody = """
+				{
+				  "reason": "Hàng lỗi",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		var createRes = mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody))
+				.andExpect(status().isCreated())
+				.andReturn();
+
+		String returnId = com.jayway.jsonpath.JsonPath.read(createRes.getResponse().getContentAsString(), "$.id");
+
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/reject")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Từ chối\"}"))
+				.andExpect(status().isOk());
+
+		// 2. Buyer khiếu nại -> DISPUTED
+		mockMvc.perform(post("/api/orders/returns/" + returnId + "/dispute")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Khiếu nại người bán\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("DISPUTED"));
+
+		// 3. Admin phán xử bác bỏ khiếu nại -> ADMIN_REJECTED
+		mockMvc.perform(post("/api/orders/admin/returns/" + returnId + "/resolve")
+				.header(HttpHeaders.AUTHORIZATION, adminToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"approved\":false,\"restock\":false,\"note\":\"Admin bác bỏ khiếu nại do thiếu bằng chứng\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("ADMIN_REJECTED"));
+
+		// 4. Buyer cố khiếu nại lại phán quyết của Admin -> bị chặn 409 CANNOT_DISPUTE_ADMIN_DECISION
+		mockMvc.perform(post("/api/orders/returns/" + returnId + "/dispute")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"Khiếu nại lại lần nữa\"}"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("CANNOT_DISPUTE_ADMIN_DECISION"));
+	}
+
+	@Test
+	void adminResolvesPendingReturn_after48Hours_success() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String createBody = """
+				{
+				  "reason": "Hàng lỗi",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		var createRes = mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody))
+				.andExpect(status().isCreated())
+				.andReturn();
+
+		String returnId = com.jayway.jsonpath.JsonPath.read(createRes.getResponse().getContentAsString(), "$.id");
+
+		// Chưa quá 48h -> Admin bị chặn
+		mockMvc.perform(post("/api/orders/admin/returns/" + returnId + "/resolve")
+				.header(HttpHeaders.AUTHORIZATION, adminToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"approved\":true,\"restock\":false,\"note\":\"Admin can thiệp sớm\"}"))
+				.andExpect(status().isConflict());
+
+		// Lùi thời gian created_at của return về 50 giờ trước
+		jdbc.update("UPDATE order_returns SET created_at = ? WHERE id = ?",
+				Instant.parse("2026-11-04T10:00:00Z"), returnId);
+
+		// Sau 48h -> Admin phân xử thành công
+		mockMvc.perform(post("/api/orders/admin/returns/" + returnId + "/resolve")
+				.header(HttpHeaders.AUTHORIZATION, adminToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"approved\":true,\"restock\":false,\"note\":\"Seller quá hạn 48h, Admin duyệt hoàn tiền\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("RESOLVED"));
+	}
+
+	@Test
+	void sellerCannotAcceptOrRejectAfter48Hours() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+
+		String createBody = """
+				{
+				  "reason": "Hàng lỗi",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(orderItemId);
+
+		var createRes = mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody))
+				.andExpect(status().isCreated())
+				.andReturn();
+
+		String returnId = com.jayway.jsonpath.JsonPath.read(createRes.getResponse().getContentAsString(), "$.id");
+
+		// Lùi thời gian created_at về 50 giờ trước
+		jdbc.update("UPDATE order_returns SET created_at = ? WHERE id = ?",
+				Instant.parse("2026-11-04T10:00:00Z"), returnId);
+
+		// Seller cố chấp nhận sau 48h -> bị chặn và chuyển sang DISPUTED qua escalation
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/accept")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken()))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("SELLER_RESPONSE_WINDOW_EXPIRED"));
+
+		completionJob.escalateOverdueReturns();
+		OrderReturn updated = returnRepository.findById(returnId).orElseThrow();
+		assertThat(updated.getStatus()).isEqualTo(ReturnStatus.DISPUTED);
 	}
 }

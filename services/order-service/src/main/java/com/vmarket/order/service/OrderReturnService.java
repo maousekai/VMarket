@@ -5,8 +5,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -59,7 +61,8 @@ public class OrderReturnService {
 	 */
 	@Transactional
 	public ReturnResponse createReturn(String userId, String orderId, CreateReturnRequest request) {
-		// Khóa đơn hàng với pessimistic lock để chống race condition khi tạo yêu cầu trả hàng đồng thời
+		// Khóa đơn hàng với pessimistic lock để chống race condition khi tạo yêu cầu
+		// trả hàng đồng thời
 		Order order = orderRepository.lock(orderId)
 				.filter(o -> userId.equals(o.getUserId()))
 				.orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
@@ -82,8 +85,19 @@ public class OrderReturnService {
 		String targetShopId = null;
 		BigDecimal totalRefund = BigDecimal.ZERO;
 		List<OrderReturnItem> returnItems = new ArrayList<>();
+		Set<String> seenItemIds = new HashSet<>();
 
 		for (ReturnItemRequest itemReq : request.items()) {
+			if (itemReq.quantity() <= 0) {
+				throw ApiException.badRequest("INVALID_QUANTITY",
+						"Số lượng trả phải lớn hơn 0: " + itemReq.quantity());
+			}
+
+			if (!seenItemIds.add(itemReq.orderItemId())) {
+				throw ApiException.badRequest("DUPLICATE_RETURN_ITEM",
+						"Mỗi mặt hàng chỉ được xuất hiện một lần trong yêu cầu trả hàng: " + itemReq.orderItemId());
+			}
+
 			OrderItem orderItem = orderItemMap.get(itemReq.orderItemId());
 			if (orderItem == null) {
 				throw ApiException.badRequest("ITEM_NOT_IN_ORDER",
@@ -189,13 +203,29 @@ public class OrderReturnService {
 	 */
 	@Transactional
 	public ReturnResponse disputeReturn(String userId, String returnId, String reason) {
-		OrderReturn r = returnRepository.lock(returnId)
+		OrderReturn r = returnRepository.findById(returnId)
 				.filter(x -> userId.equals(x.getUserId()))
 				.orElseThrow(() -> ApiException.notFound("RETURN_NOT_FOUND", "Không tìm thấy yêu cầu trả hàng"));
 
+		Order order = orderRepository.lock(r.getOrderId())
+				.orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
+
+		if (order.getStatus() == OrderStatus.COMPLETED) {
+			throw ApiException.conflict("ORDER_ALREADY_COMPLETED",
+					"Không thể khiếu nại yêu cầu trả hàng của đơn đã hoàn tất.");
+		}
+
+		r = returnRepository.lock(returnId).orElseThrow();
+
+		if (r.getStatus() == ReturnStatus.ADMIN_REJECTED) {
+			throw ApiException.conflict("CANNOT_DISPUTE_ADMIN_DECISION",
+					"Quyết định của Quản trị viên là phán quyết cuối cùng, không thể khiếu nại lại.");
+		}
+
 		if (r.getStatus() != ReturnStatus.REJECTED) {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
-					"Chỉ có thể khiếu nại yêu cầu đã bị người bán từ chối (REJECTED). Trạng thái hiện tại: " + r.getStatus());
+					"Chỉ có thể khiếu nại yêu cầu đã bị người bán từ chối (REJECTED). Trạng thái hiện tại: "
+							+ r.getStatus());
 		}
 
 		r.setStatus(ReturnStatus.DISPUTED);
@@ -233,6 +263,10 @@ public class OrderReturnService {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
 					"Chỉ có thể chấp nhận yêu cầu ở trạng thái PENDING. Trạng thái hiện tại: " + r.getStatus());
 		}
+		if (clock.instant().isAfter(r.getCreatedAt().plus(Duration.ofHours(48)))) {
+			throw ApiException.conflict("SELLER_RESPONSE_WINDOW_EXPIRED",
+					"Đã quá thời hạn 48 giờ để người bán phản hồi. Yêu cầu đã được chuyển cho Quản trị viên phân xử.");
+		}
 
 		r.setStatus(ReturnStatus.APPROVED);
 		OrderReturn saved = returnRepository.save(r);
@@ -254,6 +288,10 @@ public class OrderReturnService {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
 					"Chỉ có thể từ chối yêu cầu ở trạng thái PENDING. Trạng thái hiện tại: " + r.getStatus());
 		}
+		if (clock.instant().isAfter(r.getCreatedAt().plus(Duration.ofHours(48)))) {
+			throw ApiException.conflict("SELLER_RESPONSE_WINDOW_EXPIRED",
+					"Đã quá thời hạn 48 giờ để người bán phản hồi. Yêu cầu đã được chuyển cho Quản trị viên phân xử.");
+		}
 
 		r.setStatus(ReturnStatus.REJECTED);
 		r.setSellerNote(reason.trim());
@@ -263,7 +301,8 @@ public class OrderReturnService {
 	}
 
 	/**
-	 * Seller xác nhận đã nhận lại hàng thu hồi: kích hoạt hoàn tiền và nhập kho lại (FR-ORD-07).
+	 * Seller xác nhận đã nhận lại hàng thu hồi: kích hoạt hoàn tiền và nhập kho lại
+	 * (FR-ORD-07).
 	 */
 	@Transactional
 	public ReturnResponse confirmReceipt(String userId, String bearerToken, String shopId, String returnId) {
@@ -276,7 +315,8 @@ public class OrderReturnService {
 		}
 		if (r.getStatus() != ReturnStatus.APPROVED) {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
-					"Chỉ có thể xác nhận nhận hàng khi yêu cầu đã được người bán chấp thuận (APPROVED). Trạng thái hiện tại: " + r.getStatus());
+					"Chỉ có thể xác nhận nhận hàng khi yêu cầu đã được người bán chấp thuận (APPROVED). Trạng thái hiện tại: "
+							+ r.getStatus());
 		}
 
 		r.setStatus(ReturnStatus.RESOLVED);
@@ -289,7 +329,7 @@ public class OrderReturnService {
 
 		outbox.add(
 				EventType.RETURN_RESOLVED,
-				new ReturnResolved(saved.getId(), saved.getOrderId(), true, items));
+				new ReturnResolved(saved.getId(), saved.getOrderId(), saved.getRefundAmount(), true, items));
 
 		log.info("Seller shopId={} xác nhận thu hồi hàng trả {} cho đơn {} -> RESOLVED (phát ReturnResolved)",
 				targetShopId, returnId, saved.getOrderId());
@@ -313,9 +353,13 @@ public class OrderReturnService {
 		OrderReturn r = returnRepository.lock(returnId)
 				.orElseThrow(() -> ApiException.notFound("RETURN_NOT_FOUND", "Không tìm thấy yêu cầu trả hàng"));
 
-		if (r.getStatus() != ReturnStatus.DISPUTED) {
+		boolean isPendingOverdue = r.getStatus() == ReturnStatus.PENDING
+				&& !clock.instant().isBefore(r.getCreatedAt().plus(Duration.ofHours(48)));
+
+		if (r.getStatus() != ReturnStatus.DISPUTED && !isPendingOverdue) {
 			throw ApiException.conflict("INVALID_RETURN_STATUS",
-					"Chỉ có thể phân xử yêu cầu ở trạng thái DISPUTED (khiếu nại). Trạng thái hiện tại: " + r.getStatus());
+					"Chỉ có thể phân xử yêu cầu ở trạng thái DISPUTED hoặc PENDING đã quá hạn 48 giờ phản hồi. Trạng thái hiện tại: "
+							+ r.getStatus());
 		}
 
 		if (request.approved()) {
@@ -329,14 +373,15 @@ public class OrderReturnService {
 
 			outbox.add(
 					EventType.RETURN_RESOLVED,
-					new ReturnResolved(r.getId(), r.getOrderId(), request.restock(), items));
+					new ReturnResolved(r.getId(), r.getOrderId(), r.getRefundAmount(), request.restock(), items));
 
 			log.info("Admin {} phân xử CHẤP THUẬN yêu cầu trả hàng {} -> RESOLVED (restock={})",
 					adminId, returnId, request.restock());
 		} else {
-			r.setStatus(ReturnStatus.REJECTED);
+			r.setStatus(ReturnStatus.ADMIN_REJECTED);
+			r.setResolvedAt(clock.instant());
 			r.setAdminNote(request.note() != null ? request.note().trim() : "Admin bác bỏ khiếu nại");
-			log.info("Admin {} phân xử BÁC BỎ yêu cầu trả hàng {} -> REJECTED", adminId, returnId);
+			log.info("Admin {} phân xử BÁC BỎ yêu cầu trả hàng {} -> ADMIN_REJECTED", adminId, returnId);
 		}
 
 		return ReturnResponse.from(returnRepository.save(r));

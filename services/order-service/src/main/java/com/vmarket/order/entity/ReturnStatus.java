@@ -20,6 +20,9 @@ public enum ReturnStatus {
 	RESOLVED,
 
 	/** Buyer tự hủy yêu cầu trả hàng. */
-	CANCELLED
+	CANCELLED,
+
+	/** Admin phân xử bác bỏ khiếu nại (kết quả cuối cùng, không thể khiếu nại lại). */
+	ADMIN_REJECTED
 }
 

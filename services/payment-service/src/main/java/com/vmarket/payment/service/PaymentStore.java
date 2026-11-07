@@ -11,6 +11,7 @@ import com.vmarket.payment.exception.ApiException;
 import com.vmarket.payment.repository.*;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.ResolverStyle;
 import java.util.*;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentStore {
@@ -448,12 +450,46 @@ public class PaymentStore {
         return refund(p, reason);
     }
 
+    @Transactional
+    public RefundRequest processReturnRefund(String orderId, String returnId, long refundAmount, String reason) {
+        if (returnId != null) {
+            var existing = refunds.findByReturnId(returnId);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+        }
+        var p = payments.lockByOrderId(orderId).orElse(null);
+        if (p == null || p.getPaidAt() == null) {
+            log.warn("Không thể hoàn tiền cho returnId={}: đơn {} chưa thanh toán", returnId, orderId);
+            return null;
+        }
+        long totalRefunded = refunds.findAllByPaymentId(p.getId()).stream()
+                .mapToLong(RefundRequest::getAmount)
+                .sum();
+        long remaining = p.getAmount() - totalRefunded;
+        if (remaining <= 0) {
+            log.warn("Tổng số tiền đã hoàn ({}) đạt mức tối đa thanh toán ({}) của đơn {}", totalRefunded, p.getAmount(), orderId);
+            return null;
+        }
+        long amountToRefund = Math.min(refundAmount, remaining);
+        var r = new RefundRequest();
+        r.setPaymentId(p.getId());
+        r.setReturnId(returnId);
+        r.setAmount(amountToRefund);
+        r.setReason(reason != null ? reason : "Hoàn tiền trả hàng " + returnId);
+        r.setRequestedAt(clock.instant());
+        return refunds.save(r);
+    }
+
     private RefundRequest refund(PaymentTransaction p, String reason) {
-        return refunds.findByPaymentId(p.getId())
+        String cancelReturnId = "CANCELLATION_" + p.getId();
+        return refunds.findByReturnId(cancelReturnId)
+                .or(() -> refunds.findByPaymentId(p.getId()))
                 .orElseGet(
                         () -> {
                             var r = new RefundRequest();
                             r.setPaymentId(p.getId());
+                            r.setReturnId(cancelReturnId);
                             r.setAmount(p.getAmount());
                             r.setReason(reason);
                             r.setRequestedAt(clock.instant());

@@ -13,6 +13,10 @@ import java.util.*;
 public interface RefundRepository extends JpaRepository<RefundRequest, String> {
     Optional<RefundRequest> findByPaymentId(Long id);
 
+    Optional<RefundRequest> findByReturnId(String returnId);
+
+    List<RefundRequest> findAllByPaymentId(Long paymentId);
+
     List<RefundRequest> findByStatusOrderByRequestedAtAsc(String status, Pageable page);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

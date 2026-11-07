@@ -39,7 +39,8 @@ public interface OrderReturnRepository extends JpaRepository<OrderReturn, String
 
 	boolean existsByOrderIdAndStatusIn(String orderId, List<ReturnStatus> statuses);
 
+	List<OrderReturn> findByStatusAndCreatedAtLessThanEqual(ReturnStatus status, java.time.Instant cutoff);
+
 	@Query("select count(i) > 0 from OrderReturnItem i where i.orderReturn.orderId = :orderId and i.orderItemId = :orderItemId and i.orderReturn.status <> 'CANCELLED'")
 	boolean isOrderItemAlreadyRequested(@Param("orderId") String orderId, @Param("orderItemId") String orderItemId);
 }
-

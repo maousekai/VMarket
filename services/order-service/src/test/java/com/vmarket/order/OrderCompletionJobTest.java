@@ -50,6 +50,7 @@ class OrderCompletionJobTest {
 	@Autowired private OrderReturnRepository returnRepository;
 	@Autowired private OutboxRepository outboxRepository;
 	@Autowired private OrderCompletionJob completionJob;
+	@Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
 	@MockitoBean private UserServiceClient userServiceClient;
 	@MockitoBean private CartServiceClient cartServiceClient;
@@ -151,5 +152,41 @@ class OrderCompletionJobTest {
 
 		Order updated = orderRepository.findById(order.getId()).orElseThrow();
 		assertThat(updated.getStatus()).isEqualTo(OrderStatus.DELIVERED);
+	}
+
+	@Test
+	void run_completesOverdueDeliveredOrder_viaScheduledEntrypoint_andWritesOutbox() {
+		Order order = createDeliveredOrder();
+		order.setDeliveredAt(Instant.parse("2026-10-29T10:00:00Z")); // > 7 days before 2026-11-06T12:00:00Z
+		orderRepository.save(order);
+
+		completionJob.run();
+
+		Order updated = orderRepository.findById(order.getId()).orElseThrow();
+		assertThat(updated.getStatus()).isEqualTo(OrderStatus.COMPLETED);
+		assertThat(outboxRepository.count()).isEqualTo(1);
+	}
+
+	@Test
+	void run_escalatesPendingReturnsOlderThan48Hours_toDisputed() {
+		Order order = createDeliveredOrder();
+
+		OrderReturn orderReturn = new OrderReturn();
+		orderReturn.setOrderId(order.getId());
+		orderReturn.setUserId(BUYER_USER);
+		orderReturn.setShopId("01JBQ9SHOP0000000000000001");
+		orderReturn.setStatus(ReturnStatus.PENDING);
+		orderReturn.setReason("Lỗi sản phẩm");
+		OrderReturn saved = returnRepository.save(orderReturn);
+
+		// Backdate created_at to 50 hours before clock.instant() (2026-11-06T12:00:00Z -> 2026-11-04T10:00:00Z)
+		jdbc.update("UPDATE order_returns SET created_at = ? WHERE id = ?",
+				Instant.parse("2026-11-04T10:00:00Z"), saved.getId());
+
+		completionJob.run();
+
+		OrderReturn updated = returnRepository.findById(saved.getId()).orElseThrow();
+		assertThat(updated.getStatus()).isEqualTo(ReturnStatus.DISPUTED);
+		assertThat(updated.getAdminNote()).contains("Quá hạn 48 giờ");
 	}
 }
