@@ -31,6 +31,7 @@ import java.util.*;
 public class PaymentStore {
     private final PaymentRepository payments;
     private final RefundRepository refunds;
+    private final PendingReturnRefundRepository pendingRefunds;
     private final Outbox outbox;
     private final Clock clock;
     private final PaymentOrderStateRepository states;
@@ -273,6 +274,7 @@ public class PaymentStore {
             if (!closed)
                 outbox.add(EventType.PAYMENT_FAILED, new PaymentFailed(p.getOrderId(), "EXPIRED"));
         } else outbox.add(EventType.PAYMENT_SUCCEEDED, new PaymentSucceeded(p.getOrderId()));
+        processPendingReturnRefunds(p);
     }
 
     @Transactional
@@ -409,6 +411,7 @@ public class PaymentStore {
         p.setPaidAt(clock.instant());
         p.setStatus("SUCCEEDED");
         if (cancelled) refund(p, "COD đến sau khi đơn hủy");
+        processPendingReturnRefunds(p);
         // Delivery owns DELIVERED; a PayOS-style PaymentSucceeded must not revive a COD order.
     }
 
@@ -460,15 +463,39 @@ public class PaymentStore {
         }
         var p = payments.lockByOrderId(orderId).orElse(null);
         if (p == null || p.getPaidAt() == null) {
-            log.warn("Không thể hoàn tiền cho returnId={}: đơn {} chưa thanh toán", returnId, orderId);
+            if (returnId != null) {
+                var pending = pendingRefunds.findByReturnId(returnId).orElseGet(() ->
+                        new PendingReturnRefund(
+                                orderId,
+                                returnId,
+                                refundAmount,
+                                reason != null ? reason : "Hoàn tiền trả hàng " + returnId,
+                                clock.instant()));
+                pending.setAmount(refundAmount);
+                pending.setProcessed(false);
+                pendingRefunds.save(pending);
+                log.info("Lưu pending refund intent cho returnId={} trên đơn {} (chờ thanh toán hoàn tất)",
+                        returnId, orderId);
+            }
             return null;
+        }
+
+        return createRefundForReturn(p, returnId, refundAmount, reason);
+    }
+
+    private RefundRequest createRefundForReturn(PaymentTransaction p, String returnId, long refundAmount, String reason) {
+        if (returnId != null) {
+            var existing = refunds.findByReturnId(returnId);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
         }
         long totalRefunded = refunds.findAllByPaymentId(p.getId()).stream()
                 .mapToLong(RefundRequest::getAmount)
                 .sum();
         long remaining = p.getAmount() - totalRefunded;
         if (remaining <= 0) {
-            log.warn("Tổng số tiền đã hoàn ({}) đạt mức tối đa thanh toán ({}) của đơn {}", totalRefunded, p.getAmount(), orderId);
+            log.warn("Tổng số tiền đã hoàn ({}) đạt mức tối đa thanh toán ({}) của đơn {}", totalRefunded, p.getAmount(), p.getOrderId());
             return null;
         }
         long amountToRefund = Math.min(refundAmount, remaining);
@@ -478,23 +505,59 @@ public class PaymentStore {
         r.setAmount(amountToRefund);
         r.setReason(reason != null ? reason : "Hoàn tiền trả hàng " + returnId);
         r.setRequestedAt(clock.instant());
-        return refunds.save(r);
+        RefundRequest saved = refunds.save(r);
+
+        if (returnId != null) {
+            pendingRefunds.findByReturnId(returnId).ifPresent(pending -> {
+                pending.setProcessed(true);
+                pendingRefunds.save(pending);
+            });
+        }
+        log.info("Đã tạo yêu cầu hoàn tiền {} cho returnId={}, paymentId={}, đơn {}",
+                saved.getId(), returnId, p.getId(), p.getOrderId());
+        return saved;
+    }
+
+    private void processPendingReturnRefunds(PaymentTransaction p) {
+        List<PendingReturnRefund> pendings =
+                pendingRefunds.findByOrderIdAndProcessedFalseOrderByCreatedAtAsc(p.getOrderId());
+        for (PendingReturnRefund pending : pendings) {
+            try {
+                createRefundForReturn(p, pending.getReturnId(), pending.getAmount(), pending.getReason());
+            } catch (Exception ex) {
+                log.error("Lỗi khi xử lý pending return refund {} cho đơn {}: {}",
+                        pending.getReturnId(), p.getOrderId(), ex.getMessage(), ex);
+            }
+        }
     }
 
     private RefundRequest refund(PaymentTransaction p, String reason) {
         String cancelReturnId = "CANCELLATION_" + p.getId();
-        return refunds.findByReturnId(cancelReturnId)
-                .or(() -> refunds.findByPaymentId(p.getId()))
-                .orElseGet(
-                        () -> {
-                            var r = new RefundRequest();
-                            r.setPaymentId(p.getId());
-                            r.setReturnId(cancelReturnId);
-                            r.setAmount(p.getAmount());
-                            r.setReason(reason);
-                            r.setRequestedAt(clock.instant());
-                            return refunds.save(r);
-                        });
+        var existing = refunds.findByReturnId(cancelReturnId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        var legacy = refunds.findFirstByPaymentIdAndReturnIdIsNull(p.getId());
+        if (legacy.isPresent()) {
+            return legacy.get();
+        }
+
+        long totalRefunded = refunds.findAllByPaymentId(p.getId()).stream()
+                .mapToLong(RefundRequest::getAmount)
+                .sum();
+        long remaining = p.getAmount() - totalRefunded;
+        if (remaining <= 0) {
+            log.info("Payment {} đã được hoàn tiền đủ (tổng hoàn {} / giá trị {})", p.getId(), totalRefunded, p.getAmount());
+            return refunds.findFirstByPaymentIdOrderByRequestedAtDesc(p.getId()).orElse(null);
+        }
+
+        var r = new RefundRequest();
+        r.setPaymentId(p.getId());
+        r.setReturnId(cancelReturnId);
+        r.setAmount(remaining);
+        r.setReason(reason);
+        r.setRequestedAt(clock.instant());
+        return refunds.save(r);
     }
 
     @Transactional
