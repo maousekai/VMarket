@@ -24,6 +24,6 @@ public class ReviewCreatedCatalogConsumer implements EventConsumer<ReviewCreated
 	@Override
 	public void handle(ReviewCreated payload, EventEnvelope envelope) {
 		ratingService.synchronize(payload.productId(), payload.ratingAverage(), payload.ratingCount(),
-				Instant.ofEpochMilli(envelope.timestamp()));
+				payload.revision(), Instant.ofEpochMilli(envelope.timestamp()));
 	}
 }

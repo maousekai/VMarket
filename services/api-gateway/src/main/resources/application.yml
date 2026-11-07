@@ -133,6 +133,10 @@ app:
       # END GENERATED SEARCH ROUTES
       - /api/products/**
       - /api/shops/**
+      # Review (PBL6-22): chi danh sach + diem tong hop cua san pham / gian hang la cong khai;
+      # /api/reviews/me, /seller/**, /admin/** van bat buoc dang nhap.
+      - /api/reviews/products/**
+      - /api/reviews/shops/**
       - /api/ai/recommendations/for-you
       - /api/ai/recommendations/similar/*
       - /api/ai/recommendations/health
