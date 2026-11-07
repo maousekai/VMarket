@@ -100,6 +100,9 @@ public class Order extends BaseEntity {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	@Column(name = "delivered_at")
+	private Instant deliveredAt;
+
 	/**
 	 * Item của đơn. {@code mappedBy} + {@code cascade ALL} để lưu đơn là lưu trọn
 	 * bộ item trong cùng transaction (một đơn không item là đơn hỏng). items được

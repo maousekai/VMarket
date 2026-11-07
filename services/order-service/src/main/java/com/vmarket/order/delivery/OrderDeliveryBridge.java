@@ -24,6 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +34,7 @@ public class OrderDeliveryBridge {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final Outbox outbox;
+    private final Clock clock;
 
     public void authorize(String key) {
         if (key == null
@@ -62,6 +64,10 @@ public class OrderDeliveryBridge {
                 throw ApiException.conflict("STOCK_NOT_RESERVED", "Chưa giữ được tồn kho");
             }
             if (order.getStatus() == OrderStatus.PENDING) {
+                boolean allConfirmed = order.getItems().stream().allMatch(com.vmarket.order.entity.OrderItem::isConfirmed);
+                if (!allConfirmed) {
+                    throw ApiException.conflict("ORDER_NOT_CONFIRMED", "Đơn hàng chưa được tất cả gian hàng xác nhận");
+                }
                 order.setStatus(OrderStatus.PROCESSING);
                 enqueue(
                         new OrderStatusChanged(
@@ -111,6 +117,9 @@ public class OrderDeliveryBridge {
                 || order.getStatus() == OrderStatus.DELIVERED) return;
         var before = order.getStatus();
         order.setStatus(next);
+        if (next == OrderStatus.DELIVERED && order.getDeliveredAt() == null) {
+            order.setDeliveredAt(clock.instant());
+        }
         jdbc.update(
                 "update orders set delivery_version = ? where id = ?",
                 event.version(),

@@ -54,4 +54,11 @@ public class OrderItem extends BaseEntity {
 	/** Tổng tiền dòng = unitPrice * quantity, tính lúc tạo để truy vấn không phải nhân lại. */
 	@Column(name = "line_total", nullable = false, precision = 12, scale = 2)
 	private BigDecimal lineTotal;
+
+	/**
+	 * Người bán của gian hàng đã xác nhận mặt hàng này (FR-ORD-04).
+	 * Đơn hàng có thể gồm nhiều shop; toàn bộ đơn chuyển sang PROCESSING khi tất cả shop đều xác nhận.
+	 */
+	@Column(name = "confirmed", nullable = false)
+	private boolean confirmed = false;
 }

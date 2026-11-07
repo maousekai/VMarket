@@ -135,4 +135,73 @@ class OrderDeliveryBridgeTest {
         assertThat(jdbc.queryForList("select payload from event_outbox", String.class))
                 .anyMatch(p -> p.contains("CANCELLED"));
     }
+
+    @Test
+    void multiShopOrder_handoffClaimFails_whenNotAllShopsConfirmed() throws Exception {
+        Order multiOrder = new Order();
+        multiOrder.setUserId("buyer");
+        multiOrder.setStatus(OrderStatus.PENDING);
+        multiOrder.setStockReserved(true);
+        multiOrder.setTotalAmount(new BigDecimal("200000"));
+        multiOrder.setRecipientName("Buyer");
+        multiOrder.setPhone("0901234567");
+        multiOrder.setProvince("Đà Nẵng");
+        multiOrder.setDistrict("Hải Châu");
+        multiOrder.setWard("Phường 1");
+        multiOrder.setStreetAddress("1 đường giao");
+
+        OrderItem itemA = new OrderItem();
+        itemA.setOrder(multiOrder);
+        itemA.setShopId("SHOP_A");
+        itemA.setProductId("P1");
+        itemA.setQuantity(1);
+        itemA.setUnitPrice(new BigDecimal("100000"));
+        itemA.setLineTotal(new BigDecimal("100000"));
+        itemA.setConfirmed(true);
+        multiOrder.getItems().add(itemA);
+
+        OrderItem itemB = new OrderItem();
+        itemB.setOrder(multiOrder);
+        itemB.setShopId("SHOP_B");
+        itemB.setProductId("P2");
+        itemB.setQuantity(1);
+        itemB.setUnitPrice(new BigDecimal("100000"));
+        itemB.setLineTotal(new BigDecimal("100000"));
+        itemB.setConfirmed(false);
+        multiOrder.getItems().add(itemB);
+
+        orders.saveAndFlush(multiOrder);
+
+        // Claim fails with 409 ORDER_NOT_CONFIRMED
+        mvc.perform(
+                        post("/internal/delivery/orders/{id}/claim", multiOrder.getId())
+                                .header("X-Internal-Api-Key", key.getInternalApiKey()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ORDER_NOT_CONFIRMED"));
+
+        assertThat(orders.findById(multiOrder.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.PENDING);
+
+        // Shop B confirms
+        itemB.setConfirmed(true);
+        orders.saveAndFlush(multiOrder);
+
+        // Claim succeeds -> PROCESSING
+        mvc.perform(
+                        post("/internal/delivery/orders/{id}/claim", multiOrder.getId())
+                                .header("X-Internal-Api-Key", key.getInternalApiKey()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
+
+        assertThat(orders.findById(multiOrder.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.PROCESSING);
+    }
+
+    @Test
+    void deliveryStatusDelivered_setsDeliveredAt() {
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "DELIVERED", 20));
+        Order delivered = orders.findById(order.getId()).orElseThrow();
+        assertThat(delivered.getStatus()).isEqualTo(OrderStatus.DELIVERED);
+        assertThat(delivered.getDeliveredAt()).isNotNull();
+    }
 }

@@ -69,6 +69,8 @@ app:
   # khoá noi bo vi user-service khong mo endpoint /internal nao cho order-service.
   user-service:
     base-url: ${USER_SERVICE_URL:http://localhost:8082}
+  shop-service:
+    base-url: ${SHOP_SERVICE_URL:http://localhost:8083}
 
 # JWT - order-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
 # hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va

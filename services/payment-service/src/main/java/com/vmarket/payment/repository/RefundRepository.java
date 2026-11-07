@@ -11,7 +11,18 @@ import org.springframework.data.repository.query.Param;
 import java.util.*;
 
 public interface RefundRepository extends JpaRepository<RefundRequest, String> {
-    Optional<RefundRequest> findByPaymentId(Long id);
+
+    Optional<RefundRequest> findFirstByPaymentIdOrderByRequestedAtDesc(Long id);
+
+    Optional<RefundRequest> findFirstByPaymentIdAndReturnIdIsNull(Long id);
+
+    default Optional<RefundRequest> findByPaymentId(Long id) {
+        return findFirstByPaymentIdOrderByRequestedAtDesc(id);
+    }
+
+    Optional<RefundRequest> findByReturnId(String returnId);
+
+    List<RefundRequest> findAllByPaymentId(Long paymentId);
 
     List<RefundRequest> findByStatusOrderByRequestedAtAsc(String status, Pageable page);
 
