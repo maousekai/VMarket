@@ -1,5 +1,6 @@
 package com.vmarket.cart.service;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.http.HttpStatusCode;
@@ -9,6 +10,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import com.vmarket.cart.config.ProductCatalogProperties;
+import com.vmarket.cart.dto.ProductCatalogWire;
 import com.vmarket.cart.dto.ProductSnapshot;
 import com.vmarket.cart.exception.ProductCatalogUnavailableException;
 
@@ -39,12 +41,12 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 
 	@Override
 	public Optional<ProductSnapshot> findProduct(String productId) {
-		ProductSnapshot snapshot;
+		ProductCatalogWire wire;
 		try {
-			snapshot = restClient.get()
+			wire = restClient.get()
 					.uri("/api/products/{productId}", productId)
 					.retrieve()
-					.body(ProductSnapshot.class);
+					.body(ProductCatalogWire.class);
 		} catch (HttpStatusCodeException ex) {
 			HttpStatusCode status = ex.getStatusCode();
 			if (status.value() == 404) {
@@ -69,13 +71,55 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 					"Phản hồi product-service không đọc được", ex);
 		}
 
-		if (snapshot == null) {
+		if (wire == null) {
 			// 200 nhưng không có nội dung: KHÔNG phải "sản phẩm đã bị xoá" (đó là 404),
 			// mà là phản hồi sai hợp đồng — coi như chưa kiểm tra được, không phải NOT_FOUND.
 			log.warn("product-service trả body rỗng cho productId={}", productId);
 			throw new ProductCatalogUnavailableException(
 					"product-service trả phản hồi rỗng", null);
 		}
-		return Optional.of(snapshot);
+		return toSnapshot(wire, productId);
+	}
+
+	/**
+	 * Map cả dạng bọc ({@code product}) lẫn dạng phẳng cũ sang {@link ProductSnapshot}.
+	 * Sản phẩm không ACTIVE hoặc bị kiểm duyệt gỡ → {@code Optional#empty()} (CheckoutService
+	 * báo NOT_FOUND như sản phẩm không còn bán).
+	 */
+	static Optional<ProductSnapshot> toSnapshot(ProductCatalogWire wire, String requestedId) {
+		ProductCatalogWire.Detail p = wire.product();
+		if (p == null) {
+			// Dạng phẳng cũ.
+			List<ProductSnapshot.VariantSnapshot> variants = wire.variants() == null ? null
+					: wire.variants().stream().map(v -> toVariant(v)).toList();
+			return Optional.of(new ProductSnapshot(
+					wire.productId(), wire.shopId(), wire.price(), wire.stock(), variants));
+		}
+
+		if (Boolean.TRUE.equals(p.moderationRemoved())
+				|| (p.status() != null && !"ACTIVE".equalsIgnoreCase(p.status()))) {
+			return Optional.empty();
+		}
+		List<ProductSnapshot.VariantSnapshot> variants = p.variants() == null
+				|| p.variants().isEmpty() ? null
+						: p.variants().stream().map(v -> toVariant(v)).toList();
+		return Optional.of(new ProductSnapshot(
+				p.id() != null ? p.id() : requestedId,
+				p.shopId(),
+				p.minPrice(),
+				p.availableStock() == null ? null : clamp(p.availableStock()),
+				variants));
+	}
+
+	private static ProductSnapshot.VariantSnapshot toVariant(ProductCatalogWire.Variant v) {
+		Long stock = v.availableStock() != null ? v.availableStock() : v.stock();
+		return new ProductSnapshot.VariantSnapshot(
+				v.id() != null ? v.id() : v.variantId(),
+				v.price(),
+				stock == null ? null : clamp(stock));
+	}
+
+	private static int clamp(long value) {
+		return (int) Math.max(0, Math.min(Integer.MAX_VALUE, value));
 	}
 }

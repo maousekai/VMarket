@@ -13,6 +13,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(name = "OrderItemResponse", description = "Dòng hàng trong đơn")
 public record OrderItemResponse(
 
+		@Schema(description = "Id dòng hàng (orderItemId) — dùng cho yêu cầu trả hàng và đánh giá",
+				example = "01JBQ9YDX7K3M8N5P2R4T6V8W0") String id,
+
 		@Schema(example = "01JBQ9YDX7K3M8N5P2R4T6V8W1") String productId,
 
 		@Schema(example = "01JBQ9YDX7K3M8N5P2R4T6V8W2") String variantId,
@@ -27,6 +30,7 @@ public record OrderItemResponse(
 
 	public static OrderItemResponse from(OrderItem item) {
 		return new OrderItemResponse(
+				item.getId(),
 				item.getProductId(),
 				item.getVariantId(),
 				item.getShopId(),
