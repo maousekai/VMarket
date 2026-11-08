@@ -85,7 +85,8 @@ public class AuthController {
 			HttpServletResponse httpResponse) {
 		TokenIssuer.IssuedTokens issued = authenticationService.login(request, deviceMetaResolver.resolve(httpRequest));
 		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
-		return issued.body();
+		return refreshCookieService.decorate(httpRequest, issued.body(), issued.rawRefreshToken(),
+				jwtProps.getRefreshTtl());
 	}
 
 	@Operation(summary = "Làm mới access token (FR-AUTH-02)",
@@ -128,6 +129,7 @@ public class AuthController {
 			throw ex;
 		}
 		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
-		return issued.body();
+		return refreshCookieService.decorate(httpRequest, issued.body(), issued.rawRefreshToken(),
+				jwtProps.getRefreshTtl());
 	}
 }

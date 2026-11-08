@@ -8,6 +8,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 import com.vmarket.auth.config.AuthRefreshCookieProperties;
+import com.vmarket.auth.dto.TokenResponse;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,6 +26,9 @@ import lombok.RequiredArgsConstructor;
 public class RefreshTokenCookieService {
 
 	public static final String COOKIE_NAME = "refresh_token";
+	public static final String CLIENT_TYPE_HEADER = "X-Client-Type";
+	public static final String REFRESH_HEADER = "X-Refresh-Token";
+	private static final String MOBILE_CLIENT = "mobile";
 	private static final String PATH = "/api/auth";
 
 	private final AuthRefreshCookieProperties props;
@@ -42,15 +46,38 @@ public class RefreshTokenCookieService {
 	/** Đọc raw refresh token từ cookie của request, nếu có. */
 	public Optional<String> read(HttpServletRequest request) {
 		Cookie[] cookies = request.getCookies();
-		if (cookies == null) {
-			return Optional.empty();
+		if (cookies != null) {
+			for (Cookie cookie : cookies) {
+				if (COOKIE_NAME.equals(cookie.getName()) && !cookie.getValue().isBlank()) {
+					return Optional.of(cookie.getValue());
+				}
+			}
 		}
-		for (Cookie cookie : cookies) {
-			if (COOKIE_NAME.equals(cookie.getName()) && !cookie.getValue().isBlank()) {
-				return Optional.of(cookie.getValue());
+		// Client native không có cookie jar đáng tin: dự phòng header X-Refresh-Token,
+		// nhưng CHỈ cho request mobile không Origin/Referer (trình duyệt luôn gửi một trong hai).
+		if (isNativeMobileRequest(request)) {
+			String header = request.getHeader(REFRESH_HEADER);
+			if (header != null && !header.isBlank()) {
+				return Optional.of(header.trim());
 			}
 		}
 		return Optional.empty();
+	}
+
+	/**
+	 * Client native opt-in: {@code X-Client-Type: mobile} và KHÔNG có {@code Origin} lẫn
+	 * {@code Referer}. Trình duyệt luôn gửi Origin trên POST fetch, nên payload XSS không
+	 * thể tự opt-in để lấy refresh token ra body (giữ nguyên bảo vệ PBL6-46 cho web).
+	 */
+	public boolean isNativeMobileRequest(HttpServletRequest request) {
+		return MOBILE_CLIENT.equalsIgnoreCase(request.getHeader(CLIENT_TYPE_HEADER))
+				&& request.getHeader("Origin") == null
+				&& request.getHeader("Referer") == null;
+	}
+
+	/** Gắn refresh token vào body nếu request là client native; ngược lại giữ nguyên body. */
+	public TokenResponse decorate(HttpServletRequest request, TokenResponse body, String rawToken, Duration ttl) {
+		return isNativeMobileRequest(request) ? body.withRefreshToken(rawToken, ttl.toSeconds()) : body;
 	}
 
 	private ResponseCookie build(String value, Duration maxAge) {
