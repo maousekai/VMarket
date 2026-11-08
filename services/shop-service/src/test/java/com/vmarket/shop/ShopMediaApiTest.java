@@ -1,5 +1,6 @@
 package com.vmarket.shop;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -149,8 +150,69 @@ class ShopMediaApiTest extends ShopApiTestSupport {
 						.content(json(update)))
 				.andExpect(status().isOk());
 
-		verify(mediaStorage).deleteQuietly(oldLogo, "shops/" + OWNER_A + "/logo");
-		verify(mediaStorage).deleteQuietly(oldCover, "shops/" + OWNER_A + "/cover");
+		verify(mediaStorage).deleteQuietly(oldLogo, "shops/" + OWNER_A);
+		verify(mediaStorage).deleteQuietly(oldCover, "shops/" + OWNER_A);
+	}
+
+	@Test
+	void updateMine_chuyenLogoThanhCover_khongXoaAnhDangDung() throws Exception {
+		String image = "http://localhost:9000/vmarket-media/shops/" + OWNER_A + "/logo/shared.png";
+		Map<String, Object> registration = validShop("Gốm Thanh Hà");
+		registration.put("logoUrl", image);
+		registration.remove("coverUrl");
+		mockMvc.perform(post("/api/shops")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(registration)))
+				.andExpect(status().isCreated());
+
+		Map<String, Object> update = validShop("Gốm Thanh Hà");
+		update.put("logoUrl", null);
+		update.put("coverUrl", image);
+		mockMvc.perform(put("/api/shops/me")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(update)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.logoUrl").value(nullValue()))
+				.andExpect(jsonPath("$.coverUrl").value(image));
+
+		verify(mediaStorage, never()).deleteQuietly(any(), any());
+	}
+
+	@Test
+	void updateMine_logoVaCoverCungUrl_chiXoaKhiCaHaiKhongConDung() throws Exception {
+		String shared = "http://localhost:9000/vmarket-media/shops/" + OWNER_A + "/logo/shared.png";
+		Map<String, Object> registration = validShop("Gốm Thanh Hà");
+		registration.put("logoUrl", shared);
+		registration.put("coverUrl", shared);
+		mockMvc.perform(post("/api/shops")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(registration)))
+				.andExpect(status().isCreated());
+
+		Map<String, Object> update = validShop("Gốm Thanh Hà");
+		update.put("logoUrl", null);
+		update.put("coverUrl", shared);
+		mockMvc.perform(put("/api/shops/me")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(update)))
+				.andExpect(status().isOk());
+
+		verify(mediaStorage, never()).deleteQuietly(any(), any());
+
+		Map<String, Object> removeBoth = validShop("Gốm Thanh Hà");
+		removeBoth.put("logoUrl", null);
+		removeBoth.put("coverUrl", null);
+		mockMvc.perform(put("/api/shops/me")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(removeBoth)))
+				.andExpect(status().isOk());
+
+		verify(mediaStorage).deleteQuietly(shared, "shops/" + OWNER_A);
 	}
 
 	private static MockMultipartFile pngFile() throws Exception {

@@ -1,7 +1,9 @@
 package com.vmarket.shop.service;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -105,8 +107,7 @@ public class ShopService {
 		// saveAndFlush: đụng @Version / UNIQUE thì lỗi bung ra ở đây (được dịch thành 409),
 		// và updatedAt trong response là giá trị thật đã ghi xuống.
 		Shop saved = shopRepository.saveAndFlush(shop);
-		cleanupReplacedImage(oldLogoUrl, saved.getLogoUrl(), ShopMediaService.logoPrefix(ownerId));
-		cleanupReplacedImage(oldCoverUrl, saved.getCoverUrl(), ShopMediaService.coverPrefix(ownerId));
+		cleanupReplacedImages(ownerId, oldLogoUrl, oldCoverUrl, saved);
 		log.info("Cập nhật gian hàng id={} ownerId={}", saved.getId(), ownerId);
 		return ShopResponse.from(saved);
 	}
@@ -177,12 +178,26 @@ public class ShopService {
 	}
 
 	/**
-	 * Ảnh cũ chỉ bị xoá sau khi transaction commit. URL ngoài MinIO (ảnh legacy)
-	 * hoặc ảnh không đổi không khớp điều kiện nên được bỏ qua an toàn.
+	 * Ảnh cũ chỉ bị xoá sau khi transaction commit và chỉ khi không còn được logo
+	 * hoặc ảnh bìa của hồ sơ sau cập nhật tham chiếu. Một URL có thể được chuyển
+	 * từ logo sang ảnh bìa (hoặc ngược lại), nên phải kiểm tra cả hai trường trước
+	 * khi dọn. URL ngoài MinIO (ảnh legacy) hoặc ảnh không đổi được bỏ qua an toàn.
 	 */
-	private void cleanupReplacedImage(String oldUrl, String newUrl, String keyPrefix) {
-		if (oldUrl != null && !oldUrl.equals(newUrl)) {
-			MediaStorage.afterCommit(() -> mediaStorage.deleteQuietly(oldUrl, keyPrefix));
+	private void cleanupReplacedImages(String ownerId, String oldLogoUrl, String oldCoverUrl, Shop saved) {
+		String newLogoUrl = saved.getLogoUrl();
+		String newCoverUrl = saved.getCoverUrl();
+		Set<String> replaced = new LinkedHashSet<>();
+		collectIfUnreferenced(replaced, oldLogoUrl, newLogoUrl, newCoverUrl);
+		collectIfUnreferenced(replaced, oldCoverUrl, newLogoUrl, newCoverUrl);
+		String keyPrefix = ShopMediaService.mediaPrefix(ownerId);
+		replaced.forEach(url ->
+				MediaStorage.afterCommit(() -> mediaStorage.deleteQuietly(url, keyPrefix)));
+	}
+
+	private static void collectIfUnreferenced(Set<String> replaced, String oldUrl,
+			String newLogoUrl, String newCoverUrl) {
+		if (oldUrl != null && !oldUrl.equals(newLogoUrl) && !oldUrl.equals(newCoverUrl)) {
+			replaced.add(oldUrl);
 		}
 	}
 }
