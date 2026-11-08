@@ -46,6 +46,8 @@ public class Product {
 	private double ratingAverage;
 	private long ratingCount;
 	private Instant ratingUpdatedAt;
+	/** Revision của aggregate đánh giá đã áp dụng (ReviewCreated.revision); null = chưa nhận bản có revision. */
+	private Long ratingRevision;
 	private long soldCount;
 	private boolean moderationRemoved;
 	private String moderationReason;

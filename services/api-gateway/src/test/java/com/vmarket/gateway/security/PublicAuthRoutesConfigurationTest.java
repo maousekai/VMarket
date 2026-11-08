@@ -81,4 +81,30 @@ class PublicAuthRoutesConfigurationTest {
 		assertThat(security.getPublicPaths()).containsAll(List.of(
 				"/api/auth/otp/request", "/api/auth/otp/verify", "/api/auth/password/forgot", "/api/auth/password/reset"));
 	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {
+			"/api/reviews/products/p-1", "/api/reviews/products/p-1/summary",
+			"/api/reviews/shops/s-1", "/api/reviews/shops/s-1/summary"
+	})
+	void guestCanReadPublicReviews(String path) throws Exception {
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		AtomicBoolean reached = new AtomicBoolean();
+		filter.doFilter(new MockHttpServletRequest("GET", path), response, (in, out) -> reached.set(true));
+		assertThat(response.getStatus()).isEqualTo(200);
+		assertThat(reached).isTrue();
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {
+			"GET /api/reviews/me", "GET /api/reviews/seller", "PUT /api/reviews/seller/r-1/reply",
+			"GET /api/reviews/admin", "POST /api/reviews/admin/r-1/hide", "POST /api/reviews",
+			"POST /api/reviews/products/p-1"
+	})
+	void otherReviewEndpointsStillRequireBearerToken(String route) throws Exception {
+		String[] parts = route.split(" ");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		filter.doFilter(new MockHttpServletRequest(parts[0], parts[1]), response, new MockFilterChain());
+		assertThat(response.getStatus()).isEqualTo(401);
+	}
 }
