@@ -32,6 +32,8 @@ Mọi endpoint **ghi dữ liệu** (POST/PUT/PATCH/DELETE) nhận thêm header t
 | --- | --- | --- |
 | GET | `/api/users/me` | Xem hồ sơ của tôi (tự tạo hồ sơ rỗng ở lần gọi đầu) |
 | PUT | `/api/users/me` | Cập nhật hồ sơ — **thay thế toàn bộ** |
+| POST | `/api/users/me/avatar` | Tải ảnh đại diện lên kho ảnh, trả `{ "url" }` |
+| DELETE | `/api/users/me/media?url=` | Dọn ảnh vừa tải nếu lưu hồ sơ thất bại (409 nếu ảnh đang là avatar) |
 | GET | `/api/users/me/addresses` | Danh sách địa chỉ (mặc định đứng đầu) |
 | POST | `/api/users/me/addresses` | Thêm địa chỉ (địa chỉ đầu tiên tự thành mặc định) |
 | GET | `/api/users/me/addresses/{id}` | Chi tiết một địa chỉ |
@@ -54,6 +56,23 @@ Body `PUT /api/users/me`: `{ "fullName", "avatarUrl", "phone", "dateOfBirth", "g
 | `phone` | Số di động Việt Nam: `0xxxxxxxxx` hoặc `+84xxxxxxxxx` |
 | `dateOfBirth` | `yyyy-MM-dd`, phải ở quá khứ |
 | `gender` | `MALE` \| `FEMALE` \| `OTHER` \| `UNDISCLOSED` |
+
+### Ảnh đại diện
+
+`POST /api/users/me/avatar` nhận `multipart/form-data` với trường `file`. Endpoint
+**chỉ trả URL**, không ghi vào hồ sơ: client còn có thể chọn ảnh khác hoặc bấm Huỷ.
+Khi bấm Lưu, client gửi URL đó trong `PUT /api/users/me`; nếu lưu bị từ chối rõ
+ràng (4xx), gọi `DELETE /api/users/me/media?url=...` để dọn ảnh vừa tải. Timeout,
+mất mạng hoặc 5xx có thể xảy ra sau khi transaction đã commit nên client không dọn.
+Endpoint xoá trả `409 MEDIA_IN_USE` nếu URL vẫn đang là avatar của hồ sơ.
+
+- Nhận JPEG, PNG, WebP; tối đa **2 MB** và **25 MP**.
+- Server tự cắt vuông **512×512**, mã hoá lại PNG và loại bỏ EXIF/GPS.
+- Ảnh được lưu dưới `avatars/{userId}/` trong bucket `vmarket-media` và đọc công khai
+  qua `MINIO_PUBLIC_ORIGIN`. Không lưu signed URL vào CSDL.
+- Endpoint xoá chỉ chấp nhận URL thuộc đúng thư mục của người dùng hiện tại; URL ngoài
+  MinIO bị bỏ qua khi service dọn ảnh cũ sau khi cập nhật hồ sơ.
+- Frontend vẫn hỗ trợ dán URL `http(s)` trực tiếp vào `avatarUrl` như trước.
 
 Swagger UI: <http://localhost:8082/swagger-ui.html> · spec: `/v3/api-docs`
 

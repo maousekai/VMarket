@@ -22,6 +22,21 @@ app:
   cors:
     allowed-origins: http://localhost:5173
   internal-api-key: test-internal-key-0123456789
+  # Khong goi MinIO trong test hien co; S3Client chi duoc tao (khong ket noi).
+  media:
+    endpoint: http://minio.test:9000
+    public-origin: http://localhost:9000
+    bucket: vmarket-media-test
+    access-key: test-access-key
+    secret-key: test-secret-key
+    region: us-east-1
+  downstream:
+    user-service-url: http://user-service.test:8082
+    order-service-url: http://order-service.test:8086
+    product-service-url: http://product-service.test:8084
+    internal-api-key: test-only-internal-api-key-0123456789-0123456789
+    connect-timeout: 1s
+    read-timeout: 2s
 
 auth:
   jwt:

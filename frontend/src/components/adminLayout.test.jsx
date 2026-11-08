@@ -6,10 +6,7 @@ import { AuthContext } from '../auth/useAuth'
 import AdminPlaceholderPage from '../pages/AdminPlaceholderPage'
 import AdminNotFoundPage from '../pages/AdminNotFoundPage'
 import { adminSections } from '../pages/adminSections'
-import { getHealth } from '../services/api/healthApi'
 import AdminLayout from './AdminLayout'
-
-vi.mock('../services/api/healthApi', () => ({ getHealth: vi.fn() }))
 
 const session = {
   userId: '01JBQ9YDX7K3M8N5P2R4T6V8AA',
@@ -71,7 +68,6 @@ const current = () =>
 
 beforeEach(() => {
   logout = vi.fn().mockResolvedValue(undefined)
-  getHealth.mockResolvedValue({ service: 'auth-service', status: 'UP' })
 })
 afterEach(cleanup)
 
@@ -137,18 +133,11 @@ describe('Admin sidebar', () => {
     }
   })
 
-  it('shows the live API health instead of a hard-coded online label', async () => {
+  it('does not show the API status box in the sidebar', () => {
     view()
-    expect(await screen.findByText('API trực tuyến')).toBeTruthy()
-    expect(screen.getByText('auth-service · UP')).toBeTruthy()
-    expect(screen.queryByText('Hệ thống trực tuyến')).toBeNull()
-  })
-
-  it('shows a clear connection error when the health check fails', async () => {
-    getHealth.mockRejectedValueOnce(new Error('offline'))
-    view()
-    expect(await screen.findByText('Mất kết nối API')).toBeTruthy()
-    expect(screen.getByText('Kiểm tra API Gateway / Auth Service')).toBeTruthy()
+    expect(screen.queryByText('API trực tuyến')).toBeNull()
+    expect(screen.queryByText('Mất kết nối API')).toBeNull()
+    expect(screen.queryByText('Đang kiểm tra API…')).toBeNull()
   })
 
   it('shows the not found page for an unknown admin address inside the layout', () => {
@@ -175,11 +164,11 @@ describe('Admin top bar', () => {
     expect(screen.getByRole('button', { name: 'Tài khoản của admin.vmarket' })).toBeTruthy()
   })
 
-  it('has no order search box and keeps the notification bell unavailable for now', () => {
+  it('has no order search box or notification bell', () => {
     view()
     expect(screen.queryByLabelText('Tìm mã đơn')).toBeNull()
     expect(screen.queryByRole('searchbox')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Thông báo' }).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Thông báo' })).toBeNull()
   })
 })
 
