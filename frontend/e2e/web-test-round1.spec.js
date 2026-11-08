@@ -505,6 +505,27 @@ test('WEB-PROFILE-01 profile shows only the signed-in account and identity is re
   await expect(page.locator('.profile-form [name="username"]')).toHaveCount(0)
 })
 
+test('WEB-PROFILE-02 saved name and phone survive a reload and come back from the API', async ({
+  page,
+}) => {
+  const account = await createAccount(page.request)
+  await login(page, account)
+  await page.goto('/profile')
+  await expect(field(page, 'Họ và tên')).toBeVisible()
+
+  await field(page, 'Họ và tên').fill('Nguyễn An QA')
+  await field(page, 'Số điện thoại').fill('0987654321')
+  await page.getByRole('button', { name: 'Lưu thay đổi', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText(/đã.*lưu/i)
+
+  const saved = await loadProfileGet(page, () => page.reload())
+  expect(saved.fullName).toBe('Nguyễn An QA')
+  expect(saved.phone).toBe('0987654321')
+  await expect(field(page, 'Họ và tên')).toHaveValue('Nguyễn An QA')
+  await expect(field(page, 'Số điện thoại')).toHaveValue('0987654321')
+  await expect(identity(page).getByText(account.email, { exact: true })).toBeVisible()
+})
+
 test('WEB-PROFILE-05 changing only the name keeps fields that have no form control', async ({
   page,
 }) => {
