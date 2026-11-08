@@ -117,7 +117,9 @@ class Dependencies(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        if self.path.endswith("/cancel"):
+        if self.path == "/api/cart/validate":
+            self.reply(dict(ok=True, issues=[]))
+        elif self.path.endswith("/cancel"):
             code = int(self.path.split("/")[-2])
             if self.links[code]["status"] != "PAID":
                 self.links[code]["status"] = "CANCELLED"
@@ -238,8 +240,10 @@ class Suite:
                            reservedStock=0, soldCount=0, deleted=False)])) + ")")
 
     def create(self, method="PAYOS"):
-        order = http("POST", self.order + "/api/orders", dict(addressId=ADDRESS, paymentMethod=method), self.token, 201)
-        oid = order["id"]
+        # POST /api/orders returns {checkoutId, totalAmount, orders:[...]}; the fixture cart has one shop.
+        placed = http("POST", self.order + "/api/orders", dict(addressId=ADDRESS, paymentMethod=method), self.token, 201)
+        assert len(placed["orders"]) == 1, placed
+        oid = placed["orders"][0]["id"]
         wait_for("stock reserved", lambda: http("GET", self.order + "/api/orders/" + oid, token=self.token)["stockReserved"])
         with concurrent.futures.ThreadPoolExecutor(8) as pool:
             results = list(pool.map(lambda _: http("POST", self.payment + "/api/payments", dict(orderId=oid), self.token), range(8)))

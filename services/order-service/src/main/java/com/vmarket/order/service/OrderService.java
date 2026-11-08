@@ -1,14 +1,18 @@
 package com.vmarket.order.service;
 
+import com.github.f4b6a3.ulid.UlidCreator;
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderStatusChanged;
 import com.vmarket.order.client.CartServiceClient;
+import com.vmarket.order.client.CartServiceClient.CartIssueView;
 import com.vmarket.order.client.CartServiceClient.CartItemView;
+import com.vmarket.order.client.CartServiceClient.CartValidationView;
 import com.vmarket.order.client.CartServiceClient.CartView;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.client.UserServiceClient.AddressView;
 import com.vmarket.order.dto.OrderResponse;
 import com.vmarket.order.dto.PlaceOrderRequest;
+import com.vmarket.order.dto.PlaceOrderResponse;
 import com.vmarket.order.entity.Order;
 import com.vmarket.order.entity.OrderStatus;
 import com.vmarket.order.entity.ReturnStatus;
@@ -23,6 +27,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -75,7 +81,7 @@ public class OrderService {
      * @param idempotencyKey khoá chống trùng (header {@code Idempotency-Key}), có thể {@code null}
      *     nếu client không gửi
      */
-    public OrderResponse placeOrder(
+    public PlaceOrderResponse placeOrder(
             String userId, String bearerToken, String idempotencyKey, PlaceOrderRequest request) {
         String trimmedKey =
                 (idempotencyKey != null && !idempotencyKey.isBlank())
@@ -84,15 +90,14 @@ public class OrderService {
 
         // 1. Kiểm tra nhanh trước: nếu đã có đơn với key này thì trả lại ngay
         if (trimmedKey != null) {
-            Optional<Order> existing =
-                    orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+            Optional<PlaceOrderResponse> existing = findIdempotentOrders(userId, trimmedKey);
             if (existing.isPresent()) {
                 log.info(
-                        "Idempotency-Key '{}' đã dùng → trả lại đơn {} cho userId={}",
+                        "Idempotency-Key '{}' đã dùng → trả lại checkout {} cho userId={}",
                         trimmedKey,
-                        existing.get().getId(),
+                        existing.get().checkoutId(),
                         userId);
-                return OrderResponse.from(existing.get());
+                return existing.get();
             }
         }
 
@@ -108,48 +113,108 @@ public class OrderService {
         // hoàn tất checkout và xoá giỏ trước hay không (PBL6-52).
         if (cartItems.isEmpty()) {
             if (trimmedKey != null) {
-                Optional<Order> existing =
-                        orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+                Optional<PlaceOrderResponse> existing = findIdempotentOrders(userId, trimmedKey);
                 if (existing.isPresent()) {
                     log.info(
-                            "Idempotency-Key '{}' đã dùng (giỏ đã xoá bởi request song song) → trả lại đơn {}",
+                            "Idempotency-Key '{}' đã dùng (giỏ đã xoá bởi request song song) → trả lại checkout {}",
                             trimmedKey,
-                            existing.get().getId());
-                    return OrderResponse.from(existing.get());
+                            existing.get().checkoutId());
+                    return existing.get();
                 }
             }
             throw ApiException.badRequest("CART_EMPTY", "Giỏ hàng đang trống, không thể đặt hàng");
         }
 
-        // 3. Thực hiện tạo đơn trong transaction độc lập (REQUIRES_NEW)
-        OrderResponse response;
+        // 3. Kiểm tra lại giá/shop/tồn kho với product-service (qua cart-service) để chặn giá do
+        // client tự đặt. Không tạo đơn nào nếu giỏ đã thay đổi.
+        validateCartOrThrow(userId);
+
+        // 4. Tách giỏ theo shop, tạo các đơn trong MỘT transaction độc lập (REQUIRES_NEW)
+        String checkoutId = UlidCreator.getUlid().toString();
+        PlaceOrderResponse response;
         try {
-            response = orderCreator.createOrderInTransaction(
-                    userId, address, cartItems, trimmedKey, request);
+            List<OrderResponse> orders =
+                    orderCreator.createOrdersInTransaction(
+                            userId, address, cartItems, trimmedKey, request, checkoutId);
+            response = PlaceOrderResponse.of(checkoutId, orders);
         } catch (DataIntegrityViolationException ex) {
-            return recoverIdempotentOrderOrThrow(userId, trimmedKey, ex);
+            return recoverIdempotentOrdersOrThrow(userId, trimmedKey, ex);
         }
 
-        // 4. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
-        removeCheckoutItemsFromCart(userId, response.id(), cartItems);
+        // 5. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
+        removeCheckoutItemsFromCart(userId, checkoutId, cartItems);
 
         return response;
     }
 
-    private OrderResponse recoverIdempotentOrderOrThrow(
+    private void validateCartOrThrow(String userId) {
+        CartValidationView validation = cartServiceClient.validateCart(userId);
+        if (validation.ok()) {
+            return;
+        }
+        List<CartIssueView> issues = validation.issues();
+        for (CartIssueView issue : issues) {
+            if ("SERVICE_UNAVAILABLE".equals(issue.type())) {
+                throw ApiException.unavailable(
+                        "CART_VALIDATION_UNAVAILABLE",
+                        "Chưa kiểm tra được giỏ hàng, vui lòng thử lại sau");
+            }
+        }
+        throw ApiException.conflict("CART_CHANGED", cartChangedMessage(issues));
+    }
+
+    private static String cartChangedMessage(List<CartIssueView> issues) {
+        if (issues.isEmpty()) {
+            return "Giỏ hàng đã thay đổi, vui lòng kiểm tra lại trước khi đặt hàng";
+        }
+        CartIssueView first = issues.get(0);
+        String detail =
+                first.message() != null && !first.message().isBlank()
+                        ? first.message()
+                        : switch (first.type() == null ? "" : first.type()) {
+                            case "PRICE_CHANGED" -> "Giá sản phẩm đã thay đổi";
+                            case "SHOP_CHANGED" -> "Gian hàng của sản phẩm đã thay đổi";
+                            case "OUT_OF_STOCK" -> "Sản phẩm không đủ tồn kho";
+                            case "NOT_FOUND" -> "Sản phẩm không còn tồn tại";
+                            default -> "Sản phẩm trong giỏ không hợp lệ";
+                        };
+        String more = issues.size() > 1 ? " (và " + (issues.size() - 1) + " vấn đề khác)" : "";
+        return "Giỏ hàng đã thay đổi: " + detail + more + ". Vui lòng kiểm tra lại trước khi đặt hàng";
+    }
+
+    /** Các đơn đã tạo bởi một Idempotency-Key, theo thứ tự tạo (ULID đơn điệu). */
+    private Optional<PlaceOrderResponse> findIdempotentOrders(String userId, String key) {
+        List<Order> existing = orderRepository.findAllByUserIdAndIdempotencyKey(userId, key);
+        if (existing.isEmpty()) {
+            return Optional.empty();
+        }
+        List<OrderResponse> orders =
+                existing.stream()
+                        .sorted(Comparator.comparing(Order::getId))
+                        .map(OrderResponse::from)
+                        .toList();
+        return Optional.of(
+                new PlaceOrderResponse(
+                        orders.get(0).checkoutId(),
+                        orders.stream()
+                                .map(OrderResponse::totalAmount)
+                                .reduce(BigDecimal.ZERO, BigDecimal::add),
+                        orders));
+    }
+
+    private PlaceOrderResponse recoverIdempotentOrdersOrThrow(
             String userId, String trimmedKey, DataIntegrityViolationException ex) {
         if (trimmedKey != null) {
-            // Trường hợp xung đột UNIQUE constraint trên (user_id, idempotency_key) do request retry đồng thời.
-            // Do transaction thắng đã commit nên transaction này mới nhận unique violation, query ngay đơn đã commit.
-            Optional<Order> existing =
-                    orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+            // Xung đột UNIQUE trên (user_id, idempotency_key, shop_id) do retry đồng thời.
+            // Transaction thắng đã commit nên query ngay các đơn đã commit.
+            Optional<PlaceOrderResponse> existing = findIdempotentOrders(userId, trimmedKey);
             if (existing.isPresent()) {
                 log.info(
-                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry) -> trả lại đơn đã commit {}",
+                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry) -> trả lại checkout đã commit {}",
                         trimmedKey,
                         userId,
-                        existing.get().getId());
-                return OrderResponse.from(existing.get());
+                        existing.get().checkoutId());
+                return existing.get();
             }
 
             // Thử lại 1 lần sau 10ms phòng trường hợp trễ đọc/replication
@@ -158,19 +223,19 @@ public class OrderService {
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
             }
-            existing = orderRepository.findByUserIdAndIdempotencyKey(userId, trimmedKey);
+            existing = findIdempotentOrders(userId, trimmedKey);
             if (existing.isPresent()) {
                 log.info(
-                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry) sau retry -> trả lại đơn đã commit {}",
+                        "Xung đột UNIQUE Idempotency-Key '{}' cho userId={} (concurrent retry) sau retry -> trả lại checkout đã commit {}",
                         trimmedKey,
                         userId,
-                        existing.get().getId());
-                return OrderResponse.from(existing.get());
+                        existing.get().checkoutId());
+                return existing.get();
             }
         }
 
-        // Nếu không tìm thấy đơn theo idempotencyKey, lỗi vi phạm ràng buộc không phải do retry hợp lệ
-        // (ví dụ lỗi NOT NULL, Foreign Key, hoặc dữ liệu bất thường khác). Log cảnh báo cụ thể và rethrow nguyên vẹn.
+        // Không tìm thấy đơn theo idempotencyKey: lỗi ràng buộc không phải do retry hợp lệ
+        // (NOT NULL, FK, dữ liệu bất thường...). Log và rethrow nguyên vẹn.
         log.error(
                 "DataIntegrityViolationException không phải do concurrent retry Idempotency-Key cho userId={}: {}",
                 userId,
@@ -180,7 +245,7 @@ public class OrderService {
     }
 
     private void removeCheckoutItemsFromCart(
-            String userId, String orderId, List<CartItemView> snapshot) {
+            String userId, String checkoutId, List<CartItemView> snapshot) {
         int success = 0;
         int failed = 0;
         for (CartItemView item : snapshot) {
@@ -194,16 +259,16 @@ public class OrderService {
         }
         if (failed == 0) {
             log.info(
-                    "Đã xoá {}/{} item khỏi giỏ cho userId={} (đơn {})",
+                    "Đã xoá {}/{} item khỏi giỏ cho userId={} (checkout {})",
                     success,
                     snapshot.size(),
                     userId,
-                    orderId);
+                    checkoutId);
         } else {
             log.warn(
-                    "Xoá giỏ một phần cho userId={} (đơn {}): {} thành công, {} thất bại (người dùng có thể tự xoá hoặc đã thay đổi giỏ)",
+                    "Xoá giỏ một phần cho userId={} (checkout {}): {} thành công, {} thất bại (người dùng có thể tự xoá hoặc đã thay đổi giỏ)",
                     userId,
-                    orderId,
+                    checkoutId,
                     success,
                     failed);
         }

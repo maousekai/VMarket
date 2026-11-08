@@ -67,6 +67,8 @@ class OrderApiTest {
     @org.junit.jupiter.api.BeforeEach
     void paymentClock() {
         when(paymentClock.instant()).thenReturn(java.time.Instant.parse("2026-10-19T12:00:00Z"));
+        when(cartServiceClient.validateCart(anyString()))
+                .thenReturn(new CartServiceClient.CartValidationView(true, List.of()));
     }
 
     /**
@@ -182,10 +184,10 @@ class OrderApiTest {
                                                 + ADDRESS_ID
                                                 + "\",\"note\":\"Giao giờ hành chính\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"))
-                .andExpect(jsonPath("$.recipientName").value("Nguyễn Văn An"))
-                .andExpect(jsonPath("$.totalAmount").value(750000.00))
-                .andExpect(jsonPath("$.items.length()").value(2));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.orders[0].recipientName").value("Nguyễn Văn An"))
+                .andExpect(jsonPath("$.orders[0].totalAmount").value(750000.00))
+                .andExpect(jsonPath("$.orders[0].items.length()").value(2));
 
         // Tổng tiền được tính lại ở tầng service từ unitPrice * quantity, KHÔNG tin
         // cart-service; verify bằng dữ liệu thật trong DB chứ không chỉ response.
@@ -229,7 +231,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.district").value(nullValue()));
+                .andExpect(jsonPath("$.orders[0].district").value(nullValue()));
 
         Order saved = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0);
         assertThat(saved.getDistrict()).isNull();
@@ -249,8 +251,8 @@ class OrderApiTest {
                                                 + ADDRESS_ID
                                                 + "\",\"paymentMethod\":\"PAYOS\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("WAITING_PAYMENT"))
-                .andExpect(jsonPath("$.paymentExpiresAt").value("2026-10-19T12:10:00Z"));
+                .andExpect(jsonPath("$.orders[0].status").value("WAITING_PAYMENT"))
+                .andExpect(jsonPath("$.orders[0].paymentExpiresAt").value("2026-10-19T12:10:00Z"));
     }
 
     @Test
@@ -363,7 +365,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"));
 
         // Gửi lại cùng key -> vẫn trả 201 kèm dữ liệu đơn cũ, không tạo thêm đơn mới
         mockMvc.perform(
@@ -373,7 +375,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"));
 
         // Chỉ có đúng 1 đơn được lưu trong database
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
@@ -453,7 +455,7 @@ class OrderApiTest {
         for (org.springframework.test.web.servlet.MvcResult result : results) {
             assertThat(result.getResponse().getStatus()).isEqualTo(201);
             String content = result.getResponse().getContentAsString();
-            String orderId = com.jayway.jsonpath.JsonPath.read(content, "$.id");
+            String orderId = com.jayway.jsonpath.JsonPath.read(content, "$.orders[0].id");
             assertThat(orderId).isNotBlank();
             if (firstOrderId == null) {
                 firstOrderId = orderId;
@@ -526,9 +528,9 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"))
                 .andReturn();
-        String orderIdB = com.jayway.jsonpath.JsonPath.read(resB.getResponse().getContentAsString(), "$.id");
+        String orderIdB = com.jayway.jsonpath.JsonPath.read(resB.getResponse().getContentAsString(), "$.orders[0].id");
 
         // Báo hiệu Request B đã commit xong
         bCommitted.countDown();
@@ -536,7 +538,7 @@ class OrderApiTest {
         // Request A hoàn tất: nhận giỏ rỗng nhưng phát hiện đơn B đã tạo -> trả về 201 Created cùng ID
         org.springframework.test.web.servlet.MvcResult resA = futureA.get(5, java.util.concurrent.TimeUnit.SECONDS);
         assertThat(resA.getResponse().getStatus()).isEqualTo(201);
-        String orderIdA = com.jayway.jsonpath.JsonPath.read(resA.getResponse().getContentAsString(), "$.id");
+        String orderIdA = com.jayway.jsonpath.JsonPath.read(resA.getResponse().getContentAsString(), "$.orders[0].id");
         assertThat(orderIdA).isEqualTo(orderIdB);
 
         // Database chỉ lưu duy nhất 1 đơn
@@ -560,7 +562,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"));
 
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
     }

@@ -19,6 +19,7 @@ import com.vmarket.order.dto.DisputeReturnRequest;
 import com.vmarket.order.dto.ErrorResponse;
 import com.vmarket.order.dto.OrderResponse;
 import com.vmarket.order.dto.PlaceOrderRequest;
+import com.vmarket.order.dto.PlaceOrderResponse;
 import com.vmarket.order.dto.ReturnResponse;
 import com.vmarket.order.service.OrderReturnService;
 import com.vmarket.order.service.OrderService;
@@ -54,21 +55,24 @@ public class OrderController {
 	private final OrderReturnService returnService;
 
 	@Operation(summary = "Đặt hàng từ giỏ hiện có (FR-ORDER-01)",
-			description = "Chụp toàn bộ giỏ thành đơn với địa chỉ giao hàng được chọn. "
+			description = "Kiểm tra lại giỏ (giá/shop/tồn kho) rồi tách thành mỗi gian hàng một đơn, chung checkoutId. "
+						+ "Giỏ đã đổi → 409 CART_CHANGED. "
 					+ "Giỏ trống → 400 CART_EMPTY. Đơn tạo xong thì giỏ bị xoá; xoá giỏ hỏng "
 					+ "không ảnh hưởng đơn đã tạo.")
 	@ApiResponses({
-			@ApiResponse(responseCode = "201", description = "Đã tạo đơn",
-					content = @Content(schema = @Schema(implementation = OrderResponse.class))),
+			@ApiResponse(responseCode = "201", description = "Đã tạo đơn (mỗi shop một đơn, chung checkoutId)",
+					content = @Content(schema = @Schema(implementation = PlaceOrderResponse.class))),
+			@ApiResponse(responseCode = "409", description = "Giỏ đã thay đổi giá/shop/tồn kho (CART_CHANGED)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "400", description = "Giỏ trống (CART_EMPTY) hoặc dữ liệu không hợp lệ",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "404", description = "Địa chỉ không tồn tại hoặc không thuộc sổ của bạn (ADDRESS_NOT_FOUND)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-			@ApiResponse(responseCode = "503", description = "cart-service / user-service chưa kết nối được (CART_SERVICE_UNAVAILABLE / USER_SERVICE_UNAVAILABLE)",
+			@ApiResponse(responseCode = "503", description = "cart-service / user-service chưa kết nối được (CART_SERVICE_UNAVAILABLE / CART_VALIDATION_UNAVAILABLE / USER_SERVICE_UNAVAILABLE)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 	})
 	@PostMapping
-	public ResponseEntity<OrderResponse> placeOrder(
+	public ResponseEntity<PlaceOrderResponse> placeOrder(
 			@AuthenticationPrincipal String userId,
 			@RequestHeader(name = "Authorization", required = false) String bearerToken,
 			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,

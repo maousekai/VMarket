@@ -42,8 +42,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("10");
-		assertThat(flyway.info().applied()).hasSize(10);
+		assertThat(current.getVersion().getVersion()).isEqualTo("11");
+		assertThat(flyway.info().applied()).hasSize(11);
 	}
 
 	@Test
@@ -51,7 +51,7 @@ class FlywayMigrationTest {
 		try (Connection c = dataSource.getConnection()) {
 			for (String column : new String[] { "user_id", "status", "recipient_name", "phone",
 					"province", "district", "ward", "street_address", "note", "total_amount",
-					"created_at", "updated_at", "idempotency_key", "delivered_at" }) {
+					"created_at", "updated_at", "idempotency_key", "delivered_at", "shop_id", "checkout_id" }) {
 				assertThat(columnExists(c, "orders", column)).as("orders.%s", column).isTrue();
 			}
 			for (String column : new String[] { "order_id", "product_id", "variant_id", "shop_id",

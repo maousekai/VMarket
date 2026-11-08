@@ -41,7 +41,11 @@ public record OrderResponse(
 
 		List<OrderItemResponse> items, String paymentMethod, Instant paymentExpiresAt, boolean stockReserved,
 
-		@Schema(description = "Thời điểm giao thành công; null nếu chưa giao. Mốc tính hạn 7 ngày trả hàng") Instant deliveredAt) {
+		@Schema(description = "Thời điểm giao thành công; null nếu chưa giao. Mốc tính hạn 7 ngày trả hàng") Instant deliveredAt,
+
+		@Schema(description = "Shop sở hữu đơn; null với đơn cũ gồm nhiều shop") String shopId,
+
+		@Schema(description = "Mã chung của các đơn tạo từ cùng một lần checkout; null với đơn cũ") String checkoutId) {
 
 	public static OrderResponse from(Order order) {
 		return new OrderResponse(
@@ -57,6 +61,8 @@ public record OrderResponse(
 				order.getTotalAmount(),
 				order.getCreatedAt(),
 				order.getItems().stream().map(OrderItemResponse::from).toList(), order.getPaymentMethod(), order.getPaymentExpiresAt(), order.isStockReserved(),
-				order.getDeliveredAt());
+				order.getDeliveredAt(),
+				order.getShopId(),
+				order.getCheckoutId());
 	}
 }

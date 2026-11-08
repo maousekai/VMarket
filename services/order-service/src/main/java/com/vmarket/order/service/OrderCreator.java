@@ -2,12 +2,16 @@ package com.vmarket.order.service;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.github.f4b6a3.ulid.UlidCreator;
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderPlaced;
 import com.vmarket.events.StockItem;
@@ -31,7 +35,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>PBL6-52: Tách logic tạo đơn khỏi {@link OrderService#placeOrder} để transaction
  * cơ sở dữ liệu không bị giữ trong suốt thời gian gọi downstream HTTP client (user-service,
  * cart-service), và quan trọng nhất: khi gặp xung đột khoá trùng lặp (UNIQUE constraint
- * violation trên {@code (user_id, idempotency_key)}) do retry đồng thời, transaction này
+ * violation trên {@code (user_id, idempotency_key, shop_id)}) do retry đồng thời, transaction này
  * rollback độc lập để caller có thể bắt exception và truy vấn lại đơn đã được tạo thành công
  * bởi request song song thay vì gây 500 INTERNAL_ERROR.
  *
@@ -49,15 +53,53 @@ public class OrderCreator {
     private final OrderRepository orderRepository;
     private final Outbox outbox;
 
+    /**
+     * Tách giỏ theo shop và tạo MỖI shop một đơn, tất cả trong cùng MỘT transaction REQUIRES_NEW:
+     * hoặc đủ mọi đơn, hoặc không đơn nào. Các đơn chung {@code checkoutId}; thứ tự đơn theo thứ tự
+     * nhóm shop xuất hiện trong giỏ (id đơn là ULID đơn điệu nên sắp theo id cũng ra đúng thứ tự).
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public OrderResponse createOrderInTransaction(
+    public List<OrderResponse> createOrdersInTransaction(
             String userId,
             AddressView address,
             List<CartItemView> cartItems,
             String idempotencyKey,
-            PlaceOrderRequest request) {
+            PlaceOrderRequest request,
+            String checkoutId) {
+        Map<String, List<CartItemView>> byShop = new LinkedHashMap<>();
+        for (CartItemView cartItem : cartItems) {
+            byShop.computeIfAbsent(cartItem.shopId(), k -> new ArrayList<>()).add(cartItem);
+        }
+
+        List<OrderResponse> responses = new ArrayList<>();
+        for (Map.Entry<String, List<CartItemView>> entry : byShop.entrySet()) {
+            responses.add(
+                    createSingleShopOrder(
+                            userId,
+                            address,
+                            entry.getKey(),
+                            entry.getValue(),
+                            idempotencyKey,
+                            request,
+                            checkoutId));
+        }
+        return responses;
+    }
+
+    private OrderResponse createSingleShopOrder(
+            String userId,
+            AddressView address,
+            String shopId,
+            List<CartItemView> cartItems,
+            String idempotencyKey,
+            PlaceOrderRequest request,
+            String checkoutId) {
         Order order = new Order();
+        // ULID đơn điệu: các đơn của cùng checkout sắp theo id đúng thứ tự tạo.
+        order.setId(UlidCreator.getMonotonicUlid().toString());
         order.setUserId(userId);
+        order.setShopId(shopId);
+        order.setCheckoutId(checkoutId);
         order.setPaymentMethod(request.paymentMethod() == null ? "COD" : request.paymentMethod());
         order.setStatus(
                 "PAYOS".equals(order.getPaymentMethod())
