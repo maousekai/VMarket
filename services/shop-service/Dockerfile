@@ -56,8 +56,12 @@ COPY services/${SERVICE_NAME}/pom.xml ${SERVICE_NAME}/pom.xml
 # "Could not find artifact com.vmarket:vmarket-services:pom".
 COPY services/shared-events/pom.xml shared-events/pom.xml
 COPY services/shared-events/src shared-events/src
+# shared-media (upload anh dung chung) cung la module noi bo.
+COPY services/shared-media/pom.xml shared-media/pom.xml
+COPY services/shared-media/src shared-media/src
 RUN mvn -B --no-transfer-progress -f pom.xml -N install -DskipTests \
- && mvn -B --no-transfer-progress -f shared-events/pom.xml install -DskipTests
+ && mvn -B --no-transfer-progress -f shared-events/pom.xml install -DskipTests \
+ && mvn -B --no-transfer-progress -f shared-media/pom.xml install -DskipTests
 
 # go-offline keo ve toan bo dependency + plugin can cho build.
 # Dependency nam han trong layer image (khong dung cache mount) de CI

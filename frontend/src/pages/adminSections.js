@@ -1,4 +1,5 @@
 import AdminUsersPage from './AdminUsersPage'
+import AdminShopsPage from './AdminShopsPage'
 
 // Sidebar sections of the admin area, in the order of the Figma design. `Component` is the
 // real page when it exists; sections without one render an empty placeholder.
@@ -15,7 +16,7 @@ export const adminSections = [
   section('', 'Tổng quan', 'overview', 'Tổng quan nền tảng'),
   section('products', 'Kiểm duyệt sản phẩm', 'products', 'Kiểm duyệt sản phẩm & đánh giá'),
   section('orders', 'Giám sát đơn hàng', 'orders', 'Giám sát đơn hàng'),
-  section('shops', 'Phê duyệt gian hàng', 'shops', 'Duyệt gian hàng'),
+  section('shops', 'Phê duyệt gian hàng', 'shops', 'Duyệt gian hàng', AdminShopsPage),
   section('shippers', 'Điều phối Shipper', 'shippers', 'Điều phối Shipper'),
   section('disputes', 'Phân xử khiếu nại', 'disputes', 'Phân xử khiếu nại'),
   section('users', 'Quản lý người dùng', 'users', 'Quản lý người dùng toàn sàn', AdminUsersPage),

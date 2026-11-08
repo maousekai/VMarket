@@ -49,11 +49,21 @@ public record ShopResponse(
 
 		@Schema(description = "Lần đầu được duyệt; null nếu chưa từng được duyệt") Instant approvedAt,
 
+		@Schema(description = "Tên chủ gian hàng, enrich từ user-service; null nếu không đọc được")
+		String ownerName,
+
+		@Schema(description = "Avatar chủ gian hàng, enrich từ user-service; null nếu không đọc được")
+		String ownerAvatarUrl,
+
 		Instant createdAt,
 
 		Instant updatedAt) {
 
 	public static ShopResponse from(Shop s) {
+		return from(s, null, null);
+	}
+
+	public static ShopResponse from(Shop s, String ownerName, String ownerAvatarUrl) {
 		return new ShopResponse(
 				s.getId(),
 				s.getOwnerId(),
@@ -71,7 +81,15 @@ public record ShopResponse(
 				s.getStatus(),
 				s.getStatusReason(),
 				s.getApprovedAt(),
+				ownerName,
+				ownerAvatarUrl,
 				s.getCreatedAt(),
 				s.getUpdatedAt());
+	}
+
+	public ShopResponse withOwner(String ownerName, String ownerAvatarUrl) {
+		return new ShopResponse(id, ownerId, name, description, logoUrl, coverUrl, policies,
+				contactEmail, contactPhone, province, district, ward, streetAddress, status,
+				statusReason, approvedAt, ownerName, ownerAvatarUrl, createdAt, updatedAt);
 	}
 }

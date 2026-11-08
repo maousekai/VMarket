@@ -98,49 +98,6 @@
   outline: 2px solid white;
   outline-offset: 2px;
 }
-.admin-sidebar__status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: auto 16px 17px;
-  padding: 12px 14px;
-  font-size: 12px;
-  background: rgb(255 255 255 / 5%);
-  border: 1px solid #1f2937;
-  border-radius: 8px;
-}
-.admin-sidebar__status strong,
-.admin-sidebar__status small {
-  display: block;
-}
-.admin-sidebar__status small {
-  margin-top: 2px;
-  color: #9ca3af;
-}
-.admin-sidebar__dot {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
-  background: #16a34a;
-  border-radius: 50%;
-}
-.admin-sidebar__dot--loading {
-  background: #f59e0b;
-  animation: admin-status-pulse 1.2s ease-in-out infinite;
-}
-.admin-sidebar__dot--error {
-  background: #ef4444;
-}
-@keyframes admin-status-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .admin-sidebar__dot--loading {
-    animation: none;
-  }
-}
 .admin-body {
   display: flex;
   flex-direction: column;
@@ -185,25 +142,6 @@
   border: 0;
   border-radius: 6px;
   cursor: pointer;
-}
-.admin-topbar__bell {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  color: var(--color-text);
-  background: white;
-  border: 1px solid rgb(199 196 216 / 60%);
-  border-radius: 4px;
-}
-.admin-topbar__bell:disabled {
-  cursor: not-allowed;
-  opacity: 0.8;
-}
-.admin-topbar__divider {
-  width: 1px;
-  height: 24px;
-  background: rgb(199 196 216 / 60%);
 }
 .admin-user {
   position: relative;

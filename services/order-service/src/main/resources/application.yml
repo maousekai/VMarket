@@ -44,6 +44,9 @@ management:
 # (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
 
 app:
+  internal:
+    # Khoá cho các endpoint /internal/orders/** (shop-service đọc thống kê).
+    api-key: ${INTERNAL_API_KEY}
   delivery:
     internal-api-key: ${INTERNAL_API_KEY}
   cors:

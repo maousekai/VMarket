@@ -85,6 +85,11 @@ services:
     environment:
       <<: *backend
       DB_NAME: vmarket_shop
+      # shop-service enrich chủ shop từ user-service; order/product chưa có trong
+      # stack e2e nên dashboard stats trả 503 (đã có test UI cho trạng thái này).
+      USER_SERVICE_URL: http://user-service:8082
+      ORDER_SERVICE_URL: http://order-service:8086
+      PRODUCT_SERVICE_URL: http://product-service:8084
     depends_on:
       postgres:
         condition: service_healthy

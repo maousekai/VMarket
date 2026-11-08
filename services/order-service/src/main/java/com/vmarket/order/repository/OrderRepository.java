@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 
 import com.vmarket.order.entity.Order;
 import com.vmarket.order.entity.OrderStatus;
+import com.vmarket.order.stats.ShopOrderRow;
 
 import jakarta.persistence.LockModeType;
 
@@ -42,6 +43,26 @@ public interface OrderRepository extends JpaRepository<Order, String> {
 	 * thay vì tạo đơn mới (chống retry / gửi đồng thời — P1 review PR #25).
 	 */
 	List<Order> findAllByUserIdAndIdempotencyKey(String userId, String idempotencyKey);
+
+	/** Dòng item của một gian hàng trong khoảng thời gian — nguồn cho thống kê seller. */
+	@Query("""
+			select o.id as orderId, o.status as status, o.createdAt as createdAt,
+			       i.productId as productId, i.quantity as quantity, i.lineTotal as lineTotal
+			from Order o join o.items i
+			where i.shopId = :shopId and o.createdAt >= :from and o.createdAt < :to
+			""")
+	List<ShopOrderRow> findShopOrderRows(
+			@Param("shopId") String shopId,
+			@Param("from") Instant from,
+			@Param("to") Instant to);
+
+	/** Đơn gần đây có ít nhất một item thuộc gian hàng (distinct theo đơn). */
+	@Query("""
+			select distinct o from Order o join o.items i
+			where i.shopId = :shopId
+			order by o.createdAt desc
+			""")
+	List<Order> findRecentForShop(@Param("shopId") String shopId, Pageable pageable);
 
 	// --- [Seller] FR-ORD-04 ---
 	@Query("select distinct o from Order o join o.items i where i.shopId = :shopId order by o.createdAt desc")
