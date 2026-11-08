@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import com.vmarket.cart.dto.CheckoutCheckResponse;
 import com.vmarket.cart.dto.CheckoutIssueDto;
+import com.vmarket.cart.dto.CheckoutItemDto;
 import com.vmarket.cart.dto.ProductSnapshot;
 import com.vmarket.cart.exception.ProductCatalogUnavailableException;
 
@@ -69,8 +70,15 @@ public class CheckoutService {
 			return CheckoutCheckResponse.withIssues(List.of(new CheckoutIssueDto(
 					null, null, TYPE_CART_EMPTY,
 					"Giỏ hàng trống, không thể thanh toán",
-					null, null, null, null)));
+					null, null, null, null)), List.of());
 		}
+
+		// Trả kèm đúng list item vừa đọc để order-service dựng đơn từ chính nó (không đọc
+		// giỏ lần hai): sửa giỏ xen giữa hai lần đọc sẽ không làm đơn lệch với thứ đã kiểm.
+		List<CheckoutItemDto> checkedItems = items.stream()
+				.map(i -> new CheckoutItemDto(i.productId(), i.variantId(), i.shopId(),
+						i.quantity(), i.unitPrice()))
+				.toList();
 
 		List<CheckoutIssueDto> issues = new ArrayList<>();
 		for (CartService.StoredItem item : items) {
@@ -85,7 +93,7 @@ public class CheckoutService {
 						item.productId(), item.variantId(), TYPE_SERVICE_UNAVAILABLE,
 						"Không kiểm tra được giá/tồn kho lúc này, vui lòng thử lại sau",
 						item.unitPrice(), null, item.quantity(), null));
-				return CheckoutCheckResponse.withIssues(issues);
+				return CheckoutCheckResponse.withIssues(issues, checkedItems);
 			}
 
 			if (snapshot.isEmpty()) {
@@ -114,9 +122,13 @@ public class CheckoutService {
 
 			PriceStock current = resolvePriceStock(product, item.variantId());
 			if (current == null) {
+				// variantId == null mà vẫn tới đây nghĩa là sản phẩm có biến thể nhưng item
+				// không chọn phân loại nào (xem resolvePriceStock).
+				String message = item.variantId() == null
+						? "Vui lòng chọn phân loại sản phẩm"
+						: "Biến thể không còn tồn tại, hãy xoá khỏi giỏ hàng";
 				issues.add(new CheckoutIssueDto(
-						item.productId(), item.variantId(), TYPE_NOT_FOUND,
-						"Biến thể không còn tồn tại, hãy xoá khỏi giỏ hàng",
+						item.productId(), item.variantId(), TYPE_NOT_FOUND, message,
 						item.unitPrice(), null, item.quantity(), null));
 				continue;
 			}
@@ -144,15 +156,20 @@ public class CheckoutService {
 						item.unitPrice(), current.price(), item.quantity(), current.stock()));
 			}
 		}
-		return CheckoutCheckResponse.withIssues(issues);
+		return CheckoutCheckResponse.withIssues(issues, checkedItems);
 	}
 
 	/**
 	 * Chọn giá/tồn kho theo biến thể (nếu item có variantId) hoặc của chính
-	 * sản phẩm. Trả {@code null} khi biến thể không tìm thấy.
+	 * sản phẩm. Trả {@code null} khi biến thể không tìm thấy, hoặc khi item KHÔNG có
+	 * variantId nhưng sản phẩm có biến thể (chưa chọn phân loại — không được chấp nhận
+	 * với giá thấp nhất/tổng tồn của sản phẩm).
 	 */
 	private static PriceStock resolvePriceStock(ProductSnapshot product, String variantId) {
 		if (variantId == null) {
+			if (product.variants() != null && !product.variants().isEmpty()) {
+				return null;
+			}
 			return new PriceStock(product.price(), orZero(product.stock()));
 		}
 		return product.variants() == null ? null : product.variants().stream()

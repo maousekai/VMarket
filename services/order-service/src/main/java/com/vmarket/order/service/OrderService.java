@@ -8,6 +8,7 @@ import com.vmarket.order.client.CartServiceClient.CartIssueView;
 import com.vmarket.order.client.CartServiceClient.CartItemView;
 import com.vmarket.order.client.CartServiceClient.CartValidationView;
 import com.vmarket.order.client.CartServiceClient.CartView;
+import com.vmarket.order.client.CartServiceClient.ValidatedItemView;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.client.UserServiceClient.AddressView;
 import com.vmarket.order.dto.OrderResponse;
@@ -44,9 +45,11 @@ import java.util.Optional;
  *       /me/addresses/{id}} đã kiểm tra ownership bằng JWT, nên nếu trả OK thì địa chỉ chắc chắn
  *       thuộc người đang gọi.
  *   <li>Đọc giỏ từ cart-service bằng {@code X-User-Id} đã xác thực.
- *   <li>Kiểm tra giỏ không rỗng.
- *   <li>Chụp từng item thành {@link OrderItem} với giá đã có trong giỏ (snapshot của cart-service,
- *       không hỏi lại product-service — giá chốt là giá đã hiện cho người dùng khi thêm vào giỏ).
+ *   <li>Kiểm tra giỏ không rỗng (và phát hiện checkout song song cùng Idempotency-Key).
+ *   <li>Gọi {@code POST /api/cart/validate}: cart-service đối chiếu giá/shop/tồn kho với
+ *       product-service và trả kèm CHÍNH danh sách item đã kiểm tra. Chụp từng item trong danh sách
+ *       đó thành {@link OrderItem} (không dùng snapshot {@code GET /api/cart} đọc trước đó — sửa giỏ
+ *       xen giữa hai lần đọc không thể làm đơn lệch với thứ đã được kiểm tra).
  *   <li>Lưu đơn + item trong MỘT transaction. <b>Sau khi commit</b>, xoá từng item đã checkout khỏi
  *       giỏ (không xoá toàn bộ, tránh mất item thêm trong lúc checkout). Xoá hỏng chỉ log cảnh báo,
  *       không làm hỏng đơn đã tạo.
@@ -127,40 +130,65 @@ public class OrderService {
 
         // 3. Kiểm tra lại giá/shop/tồn kho với product-service (qua cart-service) để chặn giá do
         // client tự đặt. Không tạo đơn nào nếu giỏ đã thay đổi.
-        validateCartOrThrow(userId);
+        CartValidationView validation = cartServiceClient.validateCart(userId);
+        if (!validation.ok()) {
+            // Giỏ không còn hợp lệ có thể do CHÍNH checkout này đã hoàn tất ở request song song
+            // cùng Idempotency-Key (request đầu đã tạo đơn và xoá giỏ → validate thấy CART_EMPTY).
+            // Trả lại đơn đã tạo thay vì 409 CART_CHANGED.
+            if (trimmedKey != null) {
+                Optional<PlaceOrderResponse> existing = findIdempotentOrders(userId, trimmedKey);
+                if (existing.isPresent()) {
+                    log.info(
+                            "Idempotency-Key '{}' đã dùng (validate giỏ thất bại vì request song song đã checkout xong) → trả lại checkout {}",
+                            trimmedKey,
+                            existing.get().checkoutId());
+                    return existing.get();
+                }
+            }
+            throw validationFailure(validation);
+        }
 
-        // 4. Tách giỏ theo shop, tạo các đơn trong MỘT transaction độc lập (REQUIRES_NEW)
+        // Dựng đơn từ ĐÚNG các item mà cart-service vừa kiểm tra (không dùng snapshot GET cart):
+        // sửa giỏ xen giữa hai lần đọc không thể làm đơn lệch giá/shop so với thứ đã validate.
+        List<ValidatedItemView> orderItems = validation.items();
+        if (orderItems.isEmpty()) {
+            log.error(
+                    "cart-service trả ok=true nhưng không kèm items cho userId={} → không dựng được đơn",
+                    userId);
+            throw ApiException.unavailable(
+                    "CART_VALIDATION_UNAVAILABLE",
+                    "Chưa kiểm tra được giỏ hàng, vui lòng thử lại sau");
+        }
+
+        // 4. Tách theo shop, tạo các đơn trong MỘT transaction độc lập (REQUIRES_NEW)
         String checkoutId = UlidCreator.getUlid().toString();
         PlaceOrderResponse response;
         try {
             List<OrderResponse> orders =
                     orderCreator.createOrdersInTransaction(
-                            userId, address, cartItems, trimmedKey, request, checkoutId);
+                            userId, address, orderItems, trimmedKey, request, checkoutId);
             response = PlaceOrderResponse.of(checkoutId, orders);
         } catch (DataIntegrityViolationException ex) {
             return recoverIdempotentOrdersOrThrow(userId, trimmedKey, ex);
         }
 
         // 5. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
-        removeCheckoutItemsFromCart(userId, checkoutId, cartItems);
+        removeCheckoutItemsFromCart(userId, checkoutId, orderItems);
 
         return response;
     }
 
-    private void validateCartOrThrow(String userId) {
-        CartValidationView validation = cartServiceClient.validateCart(userId);
-        if (validation.ok()) {
-            return;
-        }
+    /** Lỗi trả cho client khi {@code validation.ok() == false} (và không có đơn idempotent nào). */
+    private static ApiException validationFailure(CartValidationView validation) {
         List<CartIssueView> issues = validation.issues();
         for (CartIssueView issue : issues) {
             if ("SERVICE_UNAVAILABLE".equals(issue.type())) {
-                throw ApiException.unavailable(
+                return ApiException.unavailable(
                         "CART_VALIDATION_UNAVAILABLE",
                         "Chưa kiểm tra được giỏ hàng, vui lòng thử lại sau");
             }
         }
-        throw ApiException.conflict("CART_CHANGED", cartChangedMessage(issues));
+        return ApiException.conflict("CART_CHANGED", cartChangedMessage(issues));
     }
 
     private static String cartChangedMessage(List<CartIssueView> issues) {
@@ -245,10 +273,10 @@ public class OrderService {
     }
 
     private void removeCheckoutItemsFromCart(
-            String userId, String checkoutId, List<CartItemView> snapshot) {
+            String userId, String checkoutId, List<ValidatedItemView> snapshot) {
         int success = 0;
         int failed = 0;
-        for (CartItemView item : snapshot) {
+        for (ValidatedItemView item : snapshot) {
             boolean ok =
                     cartServiceClient.removeCartItem(userId, item.productId(), item.variantId());
             if (ok) {

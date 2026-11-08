@@ -67,8 +67,27 @@ class OrderApiTest {
     @org.junit.jupiter.api.BeforeEach
     void paymentClock() {
         when(paymentClock.instant()).thenReturn(java.time.Instant.parse("2026-10-19T12:00:00Z"));
-        when(cartServiceClient.validateCart(anyString()))
-                .thenReturn(new CartServiceClient.CartValidationView(true, List.of()));
+        // Mặc định validate ok kèm đúng các item của cartWithItems(): đơn được dựng từ items của
+        // validate chứ không phải từ GET /api/cart.
+        when(cartServiceClient.validateCart(anyString())).thenReturn(okValidation(cartWithItems()));
+    }
+
+    private static CartServiceClient.CartValidationView okValidation(
+            CartServiceClient.CartView cart) {
+        return new CartServiceClient.CartValidationView(
+                true,
+                List.of(),
+                cart.groups().stream()
+                        .flatMap(group -> group.items().stream())
+                        .map(
+                                i ->
+                                        new CartServiceClient.ValidatedItemView(
+                                                i.productId(),
+                                                i.variantId(),
+                                                i.shopId(),
+                                                i.quantity(),
+                                                i.unitPrice()))
+                        .toList());
     }
 
     /**
@@ -545,6 +564,140 @@ class OrderApiTest {
         var orders = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE);
         assertThat(orders).hasSize(1);
         assertThat(orders.get(0).getId()).isEqualTo(orderIdB);
+    }
+
+    /**
+     * Retry đồng thời cùng Idempotency-Key: request B đã tạo đơn và xoá giỏ trước khi request A
+     * gọi validate, nên validate của A thấy CART_EMPTY. A phải trả lại đơn của B (201) thay vì 409
+     * CART_CHANGED dù đơn đã tạo xong.
+     */
+    @Test
+    void placeOrderConcurrentRetryWhenValidateSeesEmptiedCartReturnsExistingOrder()
+            throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        String key = "retry-validate-empty-" + System.currentTimeMillis();
+
+        java.util.concurrent.CountDownLatch aAtValidate = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch bCommitted = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean aFirstCall =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+
+        // Request A (lần gọi validate đầu) bị giữ lại tới khi B commit xong; khi tiếp tục, giỏ đã
+        // bị B xoá nên validate báo CART_EMPTY. Request B (lần gọi sau) thấy giỏ đầy đủ → ok.
+        when(cartServiceClient.validateCart(eq(ALICE)))
+                .thenAnswer(
+                        inv -> {
+                            if (aFirstCall.compareAndSet(true, false)) {
+                                aAtValidate.countDown();
+                                try {
+                                    bCommitted.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                                } catch (Exception e) {
+                                    throw new RuntimeException("Timeout waiting for Request B", e);
+                                }
+                                return new CartServiceClient.CartValidationView(
+                                        false,
+                                        List.of(
+                                                new CartServiceClient.CartIssueView(
+                                                        null,
+                                                        null,
+                                                        "CART_EMPTY",
+                                                        "Giỏ hàng trống, không thể thanh toán",
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null)),
+                                        List.of());
+                            }
+                            return okValidation(cartWithItems());
+                        });
+
+        java.util.concurrent.CompletableFuture<org.springframework.test.web.servlet.MvcResult>
+                futureA =
+                        java.util.concurrent.CompletableFuture.supplyAsync(
+                                () -> {
+                                    try {
+                                        return mockMvc.perform(
+                                                        post("/api/orders")
+                                                                .header(
+                                                                        HttpHeaders.AUTHORIZATION,
+                                                                        aliceToken())
+                                                                .header("Idempotency-Key", key)
+                                                                .contentType(
+                                                                        MediaType.APPLICATION_JSON)
+                                                                .content(
+                                                                        "{\"addressId\":\""
+                                                                                + ADDRESS_ID
+                                                                                + "\"}"))
+                                                .andReturn();
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                });
+
+        assertThat(aAtValidate.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        var resB =
+                mockMvc.perform(
+                                post("/api/orders")
+                                        .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                        .header("Idempotency-Key", key)
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                        .andExpect(status().isCreated())
+                        .andReturn();
+        String orderIdB =
+                com.jayway.jsonpath.JsonPath.read(
+                        resB.getResponse().getContentAsString(), "$.orders[0].id");
+        bCommitted.countDown();
+
+        org.springframework.test.web.servlet.MvcResult resA =
+                futureA.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(resA.getResponse().getStatus()).isEqualTo(201);
+        String orderIdA =
+                com.jayway.jsonpath.JsonPath.read(
+                        resA.getResponse().getContentAsString(), "$.orders[0].id");
+        assertThat(orderIdA).isEqualTo(orderIdB);
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+        // Chỉ B xoá giỏ (2 item); A trả đơn cũ nên không xoá thêm gì.
+        verify(cartServiceClient, times(2)).removeCartItem(eq(ALICE), anyString(), any());
+    }
+
+    /** Có Idempotency-Key nhưng chưa có đơn nào: validate CART_EMPTY vẫn là 409 CART_CHANGED. */
+    @Test
+    void placeOrderWithKeyAndEmptiedCartButNoExistingOrderStillReturns409() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.validateCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartValidationView(
+                                false,
+                                List.of(
+                                        new CartServiceClient.CartIssueView(
+                                                null,
+                                                null,
+                                                "CART_EMPTY",
+                                                "Giỏ hàng trống, không thể thanh toán",
+                                                null,
+                                                null,
+                                                null,
+                                                null)),
+                                List.of()));
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "no-order-yet-key")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CART_CHANGED"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+        verify(cartServiceClient, never()).removeCartItem(anyString(), anyString(), any());
     }
 
     @Test

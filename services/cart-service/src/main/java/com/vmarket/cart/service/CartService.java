@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -184,7 +185,10 @@ public class CartService {
 		try {
 			redis.delete(key(userId));
 			log.debug("clearCart: đã xoá giỏ của userId={}", userId);
-		} catch (org.springframework.data.redis.RedisConnectionFailureException ex) {
+		} catch (DataAccessException ex) {
+			// Bắt DataAccessException chứ không riêng RedisConnectionFailureException: khi Redis
+			// chết giữa chừng Lettuce xếp lệnh chờ timeout rồi ném QueryTimeoutException /
+			// RedisSystemException (cùng áp dụng cho load/save bên dưới).
 			log.error("Không kết nối được Redis khi xoá giỏ userId={}", userId, ex);
 			throw new CartStorageException("Redis không khả dụng", ex);
 		} finally {
@@ -211,7 +215,7 @@ public class CartService {
 		String json;
 		try {
 			json = redis.opsForValue().get(key(userId));
-		} catch (org.springframework.data.redis.RedisConnectionFailureException ex) {
+		} catch (DataAccessException ex) {
 			log.error("Không kết nối được Redis khi đọc giỏ userId={}", userId, ex);
 			throw new CartStorageException("Redis không khả dụng", ex);
 		}
@@ -235,7 +239,7 @@ public class CartService {
 			// thì xoá TTL cũ trước khi lệnh EXPIRE kịp chạy (P2 của review PR #23).
 			redis.opsForValue().set(key(userId), objectMapper.writeValueAsString(doc),
 					Duration.ofDays(properties.getTtlDays()));
-		} catch (org.springframework.data.redis.RedisConnectionFailureException ex) {
+		} catch (DataAccessException ex) {
 			log.error("Không kết nối được Redis khi ghi giỏ userId={}", userId, ex);
 			throw new CartStorageException("Redis không khả dụng", ex);
 		} catch (Exception ex) {

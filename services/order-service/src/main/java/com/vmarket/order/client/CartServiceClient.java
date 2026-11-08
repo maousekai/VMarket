@@ -269,11 +269,32 @@ public class CartServiceClient {
 	record ErrorDetail(String code, String message) {
 	}
 
-	/** Response {@code POST /api/cart/validate}: {@code {ok, issues[]}}. */
-	public record CartValidationView(boolean ok, List<CartIssueView> issues) {
+	/**
+	 * Response {@code POST /api/cart/validate}: {@code {ok, issues[], items[]}}.
+	 *
+	 * <p>{@code items} là ĐÚNG danh sách dòng hàng mà cart-service đã kiểm tra giá/shop/tồn kho
+	 * trong lần gọi này (luôn có, kể cả khi {@code ok=false}). Order-service dựng đơn từ chính
+	 * danh sách này thay vì từ snapshot {@code GET /api/cart} đọc trước đó, để sửa giỏ xen giữa
+	 * hai lần đọc không làm đơn lệch với thứ đã được kiểm tra.
+	 */
+	public record CartValidationView(
+			boolean ok, List<CartIssueView> issues, List<ValidatedItemView> items) {
 		public List<CartIssueView> issues() {
 			return issues == null ? List.of() : issues;
 		}
+
+		public List<ValidatedItemView> items() {
+			return items == null ? List.of() : items;
+		}
+	}
+
+	/** Một dòng hàng đã được cart-service kiểm tra trong {@code POST /api/cart/validate}. */
+	public record ValidatedItemView(
+			String productId,
+			String variantId,
+			String shopId,
+			int quantity,
+			BigDecimal unitPrice) {
 	}
 
 	/** Một vấn đề của giỏ: type = PRICE_CHANGED | SHOP_CHANGED | OUT_OF_STOCK | NOT_FOUND | ... */

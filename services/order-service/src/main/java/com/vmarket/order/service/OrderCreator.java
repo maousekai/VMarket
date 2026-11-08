@@ -15,7 +15,7 @@ import com.github.f4b6a3.ulid.UlidCreator;
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderPlaced;
 import com.vmarket.events.StockItem;
-import com.vmarket.order.client.CartServiceClient.CartItemView;
+import com.vmarket.order.client.CartServiceClient.ValidatedItemView;
 import com.vmarket.order.client.UserServiceClient.AddressView;
 import com.vmarket.order.config.OrderPaymentProperties;
 import com.vmarket.order.dto.OrderResponse;
@@ -62,17 +62,17 @@ public class OrderCreator {
     public List<OrderResponse> createOrdersInTransaction(
             String userId,
             AddressView address,
-            List<CartItemView> cartItems,
+            List<ValidatedItemView> cartItems,
             String idempotencyKey,
             PlaceOrderRequest request,
             String checkoutId) {
-        Map<String, List<CartItemView>> byShop = new LinkedHashMap<>();
-        for (CartItemView cartItem : cartItems) {
+        Map<String, List<ValidatedItemView>> byShop = new LinkedHashMap<>();
+        for (ValidatedItemView cartItem : cartItems) {
             byShop.computeIfAbsent(cartItem.shopId(), k -> new ArrayList<>()).add(cartItem);
         }
 
         List<OrderResponse> responses = new ArrayList<>();
-        for (Map.Entry<String, List<CartItemView>> entry : byShop.entrySet()) {
+        for (Map.Entry<String, List<ValidatedItemView>> entry : byShop.entrySet()) {
             responses.add(
                     createSingleShopOrder(
                             userId,
@@ -90,7 +90,7 @@ public class OrderCreator {
             String userId,
             AddressView address,
             String shopId,
-            List<CartItemView> cartItems,
+            List<ValidatedItemView> cartItems,
             String idempotencyKey,
             PlaceOrderRequest request,
             String checkoutId) {
@@ -123,7 +123,7 @@ public class OrderCreator {
         }
 
         BigDecimal total = BigDecimal.ZERO;
-        for (CartItemView cartItem : cartItems) {
+        for (ValidatedItemView cartItem : cartItems) {
             OrderItem item = new OrderItem();
             item.setOrder(order);
             item.setProductId(cartItem.productId());
