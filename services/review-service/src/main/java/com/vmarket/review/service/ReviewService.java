@@ -30,19 +30,19 @@ import tools.jackson.databind.JsonNode;
  * Viết và đọc đánh giá (FR-REV-01, FR-REV-02).
  *
  * <p>Điều kiện được đánh giá: đơn thuộc về người gọi, đã ở trạng thái hoàn thành
- * ({@value #COMPLETED_STATUS}) và chứa sản phẩm được đánh giá. Gọi Order Service <b>ngoài</b>
+ * ({@link #REVIEWABLE_STATUSES}) và chứa sản phẩm được đánh giá. Gọi Order Service <b>ngoài</b>
  * transaction để không giữ kết nối DB trong lúc chờ mạng; ràng buộc {@code UNIQUE (order_id,
  * product_id)} vẫn chặn được request trùng lọt qua bước kiểm tra trước.
  *
- * <p>SRS gọi trạng thái này là "Hoàn thành"; Order Service hiện chưa có trạng thái hoàn thành riêng
- * (hay tự chuyển sau N ngày) nên dùng {@code DELIVERED}. Khi Order Service bổ sung thì đổi
- * {@link #COMPLETED_STATUS}.
+ * <p>SRS gọi trạng thái này là "Hoàn thành". Order Service có {@code DELIVERED} (đã giao) và
+ * {@code COMPLETED} (người mua xác nhận đã nhận hàng); cả hai đều đủ điều kiện, kẻo đơn đã hoàn tất
+ * bị từ chối còn đơn mới chỉ giao xong thì được.
  */
 @Service
 public class ReviewService {
 
-	/** Trạng thái "Hoàn thành" của đơn bên Order Service ({@code OrderStatus.DELIVERED}). */
-	static final String COMPLETED_STATUS = "DELIVERED";
+	/** Trạng thái đơn bên Order Service cho phép đánh giá: đã giao hoặc đã hoàn tất. */
+	static final java.util.Set<String> REVIEWABLE_STATUSES = java.util.Set.of("DELIVERED", "COMPLETED");
 	static final int MAX_PAGE_SIZE = 50;
 
 	private final ReviewRepository reviews;
@@ -71,7 +71,7 @@ public class ReviewService {
 		if (!request.orderId().equals(order.path("id").asString())) {
 			throw ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng của bạn");
 		}
-		if (!COMPLETED_STATUS.equals(order.path("status").asString())) {
+		if (!REVIEWABLE_STATUSES.contains(order.path("status").asString())) {
 			throw ApiException.unprocessable("ORDER_NOT_COMPLETED", "Chỉ đánh giá được sản phẩm thuộc đơn đã hoàn thành");
 		}
 		JsonNode item = findItem(order, request.productId());
