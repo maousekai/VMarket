@@ -15,7 +15,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -24,23 +23,15 @@ import com.vmarket.order.client.CartServiceClient;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.entity.Order;
 import com.vmarket.order.entity.OrderStatus;
-import com.vmarket.order.exception.GlobalExceptionHandler;
 import com.vmarket.order.repository.OrderRepository;
 
 /**
- * Kiểm tra giải quyết xung đột khi hai thao tác cùng cập nhật một đơn hàng song song (PBL6-53)
- * bằng cơ chế Optimistic Locking (@Version trên Order).
+ * Kiểm tra riêng cơ chế {@code @Version} trên Order (PBL6-53): hai transaction cố ý đọc đơn
+ * KHÔNG khoá dòng thì transaction ghi sau bị từ chối thay vì âm thầm ghi đè.
  *
- * <p>Kịch bản thực tế:
- * <ul>
- *   <li>Người mua bấm "Huỷ đơn" trong lúc Shipper/Delivery Service cập nhật sang "Đang giao" (SHIPPED).
- *   <li>Hai webhook thanh toán / hết hạn cùng cập nhật trạng thái đơn hàng đồng thời.
- * </ul>
- *
- * <p>Nếu không có {@code @Version}, Hibernate sinh UPDATE không có điều kiện version, thao tác
- * commit sau sẽ ghi đè âm thầm lên thao tác commit trước (Lost Update Anomaly).
- * Có {@code @Version}, thao tác tới sau phát hiện version đã bị thay đổi, ném
- * {@link ObjectOptimisticLockingFailureException} và được chuyển thành HTTP 409 CONCURRENT_MODIFICATION.
+ * <p>Các luồng nghiệp vụ hiện tại đều khoá dòng trước khi ghi nên không đi vào nhánh này; hành vi
+ * tuần tự hoá của chúng nằm ở {@link OrderConcurrentFlowTest}. Test này bảo vệ lớp phòng thủ cho
+ * các đường ghi không khoá về sau.
  */
 @SpringBootTest
 class OrderConcurrentUpdateTest {
@@ -50,7 +41,6 @@ class OrderConcurrentUpdateTest {
 
 	@Autowired OrderRepository orderRepository;
 	@Autowired TransactionTemplate transactionTemplate;
-	@Autowired GlobalExceptionHandler globalExceptionHandler;
 
 	@MockitoBean UserServiceClient userServiceClient;
 	@MockitoBean CartServiceClient cartServiceClient;
@@ -135,18 +125,6 @@ class OrderConcurrentUpdateTest {
 		assertThat(finalOrder.getStatus()).isEqualTo(OrderStatus.PROCESSING);
 		assertThat(finalOrder.getNote()).isEqualTo("Đang xử lý bởi người bán");
 		assertThat(finalOrder.getVersion()).isEqualTo(1L);
-	}
-
-	@Test
-	void optimisticLockConflict_translatedTo409_CONCURRENT_MODIFICATION() {
-		var response = globalExceptionHandler.handleOptimisticLock(
-				new ObjectOptimisticLockingFailureException("orders", "01JC4X9Q2W5R8T6V8N0P4S6A2B"));
-
-		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-		assertThat(response.getBody()).isNotNull();
-		assertThat(response.getBody().error().code()).isEqualTo("CONCURRENT_MODIFICATION");
-		assertThat(response.getBody().error().message())
-				.contains("Đơn hàng vừa được cập nhật bởi một thao tác khác");
 	}
 }
 
