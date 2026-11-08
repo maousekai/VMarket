@@ -116,10 +116,14 @@ class Dependencies(BaseHTTPRequestHandler):
         self.reply(None, 204)
 
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         if self.path == "/api/cart/validate":
-            self.reply(dict(ok=True, issues=[]))
-        elif self.path.endswith("/cancel"):
+            # Order builds its orders from the validated lines, so the stub must return the same item as GET /api/cart.
+            item = dict(productId=PRODUCT, variantId=VARIANT, shopId=SHOP, quantity=1, unitPrice=3000)
+            self.reply(dict(ok=True, issues=[], items=[item]))
+            return
+        body = json.loads(raw) if raw else {}
+        if self.path.endswith("/cancel"):
             code = int(self.path.split("/")[-2])
             if self.links[code]["status"] != "PAID":
                 self.links[code]["status"] = "CANCELLED"
