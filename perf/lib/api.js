@@ -1,14 +1,26 @@
-// Thin wrapper over k6/http: every request is tagged with a stable `endpoint`
-// name (method + route template, never the concrete id) so thresholds and the
-// summary report one line per endpoint instead of one per URL.
+// Thin wrapper over k6/http. Every request is tagged with
+//   endpoint: a stable name (method + route template, never the concrete id)
+//   phase:    warmup / ramp / hold / spike / recover ... (config.currentPhase)
+// so thresholds apply per endpoint and only in the measured phase.
 import http from 'k6/http';
+import exec from 'k6/execution';
 import { check, sleep } from 'k6';
-import { BASE_URL, THINK_MAX, THINK_MIN } from './config.js';
+import { BASE_URL, currentPhase } from './config.js';
 
 let rateLimitWarned = false; // per VU
 
-export function request(method, path, { endpoint, token, body, headers = {}, expect = [200], params = {} } = {}) {
+// Tag the VU's metrics (requests, checks, custom metrics) with the current phase.
+export function tagPhase() {
+  try {
+    exec.vu.metrics.tags.phase = currentPhase();
+  } catch (_) {
+    // setup()/teardown(): no VU tags; their requests use "setup:*" endpoint names
+  }
+}
+
+export function request(method, path, { endpoint, token, body, headers = {}, expect = [200], timeout = '30s' } = {}) {
   if (!endpoint) throw new Error(`request ${method} ${path}: endpoint tag is required`);
+  tagPhase();
   const allHeaders = { Accept: 'application/json', ...headers };
   if (body !== undefined) allHeaders['Content-Type'] = 'application/json';
   if (token) allHeaders.Authorization = `Bearer ${token}`;
@@ -16,27 +28,26 @@ export function request(method, path, { endpoint, token, body, headers = {}, exp
   // Statuses listed in `expect` are not counted in http_req_failed.
   const response = http.request(method, BASE_URL + path, body === undefined ? null : JSON.stringify(body), {
     headers: allHeaders,
-    tags: { endpoint, ...(params.tags || {}) },
+    tags: { endpoint },
     responseCallback: http.expectedStatuses(...expect),
-    timeout: params.timeout || '30s',
+    timeout,
   });
 
   if (response.status === 429 && !rateLimitWarned) {
     rateLimitWarned = true;
     console.warn(
-      'HTTP 429 from the gateway: its per-IP rate limit is on. On the test environment only, restart ' +
-        'api-gateway with APP_RATE_LIMIT_ENABLED=false (see perf/README.md); results are invalid otherwise.',
+      `HTTP 429 on ${endpoint}: a rate limit is on (gateway or Cloudflare). Capacity runs need ` +
+        'APP_RATE_LIMIT_ENABLED=false on ENV-P and a Cloudflare skip rule for this IP; analyse these 429s.',
     );
   }
 
-  const ok = check(response, { [`${endpoint} -> ${expect.join('|')}`]: (r) => expect.includes(r.status) });
+  const ok = check(response, { [`${endpoint} status ${expect.join('|')}`]: (r) => expect.includes(r.status) });
   return { response, ok, data: ok ? parseJson(response) : null };
 }
 
 export const get = (path, options) => request('GET', path, options);
 export const post = (path, options) => request('POST', path, options);
 export const patch = (path, options) => request('PATCH', path, options);
-export const del = (path, options) => request('DELETE', path, options);
 
 export function parseJson(response) {
   if (!response.body) return null;
@@ -52,12 +63,8 @@ export function errorCode(response) {
   return body && body.error ? body.error.code : undefined;
 }
 
-export function think(min = THINK_MIN, max = THINK_MAX) {
+export function think(min = 1, max = 3) {
   sleep(min + Math.random() * Math.max(0, max - min));
-}
-
-export function pick(items) {
-  return items[Math.floor(Math.random() * items.length)];
 }
 
 export function query(params) {
