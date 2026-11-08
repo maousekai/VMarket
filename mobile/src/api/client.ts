@@ -88,6 +88,7 @@ const TERMINAL_REFRESH_CODES = new Set([
   'INVALID_REFRESH_TOKEN',
   'REFRESH_TOKEN_EXPIRED',
   'REFRESH_TOKEN_REUSED',
+  'REFRESH_TOKEN_REVOKED',
   'SESSION_NOT_FOUND',
   'ACCOUNT_SUSPENDED',
 ])
@@ -119,7 +120,10 @@ async function doRefresh(attempt: number): Promise<boolean> {
     )
     if (stale()) return AuthStore.getSnapshot().phase === 'authenticated'
     AuthStore.apply(res.data)
-    return true
+    // The server already rotated: the old token only survives a 30s grace, so the new one must be
+    // on disk before this refresh counts as done (an app kill right after would replay the old one).
+    await AuthStore.whenPersisted()
+    return AuthStore.getSnapshot().phase === 'authenticated'
   } catch (e) {
     if (stale()) return AuthStore.getSnapshot().phase === 'authenticated'
     const err = getApiError(e)

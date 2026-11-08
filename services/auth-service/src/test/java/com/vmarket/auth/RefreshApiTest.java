@@ -1,6 +1,7 @@
 package com.vmarket.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -124,6 +125,57 @@ class RefreshApiTest {
 		RefreshToken chained = refreshTokenRepository.findByTokenHash(tokenCodec.hash(rt2)).orElseThrow();
 		assertThat(chained.getRevokedAt()).isNotNull();
 		refresh(rt2).andExpect(status().isUnauthorized());
+	}
+
+	private MockCookie cookieOf(String rawRefreshToken) {
+		return new MockCookie(RefreshTokenCookieService.COOKIE_NAME, rawRefreshToken);
+	}
+
+	private String sessionIdOf(String rawRefreshToken) {
+		return refreshTokenRepository.findByTokenHash(tokenCodec.hash(rawRefreshToken)).orElseThrow().getId();
+	}
+
+	/** Token bị thu hồi chủ động: từ chối + xoá cookie, nhưng KHÔNG đụng tới phiên khác. */
+	private void assertRevokedOnly(String revokedRaw, String survivorRaw) throws Exception {
+		refresh(revokedRaw).andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("REFRESH_TOKEN_REVOKED"))
+				.andExpect(cookie().maxAge(RefreshTokenCookieService.COOKIE_NAME, 0));
+		assertThat(refreshTokenRepository.findByTokenHash(tokenCodec.hash(survivorRaw)).orElseThrow()
+				.getRevokedAt()).isNull();
+		refresh(survivorRaw).andExpect(status().isOk());
+	}
+
+	@Test
+	void refresh_afterLogoutOnOtherDevice_isRevoked_andKeepsOtherDeviceAlive() throws Exception {
+		String rtA = loginAndGetRefreshCookie();
+		String rtB = loginAndGetRefreshCookie();
+
+		mockMvc.perform(post("/api/auth/logout").cookie(cookieOf(rtA))).andExpect(status().isOk());
+
+		assertRevokedOnly(rtA, rtB);
+	}
+
+	@Test
+	void refresh_afterRevokeSessionById_isRevoked_andKeepsCallerAlive() throws Exception {
+		String rtA = loginAndGetRefreshCookie();
+		String rtB = loginAndGetRefreshCookie();
+
+		// Thiết bị B thu hồi phiên của thiết bị A.
+		mockMvc.perform(delete("/api/auth/sessions/" + sessionIdOf(rtA)).cookie(cookieOf(rtB)))
+				.andExpect(status().isOk());
+
+		assertRevokedOnly(rtA, rtB);
+	}
+
+	@Test
+	void refresh_afterRevokeOthers_isRevoked_andKeepsCallerAlive() throws Exception {
+		String rtA = loginAndGetRefreshCookie();
+		String rtB = loginAndGetRefreshCookie();
+
+		mockMvc.perform(post("/api/auth/sessions/revoke-others").cookie(cookieOf(rtA)))
+				.andExpect(status().isOk());
+
+		assertRevokedOnly(rtB, rtA);
 	}
 
 	@Test

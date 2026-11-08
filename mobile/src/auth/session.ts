@@ -78,6 +78,8 @@ class AuthStoreImpl {
   private refreshToken: string | null = null
   private generation = 0
   private beforeClear = new Set<ClearHook>()
+  /** Serialises SecureStore writes so a late `setItem` can never land after a later `clear()`. */
+  private writeQueue: Promise<void> = Promise.resolve()
 
   subscribe = (l: Listener) => {
     this.listeners.add(l)
@@ -115,13 +117,36 @@ class AuthStoreImpl {
     }
   }
 
-  /** Apply a login / otp-verify / refresh response. */
+  /** Queue a storage write; never rejects, so callers can await it without a try/catch. */
+  private enqueueWrite(op: () => Promise<void>): Promise<void> {
+    this.writeQueue = this.writeQueue.then(op).catch(() => {})
+    return this.writeQueue
+  }
+
+  /** Resolves once every refresh-token write queued so far has settled (never rejects). */
+  whenPersisted(): Promise<void> {
+    return this.writeQueue
+  }
+
+  /**
+   * Apply a login / otp-verify / refresh response. The new state is visible immediately; the
+   * refresh-token write runs in the background — await `whenPersisted()` when it must be on disk.
+   */
   apply(res: TokenResponse) {
     const { user, expiresAt } = userFromTokenResponse(res)
     if (this.snapshot.user?.userId !== user.userId) this.generation += 1
     if (res.refreshToken) {
-      this.refreshToken = res.refreshToken
-      secureStorage.setItem(REFRESH_KEY, res.refreshToken).catch(() => {})
+      const token = res.refreshToken
+      this.refreshToken = token
+      void this.enqueueWrite(async () => {
+        try {
+          await secureStorage.setItem(REFRESH_KEY, token)
+        } catch {
+          // The previous stored token was rotated away server-side. Drop it, so the next launch
+          // starts as guest instead of replaying it (reuse detection would end every session).
+          await secureStorage.removeItem(REFRESH_KEY).catch(() => {})
+        }
+      })
     }
     this.emit({
       phase: 'authenticated',
@@ -158,7 +183,7 @@ class AuthStoreImpl {
     }
     this.generation += 1
     this.refreshToken = null
-    secureStorage.removeItem(REFRESH_KEY).catch(() => {})
+    void this.enqueueWrite(() => secureStorage.removeItem(REFRESH_KEY))
     this.emit({
       phase: 'guest',
       user: null,

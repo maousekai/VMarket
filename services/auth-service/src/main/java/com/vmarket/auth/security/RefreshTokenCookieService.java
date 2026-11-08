@@ -33,8 +33,16 @@ public class RefreshTokenCookieService {
 
 	private final AuthRefreshCookieProperties props;
 
-	/** Gắn cookie chứa refresh token gốc, sống bằng đúng TTL của token trong DB. */
-	public void attach(HttpServletResponse response, String rawToken, Duration ttl) {
+	/**
+	 * Gắn cookie chứa refresh token gốc, sống bằng đúng TTL của token trong DB.
+	 * Client native KHÔNG nhận cookie: token của họ đi theo body/header
+	 * ({@link #decorate}, {@link #REFRESH_HEADER}); cookie jar của RN vẫn lưu Set-Cookie nên
+	 * nếu ghi thêm cookie thì hai nguồn token có thể lệch nhau sau mỗi lần xoay vòng.
+	 */
+	public void attach(HttpServletRequest request, HttpServletResponse response, String rawToken, Duration ttl) {
+		if (isNativeMobileRequest(request)) {
+			return;
+		}
 		response.addHeader(HttpHeaders.SET_COOKIE, build(rawToken, ttl).toString());
 	}
 
@@ -43,22 +51,24 @@ public class RefreshTokenCookieService {
 		response.addHeader(HttpHeaders.SET_COOKIE, build("", Duration.ZERO).toString());
 	}
 
-	/** Đọc raw refresh token từ cookie của request, nếu có. */
+	/**
+	 * Đọc raw refresh token của request. Client native (xem {@link #isNativeMobileRequest}) ưu
+	 * tiên header {@code X-Refresh-Token} — nguồn duy nhất họ ghi — rồi mới tới cookie (có thể
+	 * là bản cũ trong cookie jar). Web chỉ đọc cookie HttpOnly.
+	 */
 	public Optional<String> read(HttpServletRequest request) {
+		if (isNativeMobileRequest(request)) {
+			String header = request.getHeader(REFRESH_HEADER);
+			if (header != null && !header.isBlank()) {
+				return Optional.of(header.trim());
+			}
+		}
 		Cookie[] cookies = request.getCookies();
 		if (cookies != null) {
 			for (Cookie cookie : cookies) {
 				if (COOKIE_NAME.equals(cookie.getName()) && !cookie.getValue().isBlank()) {
 					return Optional.of(cookie.getValue());
 				}
-			}
-		}
-		// Client native không có cookie jar đáng tin: dự phòng header X-Refresh-Token,
-		// nhưng CHỈ cho request mobile không Origin/Referer (trình duyệt luôn gửi một trong hai).
-		if (isNativeMobileRequest(request)) {
-			String header = request.getHeader(REFRESH_HEADER);
-			if (header != null && !header.isBlank()) {
-				return Optional.of(header.trim());
 			}
 		}
 		return Optional.empty();

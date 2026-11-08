@@ -78,7 +78,7 @@ public class OtpController {
 			HttpServletResponse httpResponse) {
 		TokenIssuer.IssuedTokens issued = otpService.verifyOtp(
 				body.email(), body.otp(), deviceMetaResolver.resolve(httpRequest));
-		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
+		refreshCookieService.attach(httpRequest, httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
 		return refreshCookieService.decorate(httpRequest, issued.body(), issued.rawRefreshToken(),
 				jwtProps.getRefreshTtl());
 	}

@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockCookie;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -100,16 +101,33 @@ class MobileRefreshTokenApiTest {
 		return objectMapper.readTree(res.getContentAsString());
 	}
 
+	private void assertNoSetCookie(ResultActions actions) {
+		assertThat(actions.andReturn().getResponse().getHeaders("Set-Cookie")).isEmpty();
+	}
+
 	@Test
-	void login_mobileWithoutOrigin_returnsRefreshTokenInBody_andStillSetsCookie() throws Exception {
+	void login_mobileWithoutOrigin_returnsRefreshTokenInBody_andSetsNoCookie() throws Exception {
 		ResultActions result = login(MOBILE, null).andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
 				.andExpect(jsonPath("$.refreshToken").isNotEmpty())
 				.andExpect(jsonPath("$.refreshExpiresIn").value(15 * 24 * 3600))
+				.andExpect(cookie().doesNotExist(RefreshTokenCookieService.COOKIE_NAME));
+		// Native chỉ có MỘT nguồn token (body/header): cookie jar của RN không được nhận thêm bản thứ hai.
+		assertNoSetCookie(result);
+	}
+
+	@Test
+	void login_web_stillSetsCookie_andRefreshRotatesCookie() throws Exception {
+		ResultActions webLogin = login(null, null).andExpect(status().isOk())
 				.andExpect(cookie().exists(RefreshTokenCookieService.COOKIE_NAME));
-		String cookieValue = result.andReturn().getResponse().getCookie(RefreshTokenCookieService.COOKIE_NAME)
+		String cookieValue = webLogin.andReturn().getResponse().getCookie(RefreshTokenCookieService.COOKIE_NAME)
 				.getValue();
-		assertThat(bodyOf(result).get("refreshToken").asString()).isEqualTo(cookieValue);
+
+		mockMvc.perform(post("/api/auth/refresh")
+				.cookie(new MockCookie(RefreshTokenCookieService.COOKIE_NAME, cookieValue)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.refreshToken").doesNotExist())
+				.andExpect(cookie().exists(RefreshTokenCookieService.COOKIE_NAME));
 	}
 
 	@Test
@@ -140,13 +158,41 @@ class MobileRefreshTokenApiTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
 				.andExpect(jsonPath("$.refreshToken").isNotEmpty())
-				.andExpect(jsonPath("$.refreshExpiresIn").isNumber());
+				.andExpect(jsonPath("$.refreshExpiresIn").isNumber())
+				.andExpect(cookie().doesNotExist(RefreshTokenCookieService.COOKIE_NAME));
+		assertNoSetCookie(result);
 		String rt2 = bodyOf(result).get("refreshToken").asString();
 		assertThat(rt2).isNotEqualTo(rt1);
 
 		// Token mới dùng được tiếp.
 		mockMvc.perform(post("/api/auth/refresh").header("X-Client-Type", MOBILE).header("X-Refresh-Token", rt2))
 				.andExpect(status().isOk());
+	}
+
+	@Test
+	void refresh_native_prefersHeaderOverStaleCookieInJar() throws Exception {
+		String rt = mobileLoginRefreshToken();
+
+		// Cookie jar của RN có thể còn một refresh_token cũ: header (nguồn thật của native) phải thắng.
+		mockMvc.perform(post("/api/auth/refresh").header("X-Client-Type", MOBILE).header("X-Refresh-Token", rt)
+				.cookie(new MockCookie(RefreshTokenCookieService.COOKIE_NAME, "stale-cookie-token")))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void refresh_afterLogoutOnOtherDevice_isRevoked_andKeepsOtherDeviceAlive() throws Exception {
+		String rtA = mobileLoginRefreshToken();
+		String rtB = mobileLoginRefreshToken();
+
+		mockMvc.perform(post("/api/auth/logout").header("X-Client-Type", MOBILE).header("X-Refresh-Token", rtA))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(post("/api/auth/refresh").header("X-Client-Type", MOBILE).header("X-Refresh-Token", rtA))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("REFRESH_TOKEN_REVOKED"));
+		mockMvc.perform(post("/api/auth/refresh").header("X-Client-Type", MOBILE).header("X-Refresh-Token", rtB))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.refreshToken").isNotEmpty());
 	}
 
 	@Test

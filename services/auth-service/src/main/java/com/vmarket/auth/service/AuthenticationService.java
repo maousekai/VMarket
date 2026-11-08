@@ -114,8 +114,15 @@ public class AuthenticationService {
 		Instant now = Instant.now();
 
 		if (token.getRevokedAt() != null) {
-			boolean withinGrace = token.getReplacedBy() != null
-					&& token.getRevokedAt().isAfter(now.minus(ROTATION_GRACE));
+			if (token.getReplacedBy() == null) {
+				// Thu hồi CHỦ ĐỘNG (logout, DELETE /sessions/{id}, revoke-others, đổi/đặt lại mật
+				// khẩu, Admin khoá...): token chưa từng được xoay vòng nên không có token kế
+				// nhiệm để bị đánh cắp. Chỉ từ chối phiên này — KHÔNG thu hồi các phiên khác,
+				// nếu không một thiết bị đã đăng xuất sẽ làm chết mọi thiết bị còn lại.
+				throw new ApiException("REFRESH_TOKEN_REVOKED", HttpStatus.UNAUTHORIZED,
+						"Phiên đã đăng xuất, vui lòng đăng nhập lại");
+			}
+			boolean withinGrace = token.getRevokedAt().isAfter(now.minus(ROTATION_GRACE));
 			if (withinGrace) {
 				// Thua một request /refresh khác đang chạy song song với CÙNG token cũ
 				// (2 tab, request trùng lặp...) — token thay thế đã tồn tại và hợp lệ, đây
