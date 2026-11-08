@@ -5,20 +5,19 @@
 // cancelled right after it is placed so reserved stock is released.
 //
 //   k6 run -e PERF_PASSWORD=... [-e PROFILE=load] perf/scenarios/04-cart-order.js
-import { BUYER_COUNT, READ_P95_MS, SUMMARY_TREND_STATS, VUS, guardWritableTarget, requireEnv, scenarioFor, thresholdsFor } from '../lib/config.js';
+import { READ_P95_MS, SUMMARY_TREND_STATS, assertBuyersCover, guardWritableTarget, requireEnv, scenarioFor, thresholdsFor } from '../lib/config.js';
 import { loadCatalog } from '../lib/catalog.js';
-import { cartAndCheckout } from '../flows/checkout.js';
+import { cartAndCheckout, orderThresholds } from '../flows/checkout.js';
 
 requireEnv('PERF_PASSWORD');
 guardWritableTarget('04-cart-order.js');
 
-// Two VUs on one account would fight over the same cart.
-if (VUS > BUYER_COUNT) {
-  throw new Error(`VUS (${VUS}) > BUYER_COUNT (${BUYER_COUNT}). Create more buyers or lower VUS.`);
-}
+// Two VUs on one account would fight over the same cart (checked at the profile's peak).
+const scenarios = { buyers: scenarioFor('buyer') };
+assertBuyersCover(scenarios);
 
 export const options = {
-  scenarios: { buyers: scenarioFor('buyer') },
+  scenarios,
   thresholds: thresholdsFor(
     {
       'GET /api/cart': READ_P95_MS,
@@ -32,7 +31,7 @@ export const options = {
       'POST /api/orders': 2000,
       'PUT /api/orders/{orderId}/cancel': 1000,
     },
-    { idempotency_replay_same_order: ['rate==1'] },
+    orderThresholds(),
   ),
   summaryTrendStats: SUMMARY_TREND_STATS,
 };

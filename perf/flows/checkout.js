@@ -12,7 +12,14 @@ export const ordersCreated = new Counter('orders_created');
 export const ordersCancelled = new Counter('orders_cancelled');
 export const idempotencyHeld = new Rate('idempotency_replay_same_order');
 
-const ORDER_RATIO = parseFloat(__ENV.ORDER_RATIO || '0.3');
+export const ORDER_RATIO = parseFloat(__ENV.ORDER_RATIO || '0.3');
+
+// Thresholds for the order path. Without orders_created count>0, a run where every
+// order fails has zero replay samples and idempotency_replay_same_order still passes.
+export function orderThresholds() {
+  if (!(ORDER_RATIO > 0)) return {};
+  return { idempotency_replay_same_order: ['rate==1'], orders_created: ['count>0'] };
+}
 const CANCEL_AFTER_ORDER = __ENV.CANCEL_AFTER_ORDER !== 'false';
 
 let addressId = null; // per VU

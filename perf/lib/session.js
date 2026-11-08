@@ -37,10 +37,22 @@ export function login(email, password) {
   };
 }
 
+// Login for a VU's long-lived session. A failure aborts the whole test: retrying
+// would loop with no think time (the failure comes before any sleep) and trip
+// auth-service's lock after 5 wrong passwords, locking every test account.
+export function loginOrAbort(email, password) {
+  try {
+    return login(email, password);
+  } catch (e) {
+    exec.test.abort(`Login failed, stopping the test so accounts are not locked: ${e.message}`);
+    throw e; // abort() ends the test; this only stops the current iteration
+  }
+}
+
 // Token for this VU's buyer, logging in only when there is no valid token yet.
 export function buyerToken() {
   if (!session || Date.now() >= session.expiresAt) {
-    session = login(buyerEmail(buyerIndexForVu()), requireEnv('PERF_PASSWORD'));
+    session = loginOrAbort(buyerEmail(buyerIndexForVu()), requireEnv('PERF_PASSWORD'));
   }
   return session.token;
 }

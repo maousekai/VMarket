@@ -100,6 +100,27 @@ export function scenarioFor(exec, { vus = VUS, startTime } = {}) {
   }
 }
 
+// Highest number of VUs a scenario object from scenarioFor() reaches
+// (stress peaks at 2.5x VUS, smoke is capped at 5, soak runs VUS/2).
+export function peakVus(scenario) {
+  if (scenario.stages) return Math.max(scenario.startVUs || 0, ...scenario.stages.map((s) => s.target));
+  return scenario.vus;
+}
+
+// VU ids are unique across all scenarios of a test, and each logged-in VU maps to
+// buyer ((id - 1) % BUYER_COUNT). If the peak VU count across every scenario exceeds
+// BUYER_COUNT, two VUs share one buyer and therefore one cart, which corrupts the
+// checkout results. Refuse to start instead.
+export function assertBuyersCover(scenarios) {
+  const peak = Object.values(scenarios).reduce((sum, s) => sum + peakVus(s), 0);
+  if (peak > BUYER_COUNT) {
+    throw new Error(
+      `Peak VUs (${peak}, PROFILE=${PROFILE}) > BUYER_COUNT (${BUYER_COUNT}): VUs would share buyer carts. ` +
+        `Create at least ${peak} buyers (setup/create-buyers.js with BUYER_COUNT=${peak}) or lower VUS.`,
+    );
+  }
+}
+
 // Thresholds that make k6 exit non-zero when an NFR is missed.
 // `endpoints` maps an endpoint tag to its p95 budget in ms.
 export function thresholdsFor(endpoints, extra = {}) {

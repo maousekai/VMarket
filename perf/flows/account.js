@@ -1,6 +1,6 @@
 // Phase 1 flows: buyer profile + public shop page, seller "my shop".
 import { get, pick, think } from '../lib/api.js';
-import { buyerToken, login } from '../lib/session.js';
+import { buyerToken, loginOrAbort } from '../lib/session.js';
 
 // Buyer: (login once per VU) -> my profile -> a public shop page or two.
 export function buyerProfileAndShops(shopIds) {
@@ -19,7 +19,7 @@ export function buyerProfileAndShops(shopIds) {
 let sellerSession = null;
 export function sellerMyShop(sellerEmails, password) {
   if (!sellerSession || Date.now() >= sellerSession.expiresAt) {
-    sellerSession = login(sellerEmails[(__VU - 1) % sellerEmails.length], password);
+    sellerSession = loginOrAbort(sellerEmails[(__VU - 1) % sellerEmails.length], password);
   }
   get('/api/shops/me', { endpoint: 'GET /api/shops/me', token: sellerSession.token });
   think();

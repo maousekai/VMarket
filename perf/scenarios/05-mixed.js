@@ -9,12 +9,12 @@
 // INCLUDE_SEARCH=false drops search (and gives its share to browse) while
 // ai-search-service is not deployed.
 import {
-  BUYER_COUNT,
   READ_P95_MS,
   SEARCH_P95_MS,
   SUGGEST_P95_MS,
   SUMMARY_TREND_STATS,
   VUS,
+  assertBuyersCover,
   guardWritableTarget,
   requireEnv,
   scenarioFor,
@@ -25,7 +25,7 @@ import { resolveShopIds } from '../lib/shops.js';
 import { buyerProfileAndShops } from '../flows/account.js';
 import { browseCatalog } from '../flows/catalog.js';
 import { searchSession } from '../flows/search.js';
-import { cartAndCheckout } from '../flows/checkout.js';
+import { cartAndCheckout, orderThresholds } from '../flows/checkout.js';
 
 requireEnv('PERF_PASSWORD');
 guardWritableTarget('05-mixed.js');
@@ -40,11 +40,9 @@ if (!INCLUDE_SEARCH) {
 const total = Object.values(mix).reduce((a, b) => a + b, 0);
 const vusFor = (name) => Math.max(1, Math.round((VUS * mix[name]) / total));
 
-// Only account + checkout VUs log in; VU ids are unique across scenarios.
+// Only account + checkout VUs log in, but VU ids are unique across all scenarios,
+// so a logged-in VU can get any id up to the total peak (see assertBuyersCover).
 const loggedInVus = (mix.account ? vusFor('account') : 0) + (mix.checkout ? vusFor('checkout') : 0);
-if (VUS > BUYER_COUNT) {
-  throw new Error(`VUS (${VUS}) > BUYER_COUNT (${BUYER_COUNT}): checkout VUs would share carts. Create more buyers.`);
-}
 
 const scenarios = {};
 const endpoints = { 'POST /api/auth/login': 1500 };
@@ -76,9 +74,11 @@ if (mix.checkout) {
   });
 }
 
+assertBuyersCover(scenarios);
+
 export const options = {
   scenarios,
-  thresholds: thresholdsFor(endpoints, mix.checkout ? { idempotency_replay_same_order: ['rate==1'] } : {}),
+  thresholds: thresholdsFor(endpoints, mix.checkout ? orderThresholds() : {}),
   summaryTrendStats: SUMMARY_TREND_STATS,
 };
 

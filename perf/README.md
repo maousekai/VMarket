@@ -63,6 +63,13 @@ perf/
    This creates `perf.buyer.0000@perf.vmarket.test` … `perf.buyer.0199@…`, each with a
    delivery address. It is safe to re-run. The `.test` domain never receives mail.
    The accounts stay PENDING (email not verified), which login, cart and orders accept.
+   Scripts 04 and 05 refuse to start when the profile's **peak** VU count is above
+   `BUYER_COUNT`, because two VUs on one buyer share a cart. `stress` peaks at 2.5× `VUS`,
+   so `PROFILE=stress VUS=200` needs `BUYER_COUNT=500`.
+
+   If a buyer or seller login fails during a run (wrong `PERF_PASSWORD` or
+   `SEED_PASSWORD`), the test aborts right away. Retrying would lock every test account:
+   auth-service locks an account for 15 minutes after 5 wrong passwords.
 
 ## Running
 
@@ -100,7 +107,8 @@ k6 run -e PROFILE=load --summary-export perf/results/02-catalog-load.json perf/s
 | `VUS` | `200` | target virtual users |
 | `RAMP`, `HOLD`, `DURATION`, `SOAK_DURATION` | `3m`, `5m`, `1m`, `1h` | profile timings |
 | `PERF_PASSWORD` | _(required for 01, 04, 05, setup)_ | password of the test buyers |
-| `BUYER_COUNT` | `200` | number of test buyers; must be ≥ `VUS` for 04 and 05 |
+| `BUYER_COUNT` | `200` | number of test buyers; must be ≥ the profile's peak VUs for 04 and 05 (2.5× `VUS` for `stress`) |
+| `BUYER_PREFIX` | `perf.buyer` | buyer account prefix; use a new one for a fresh set of buyers |
 | `SEED_PASSWORD` | _(optional)_ | seed seller password: enables the seller "my shop" flow and supplies shop ids |
 | `SHOP_IDS` | _(optional)_ | comma-separated shop ids, overrides the other sources |
 | `MAX_PRODUCTS` | `2000` | how many products setup() reads from the catalog |
@@ -118,7 +126,17 @@ k6 run -e PROFILE=load --summary-export perf/results/02-catalog-load.json perf/s
 - **COD only.** The scripts never use PayOS and never call payment, refund or
   reconciliation endpoints. Keep `PAYOS_ENABLED=false` on the target.
 - Each order uses a unique `Idempotency-Key`. The script sends it a second time and
-  requires the same order back (threshold `idempotency_replay_same_order == 1`).
+  requires the same order back (threshold `idempotency_replay_same_order == 1`). A second
+  threshold, `orders_created > 0`, fails the run when no order was placed, because the
+  replay check is meaningless with zero samples. With `ORDER_RATIO=0` both are skipped.
+- **Start every official run from fresh buyers.** `GET /api/orders` returns all of a
+  buyer's orders with no pagination, and cancelled orders stay in that list. Orders left
+  over from earlier runs make the response bigger and slower, so its p95
+  (NFR-PERF-01) can fail because of leftover test data, not because of a regression.
+  Before a run you report, delete the test buyers' orders (see Clean-up), or create new
+  buyers with a different `BUYER_PREFIX` and pass the same prefix to the run. Long
+  `soak` runs build up orders within the run too, so note `GET /api/orders` separately
+  when you interpret a soak result.
 - Orders are cancelled while still PENDING so the reserved stock is released and the
   seed inventory lasts. If you set `CANCEL_AFTER_ORDER=false` to measure stock contention,
   re-run the seed (or restock) afterwards.
