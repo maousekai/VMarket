@@ -18,8 +18,14 @@ rồi mở mỗi service trong một cửa sổ thu nhỏ. Dừng: `scripts\vmar
 > Auth-service chạy ở **18081** (script đặt `SERVER_PORT` riêng cho nó và `AUTH_SERVICE_URL` cho gateway,
 > user, delivery, notification) vì 8081 hay bị Metro/dự án khác chiếm. Đổi bằng `VMARKET_AUTH_PORT`.
 > Gateway đọc origin được phép từ **`APP_CORS_ALLOWED_ORIGINS`**; các service khác đọc `CORS_ALLOWED_ORIGINS`.
-> Khởi động lại một service: dừng tiến trình đang giữ cổng rồi chạy lại đúng lệnh của nó (script có tham số
-> `-Only` nhưng chưa ổn định khi gọi bằng `-File`; hãy chạy toàn bộ script hoặc tự mở service đó).
+> Khởi động lại riêng một vài service sau khi sửa code:
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts\start-backend-local.ps1 -Only order-service,cart-service -Wait
+> ```
+>
+> Script dừng cả cây tiến trình cũ của service đó (cửa sổ `cmd` giữ file log, Maven, JVM), chờ file log được giải phóng rồi mới
+> chạy lại; `-Wait` chờ cổng mở và in `UP`/`TIMEOUT`. Tên service sai sẽ báo lỗi và thoát với mã 1.
 
 ## Dữ liệu demo (chạy 1 lần, chờ ~1 phút giữa các lần xin OTP nếu bị `429 OTP_RESEND_TOO_SOON`)
 

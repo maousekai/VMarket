@@ -1,6 +1,8 @@
 # Start the Java backend locally for mobile development (infra must already be up: docker compose up -d postgres mongo mongo-init-replica redis rabbitmq).
-# Usage: powershell -ExecutionPolicy Bypass -File scripts\start-backend-local.ps1
-param([string[]]$Only)
+# Usage: powershell -ExecutionPolicy Bypass -File scripts\start-backend-local.ps1 [-Only order-service,cart-service] [-Wait]
+#   -Only  restart just these services (comma separated); an old process holding the port is stopped first
+#   -Wait  block until every started service listens on its port, then report UP/TIMEOUT
+param([string[]]$Only, [switch]$Wait)
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -37,10 +39,41 @@ function Start-Svc($name) {
 }
 $svcs = 'auth-service','user-service','shop-service','product-service','cart-service','order-service','payment-service','delivery-service','notification-service','review-service','api-gateway'
 $ports = @{ 'auth-service'=$authPort; 'user-service'=8082; 'shop-service'=8083; 'product-service'=8084; 'cart-service'=8085; 'order-service'=8086; 'payment-service'=8087; 'delivery-service'=8088; 'review-service'=8089; 'notification-service'=8090; 'api-gateway'=8080 }
-if ($Only) { $Only = $Only | ForEach-Object { $_ -split ',' }; $svcs = $svcs | Where-Object { $Only -contains $_ } }
+if ($Only) {
+  # accepts "-Only a,b", "-Only a b" and the single comma string that `powershell -File` produces
+  $Only = $Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ }
+  $unknown = $Only | Where-Object { $svcs -notcontains $_ }
+  if ($unknown) { Write-Error "Unknown service(s): $($unknown -join ', '). Valid: $($svcs -join ', ')"; exit 1 }
+  $svcs = $svcs | Where-Object { $Only -contains $_ }
+}
+function Stop-Svc($name, $port) {
+  # 1) the cmd wrapper (+ its Maven/JVM tree) started by an earlier run of this script. Killing only the JVM leaves
+  #    the wrapper alive holding .logs\<name>.log open, and the new start then fails to open its log and dies silently.
+  Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*\services\$name &&*" } |
+    ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F 2>&1 | Out-Null }
+  # 2) anything else still holding the port (a JVM started by hand)
+  Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+  # 3) wait until the log file can be opened for writing again (max 15 s)
+  $log = "$root\.logs\$name.log"
+  for ($i = 0; $i -lt 30 -and (Test-Path $log); $i++) {
+    try { $fs = [IO.File]::Open($log, 'Open', 'ReadWrite', 'None'); $fs.Close(); break } catch { Start-Sleep -Milliseconds 500 }
+  }
+}
 foreach ($s in $svcs) {
-  # stop whatever still holds the port (old JVM from a previous run), so a restart really restarts
-  Get-NetTCPConnection -State Listen -LocalPort $ports[$s] -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+  Stop-Svc $s $ports[$s]
   Start-Svc $s; Start-Sleep 2
 }
 Write-Output "started: $($svcs -join ', ')  (logs in .logs\)"
+
+if ($Wait) {
+  # -Wait: block until every started service listens on its port (max 3 minutes each) and report the result
+  $failed = @()
+  foreach ($s in $svcs) {
+    $deadline = (Get-Date).AddSeconds(180)
+    while ((Get-Date) -lt $deadline -and -not (Get-NetTCPConnection -State Listen -LocalPort $ports[$s] -ErrorAction SilentlyContinue)) { Start-Sleep 3 }
+    if (Get-NetTCPConnection -State Listen -LocalPort $ports[$s] -ErrorAction SilentlyContinue) { Write-Output "  UP       $s :$($ports[$s])" }
+    else { Write-Output "  TIMEOUT  $s :$($ports[$s])  (see .logs\$s.log)"; $failed += $s }
+  }
+  if ($failed) { exit 2 }
+}
