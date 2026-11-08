@@ -21,6 +21,10 @@ npx expo start --android --port 19006    # máy ảo Android (Expo Go tự cài)
 
 Địa chỉ API (`src/lib/config.ts`): Android emulator `http://10.0.2.2:8080`, web/iOS simulator `http://localhost:8080`, điện thoại thật dùng IP máy chủ Metro. Ghi đè bằng `EXPO_PUBLIC_API_BASE_URL`.
 
+- **iPhone thật**: `localhost` trỏ về chính điện thoại nên bắt buộc đặt `EXPO_PUBLIC_API_BASE_URL=http://<IP máy chạy gateway>:8080` (cùng mạng Wi-Fi).
+- **Bản build release Android** chặn HTTP không mã hóa: dùng gateway HTTPS hoặc bật `usesCleartextTraffic` qua `expo-build-properties` (chỉ cho bản thử nội bộ).
+- Chỉ dùng HTTP thuần trong dev; production phải đặt HTTPS.
+
 ## Tài khoản demo (chỉ môi trường local)
 
 | Vai trò | Email | Mật khẩu |
