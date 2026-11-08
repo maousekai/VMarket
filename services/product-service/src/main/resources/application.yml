@@ -36,7 +36,7 @@ auth:
 
 app:
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
   # Khoá API nội bộ (tồn kho, /internal/**). Không có mặc định, cùng lý do với
   # AUTH_JWT_SECRET ở trên.
   internal-api-key: ${INTERNAL_API_KEY}
