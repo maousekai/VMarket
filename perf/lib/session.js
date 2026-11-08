@@ -1,104 +1,88 @@
-// Logins for test buyers. One VU = one buyer account with its own cookie jar
-// (k6 gives each VU its own jar; the refresh_token cookie is scoped to /api/auth).
+// Test accounts and sessions. One VU = one account with its own cookie jar.
+//
+// Buyer pools (fixtures/prepare.mjs creates them, the manifest records the sizes):
+//   shopper   0 .. 399   read, cart and account journeys; each has a fixture cart
+//   order   400 .. 799   checkout journeys (they build and empty their own carts)
+//   delivery 800 .. 849  buyers of the orders being delivered (PERF-SHIP)
+// Pools are as large as the highest VU count of any run (stress: 400), so
+// (vu id - 1) % pool size never gives two VUs of one process the same account.
 import exec from 'k6/execution';
-import encoding from 'k6/encoding';
 import http from 'k6/http';
-import { BASE_URL, BUYER_COUNT, BUYER_DOMAIN, BUYER_PREFIX, requireEnv } from './config.js';
+import encoding from 'k6/encoding';
+import { BASE_URL, requireEnv } from './config.js';
 import { parseJson, post } from './api.js';
 import { MANIFEST_INFO } from './manifest.js';
 
 const REFRESH_MARGIN_MS = 60 * 1000;
+const BUYERS = MANIFEST_INFO.buyers || {};
+export const POOLS = BUYERS.pools || { shopper: { start: 0, size: 400 }, order: { start: 400, size: 400 }, delivery: { start: 800, size: 50 } };
+const PREFIX = __ENV.BUYER_PREFIX || BUYERS.prefix || 'perf.p73';
+const DOMAIN = BUYERS.domain || 'perf.vmarket.test';
 
-// Buyer prefix/count come from the fixture manifest; env vars only override them.
-const BUYERS = (MANIFEST_INFO && MANIFEST_INFO.buyers) || {};
-export const BUYER_TOTAL = __ENV.BUYER_COUNT ? BUYER_COUNT : BUYERS.count || BUYER_COUNT;
-const PREFIX = __ENV.BUYER_PREFIX ? BUYER_PREFIX : BUYERS.prefix || BUYER_PREFIX;
+export const buyerUsername = (index) => `${PREFIX}.${String(index).padStart(4, '0')}`;
+export const buyerEmail = (index) => `${buyerUsername(index)}@${DOMAIN}`;
 
-export function buyerIndexForVu() {
-  return (exec.vu.idInTest - 1) % BUYER_TOTAL;
+export function poolIndex(pool, vuId = exec.vu.idInTest) {
+  const p = POOLS[pool];
+  return p.start + ((vuId - 1) % p.size);
 }
 
-export function buyerUsername(index) {
-  return `${PREFIX}.${String(index).padStart(4, '0')}`;
-}
-
-export function buyerEmail(index) {
-  return `${buyerUsername(index)}@${BUYER_DOMAIN}`;
-}
-
-// 401 INVALID_CREDENTIALS / 423 ACCOUNT_LOCKED mean the fixture or PERF_PASSWORD is
-// wrong, not that the system is slow. Retrying would lock every test account
-// (5 wrong passwords -> 15 min lock), so the whole test stops (rule 4).
+// 401 / 423 mean the fixture or PERF_PASSWORD is wrong, not that the system is slow.
+// Retrying would lock the test accounts (5 wrong passwords -> 15 min lock), so stop.
 export function abortOnCredentialError(response, email) {
   if (response.status === 401 || response.status === 423) {
-    exec.test.abort(
-      `Login for ${email} returned HTTP ${response.status}: fixture or PERF_PASSWORD problem, ` +
-        'stopping so the test accounts are not locked. Re-run fixtures/prepare.mjs or fix PERF_PASSWORD.',
-    );
+    exec.test.abort(`Login for ${email} returned HTTP ${response.status}: fixture or PERF_PASSWORD problem; stopping so test accounts are not locked.`);
   }
 }
 
-// POST /api/auth/login. Returns the raw response plus the parsed token (or null).
-export function login(email, password, { endpoint = 'POST /api/auth/login' } = {}) {
+export function login(email, password = requireEnv('PERF_PASSWORD'), { endpoint = 'POST /api/auth/login' } = {}) {
   const { response, data } = post('/api/auth/login', { endpoint, body: { email, password } });
   abortOnCredentialError(response, email);
-  return { response, data, session: data && data.accessToken ? toSession(data) : null };
+  return { response, data, session: data && data.accessToken ? toSession(data, email) : null };
 }
 
-function toSession(data) {
-  return { token: data.accessToken, expiresAt: Date.now() + data.expiresIn * 1000 - REFRESH_MARGIN_MS };
+function toSession(data, email) {
+  return { token: data.accessToken, expiresAt: Date.now() + data.expiresIn * 1000 - REFRESH_MARGIN_MS, email, userId: userIdFromToken(data.accessToken) };
 }
 
-// User id = JWT "sub" (auth-service JwtService). Used for the cart ownership check.
 export function userIdFromToken(token) {
-  const payload = token.split('.')[1];
-  return JSON.parse(encoding.b64decode(payload, 'rawurl', 's')).sub;
+  return JSON.parse(encoding.b64decode(token.split('.')[1], 'rawurl', 's')).sub;
 }
 
-// Long-lived session for the cart flow: log in once (before the measured window),
-// refresh with the cookie before the 15-minute access token expires (rule 7).
-let session = null; // module state is per VU
-
-// setup(): log in buyers 0..count-1 before the measured window and hand each VU
-// its access token plus refresh cookie (rule 7: Cart logs in before measuring).
-export function preloginBuyers(count) {
-  const password = requireEnv('PERF_PASSWORD');
-  const sessions = [];
-  for (let i = 0; i < count; i++) {
-    const email = buyerEmail(i);
-    const { response, session: s } = login(email, password, { endpoint: 'setup:login' });
-    if (!s) throw new Error(`setup login failed for ${email}: HTTP ${response.status}`);
+// setup(): log in the given account indices before the measured window
+// (sessions are handed to VUs, so logins do not distort the measured phase).
+export function prelogin(indices) {
+  const out = {};
+  for (const index of indices) {
+    const email = buyerEmail(index);
+    const { response, session } = login(email, requireEnv('PERF_PASSWORD'), { endpoint: 'setup:login' });
+    if (!session) throw new Error(`setup login failed for ${email}: HTTP ${response.status}`);
     const cookie = (response.cookies.refresh_token || [])[0];
-    sessions.push({ ...s, email, userId: userIdFromToken(s.token), refreshCookie: cookie ? cookie.value : null });
+    out[index] = { ...session, refreshCookie: cookie ? cookie.value : null };
   }
-  return sessions;
+  return out;
 }
 
-// First call in a VU adopts the session prepared in setup() (if any).
-export function adoptSession(prepared) {
-  if (session || !prepared) return;
-  const mine = prepared[buyerIndexForVu()];
-  if (!mine) return;
-  if (mine.refreshCookie) {
-    http.cookieJar().set(BASE_URL, 'refresh_token', mine.refreshCookie, { path: '/api/auth' });
-  }
-  session = { token: mine.token, expiresAt: mine.expiresAt, email: mine.email, userId: mine.userId };
-}
+export const range = (start, count) => Array.from({ length: count }, (_, i) => start + i);
 
-export function buyerSession() {
-  if (session && Date.now() < session.expiresAt) return session;
-  if (session) {
+// Long-lived session for account `index`: adopt the prepared one, refresh with the
+// cookie before the access token expires, fall back to a fresh login.
+const sessions = {}; // per VU
+export function sessionFor(index, prepared) {
+  let s = sessions[index];
+  if (!s && prepared && prepared[index]) {
+    const p = prepared[index];
+    if (p.refreshCookie) http.cookieJar().set(BASE_URL, 'refresh_token', p.refreshCookie, { path: '/api/auth' });
+    s = sessions[index] = { token: p.token, expiresAt: p.expiresAt, email: p.email, userId: p.userId };
+  }
+  if (s && Date.now() < s.expiresAt) return s;
+  if (s) {
     const { response, data } = post('/api/auth/refresh', { endpoint: 'POST /api/auth/refresh' });
     const body = data || parseJson(response);
-    if (body && body.accessToken) {
-      session = { ...session, ...toSession(body) };
-      return session;
-    }
-    // Refresh rejected (cookie lost/rotated): fall back to a fresh login.
+    if (body && body.accessToken) return (sessions[index] = { ...s, ...toSession(body, s.email) });
   }
-  const email = buyerEmail(buyerIndexForVu());
-  const result = login(email, requireEnv('PERF_PASSWORD'));
+  const email = buyerEmail(index);
+  const result = login(email);
   if (!result.session) throw new Error(`login failed for ${email}: HTTP ${result.response.status}`);
-  session = { ...result.session, email, userId: userIdFromToken(result.session.token) };
-  return session;
+  return (sessions[index] = result.session);
 }

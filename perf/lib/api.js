@@ -48,6 +48,18 @@ export function request(method, path, { endpoint, token, body, headers = {}, exp
 export const get = (path, options) => request('GET', path, options);
 export const post = (path, options) => request('POST', path, options);
 export const patch = (path, options) => request('PATCH', path, options);
+export const put = (path, options) => request('PUT', path, options);
+export const del = (path, options) => request('DELETE', path, options);
+
+export const pickOne = (items) => items[Math.floor(Math.random() * items.length)];
+
+// Weighted choice: [[weight, value], ...]
+export function weighted(entries) {
+  const total = entries.reduce((n, [w]) => n + w, 0);
+  let roll = Math.random() * total;
+  for (const [w, value] of entries) if ((roll -= w) < 0) return value;
+  return entries[entries.length - 1][1];
+}
 
 export function parseJson(response) {
   if (!response.body) return null;

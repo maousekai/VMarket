@@ -1,149 +1,165 @@
 # Performance tests (k6)
 
-k6 scripts for the 15 performance test cases in the test report (sheet "Performance
-Test"): PERF-AUTH-01..05, PERF-CATALOG-01..05, PERF-CART-01..05. Workload rules,
-thresholds and profiles follow the "Quy tắc workload hiệu năng" section of sheet "Test Cases".
+k6 scripts for the 18 performance test cases in the test report (sheet "Performance
+Test"). They verify the performance requirements of **SRS v1.1, section 6.1**, plus the
+timing and consistency requirements those depend on. The test cases themselves (texts,
+priorities, traceability, how each one runs) live in one file,
+`perf/report/test-cases.mjs`. The runner and the Excel generator both read it.
 
-| Requirement | Threshold | Kind |
+| Requirement (SRS v1.1) | Threshold | Test cases |
 |---|---|---|
-| NFR-PERF-01 | GET /api/products, /api/products/{id}, /api/cart p95 ≤ 500 ms in the measured phase | R |
-| NFR-PERF-03 | 200 active VUs held, with VU count and throughput reported | R |
-| Login, PATCH cart | p95 ≤ 1000 ms | Q |
-| All | unexpected HTTP failure < 1 %, business checks ≥ 99 %, ≥ 200 samples per endpoint | Q |
-| Cart data | money / quantity / owner always match the fixture (no tolerance) | Q |
+| NFR-PERF-01 ordinary read APIs | p95 ≤ 500 ms, per endpoint, measured phase | PERF-READ-01..03 |
+| NFR-PERF-02 search / autocomplete | p95 ≤ 1 s / ≤ 300 ms | PERF-SRCH-01, 02 |
+| NFR-PERF-05 image search | p95 ≤ 3 s | PERF-SRCH-03 |
+| FR-SRCH-04, UC-11 index sync | new product findable ≤ 60 s (max) | PERF-SRCH-04 |
+| NFR-PERF-03 ≥ 200 concurrent users | all thresholds held at 200 VUs; stress breaking point ≥ 200 | PERF-LOAD-01..05 |
+| FR-ORD-01, FR-PROD-02, UC-06 stock consistency | no oversell, reserved = active orders, released on cancel | PERF-LOAD-06 |
+| NFR-REL-02, UC-03 fallback | core journeys keep thresholds while AI services are down | PERF-LOAD-07 |
+| NFR-PERF-04 (+ NFR-USA-03 360 px) home page | LCP and main content p95 ≤ 3 s on a regular network | PERF-WEB-01, 02 |
+| NFR-PERF-05 shipper position | send → buyer's WebSocket p95 ≤ 5 s | PERF-SHIP-01, 02 |
 
-NFR-PERF-02 (search) and NFR-PERF-04 (home page) are out of scope for this round.
+Proposed thresholds (Q), only for writes, which the SRS gives no latency for: login,
+cart writes, pre-checkout check, cancel p95 ≤ 1 s; place order ≤ 2 s. For all test
+cases: unexpected failures < 1 %, business checks ≥ 99 %, ≥ 200 samples on busy
+endpoints. Data invariants (money, stock, leaked HIDDEN/DRAFT products) have no tolerance.
+
+The gateway's rate limiting (SRS 5.3) has no performance threshold. Its test belongs
+in the API Test sheet.
 
 ## Layout
 
 ```
 perf/
-  run.mjs                    runs test cases per round, stores evidence, decides the verdict
-  fixtures/prepare.mjs       PERF-USERS / PERF-CATALOG / cart fixture + manifest.json
-  report/fill-excel.mjs      writes Round N result, test date, tester into the Excel report
-  tc/auth.js                 PERF-AUTH-01..05     login -> logout
-  tc/catalog.js              PERF-CATALOG-01..05  60 % list, 20 % category, 20 % detail
-  tc/cart.js                 PERF-CART-01..03     GET -> PATCH 1/2 -> GET
-  tc/mixed.js                PERF-CART-04         120 catalog + 60 cart + 20 auth, soak
-  tc/rate-limit-guard.js     PERF-CART-05         limiter ON: request 201 must be 429
-  flows/  lib/               workloads, profiles/phases/thresholds, sessions, summary
+  run.mjs                    runs test cases per round, keeps evidence, decides the verdict
+  docker-compose.perf.yml    product, cart, order, delivery services (not in the root compose yet)
+  fixtures/prepare.mjs       buyers, shippers, catalog, carts, order history, deliveries, photos + manifest
+  report/test-cases.mjs      the 18 test cases (single source of truth)
+  report/rebuild-excel.mjs   writes them into the Excel report (sheet layout, formulas, totals)
+  report/fill-excel.mjs      writes a round's results (status, date, tester) + report.md/csv
+  tc/read.js                 PERF-READ-01..03, and the background load of WEB-02 / SHIP-02
+  tc/search.js               PERF-SRCH-01, 02
+  tc/image-search.js         PERF-SRCH-03
+  tc/index-sync.js           PERF-SRCH-04
+  tc/load.js                 PERF-LOAD-01..05, 07 (mixed journeys)
+  tc/contention.js           PERF-LOAD-06
+  tc/web.js                  PERF-WEB-01, 02 (real Chromium)
+  tc/ship.js                 PERF-SHIP-01, 02 (WebSocket)
+  flows/                     read, browse, search, cart, checkout, account journeys
+  lib/                       profiles and phases, thresholds, endpoints, sessions, probes, summary
 ```
 
-| Test case | Script | Profile |
-|---|---|---|
-| *-01 | auth / catalog / cart | smoke: 15 s warm-up, then 1 VU × 1 min |
-| *-02 | auth / catalog / cart | baseline: warm-up 1 min @10 VU, ramp 30 s to 50, hold 5 min |
-| AUTH-03, CATALOG-03, CART-03 | auth / catalog / cart | load: warm-up, ramp 30 s to 200, hold 10 min |
-| AUTH-04, CATALOG-04 | auth / catalog | spike: 2 min @50, 50→300 in 10 s, hold 2 min, back to 50, observe 5 min |
-| AUTH-05, CATALOG-05, CART-04 | auth / catalog / mixed | soak: warm-up, ramp 30 s to 200, hold 30 min |
-| CART-05 | rate-limit-guard | 200 + 1 requests in one rate-limit window |
+### Workload of the mixed runs (per 200 VUs)
 
-Every request is tagged with its `endpoint` and its `phase`. Thresholds apply per
-endpoint in the measured phase only (`hold`; for spike, the last 3 minutes of the
-recovery). Warm-up, ramps and the 300-VU spike stay in the raw metrics as diagnostics.
+70 guest browsing (UC-04), 30 search (UC-03), 50 cart (UC-05), 20 COD checkout
+(UC-06 A1), 30 account and order tracking (UC-02, UC-07). Stress scales the same mix
+up to 400 VUs. Only COD: PayOS, refunds and reconciliation are never called.
+
+### Profiles and phases
+
+| Profile | Shape | Acceptance phase |
+|---|---|---|
+| smoke | 15 s warm-up, 1 VU per journey × 1 min | hold (no p95 conclusion) |
+| baseline | warm-up 1 min @10, ramp 30 s to 50, hold 5 min | hold |
+| load / load15 | ramp 30 s to 200, hold 10 / 15 min | hold |
+| soak | ramp to 200, hold 60 min (`SOAK_MINUTES`) | hold |
+| spike | 2 min @50, 300 in 10 s, 2 min, back to 50, 5 min | last 3 min of recovery |
+| stress | 100 → 400 VUs in steps of 50 × 3 min, then 5 min @50 | recovery; the breaking point is reported |
+
+Every request carries `endpoint` and `phase` tags. Thresholds use the acceptance
+phase only. Warm-up, ramps, the spike and the stress steps stay in the raw metrics.
 
 ## 1. Environment (ENV-P)
 
-- A stack used only for this test (not shared with functional QA), one cart-service instance.
-- Gateway: capacity runs need `APP_RATE_LIMIT_ENABLED=false`. Restart the gateway and check
-  that it took effect. PERF-CART-05 needs the limiter back ON at its default.
-- The limiter counts per **connecting address** (`RateLimitFilter.getRemoteAddr`). Behind
-  Cloudflare Tunnel or a reverse proxy, all clients share the proxy's address, so
-  PERF-CART-05 needs a site with no other traffic.
-- Cloudflare: for the duration of the test, add a WAF custom rule "IP Source Address =
-  <k6 machine IP>" → Skip (rate limiting, Bot Fight Mode). Remove it afterwards.
-- Cloudflare quick tunnel (`*.trycloudflare.com`): the URL changes every time
-  `cloudflared` restarts, there is no WAF dashboard, and Cloudflare limits a quick tunnel
-  to about 200 in-flight requests. Only `/api` is forwarded (through the frontend proxy),
-  so PERF-CART-05 needs `-e HEALTH_URL=http://localhost:8080/actuator/health`. For the
-  report, write down whether the run went through the tunnel or straight to the gateway.
-- Run k6 on a different machine from the stack. Keep Grafana (`infra/monitoring/`) open and
-  record CPU/RAM/GC, the DB pool and Redis for the same time range.
-- Record: VPS spec, container/JVM limits, number of instances, build SHA, network path
-  (Cloudflare or direct), logging level.
+- A stack used only for this test, on a machine meeting **SRS 5.2 (≥ 4 vCPU, 8 GB RAM)**.
+  k6 runs on a different machine. Record the machine, container/JVM limits, instances
+  (one cart-service), build SHA, network path and log level.
+- Start the services that the root compose file does not run yet:
+  ```
+  docker compose -f docker-compose.yml -f perf/docker-compose.perf.yml up -d --build product-service cart-service order-service delivery-service
+  ```
+  Search, image search and recommendations need ai-search-service and
+  recommendation-service. Without them, those test cases end as **Pending: blocked**.
+- Capacity runs need `APP_RATE_LIMIT_ENABLED=false` on the gateway: restart it and check
+  the setting took effect. The limiter counts per connecting address, so behind a
+  tunnel or proxy every user shares one quota (PBL6-81).
+- Through Cloudflare or a tunnel: add a rule that skips WAF and rate limiting for the
+  k6 IP. Note the network path in the report. Only `/api` goes through the front-end
+  proxy. The tracking WebSocket uses `DELIVERY_WS_URL`.
+- Keep Grafana open (`infra/monitoring/`) for CPU/RAM/GC, DB pool and Redis.
 
-## 2. Fixture (once per environment)
+## 2. Fixture
 
-Run it **on the stack host** (it reads OTP codes from the auth-service log), against the
-local gateway:
+Run it **on the stack host**, against the local gateway, with `AUTH_EMAIL_PROVIDER=log`
+(it reads OTP codes from the auth-service log):
 
 ```
 DEV_ADMIN_PASSWORD=... SEED_PASSWORD=... PERF_PASSWORD='<Strong1!pass>' node perf/fixtures/prepare.mjs
 ```
 
-It runs `scripts/seed-demo-data`, then creates:
-- 300 verified buyers `perf.buyer.0000@perf.vmarket.test` …. Spike needs 300 distinct accounts.
-- ≥ 1000 ACTIVE products in 10 categories, plus PH (HIDDEN) and PD (DRAFT).
-- 200 carts with 20 lines each, in two shops. The line the test changes costs 100000.
+| Step (`--only=`) | Creates |
+|---|---|
+| seed | demo shops and sellers (`scripts/seed-demo-data`) |
+| catalog | ≥ 1000 ACTIVE products, 10 categories, PH (HIDDEN), PD (DRAFT), a 100000-VND product per shop, 5 contention products × 50 units |
+| buyers | 850 verified buyers with a default address: shopper 0-399, order 400-799, delivery 800-849 |
+| history | 2 cancelled COD orders for shoppers 0-199 |
+| carts | 400 carts × 20 lines in two shops (also resets carts to the fixture state) |
+| deliveries | 50 shippers; 50 orders handed off, assigned and in transit (UC-23) |
+| images | query photos for image search, one 6-9 MB PNG |
 
-It writes `perf/fixtures/out/manifest.json` (ids, counts, expected carts, run id, git SHA;
-no secrets). Copy that file to the k6 machine, or pass `-e MANIFEST=<path>`.
-
-| Variable / flag | Default | Meaning |
-|---|---|---|
-| `BASE_URL` | `http://localhost:8080` | gateway (non-local needs `--allow-remote`) |
-| `PERF_BUYERS`, `PERF_CARTS`, `PERF_PRODUCTS` | 300, 200, 1000 | fixture sizes |
-| `BUYER_PREFIX` | `perf.buyer` | use a new prefix for a fresh set of buyers |
-| `OTP_LOG_CMD` | `docker compose logs --since 30m auth-service` | where OTP codes are read |
-| `--only=seed,catalog,buyers,carts` | all | e.g. `--only=carts` resets carts to the fixture state |
-| `--allow-pending` | off | skip OTP (buyers stay PENDING; note it in the report) |
-
-OTP codes are only in the log with `AUTH_EMAIL_PROVIDER=log`. With `brevo`, every OTP
-request sends a real email (to an undeliverable `.test` address and uses quota), so
-either switch ENV-P to `log` for the fixture or use `--allow-pending`.
-
-Re-running is safe. The test scripts never create catalog data during a run.
+It writes `perf/fixtures/out/manifest.json`: ids, counts, expected carts, order
+history, contention stock, deliveries, run id and git SHA. It holds no secrets. Copy
+it to the k6 machine or pass `-e MANIFEST=<path>`. Re-running is safe.
+`BUYER_PREFIX` (default `perf.p73`) picks a fresh set of accounts.
 
 ## 3. Run a round
 
 ```
-BASE_URL=https://<env-p> ALLOW_REMOTE=true PERF_PASSWORD=... \
-  node perf/run.mjs --round=1 --tc=PERF-AUTH-01,PERF-CATALOG-01,PERF-CART-01 --tester="<your name>"
+BASE_URL=http://<gateway> WEB_URL=http://<front end> ALLOW_REMOTE=true PERF_PASSWORD=... SEED_PASSWORD=... \
+  node perf/run.mjs --round=1 --tc=PERF-READ-01,PERF-LOAD-01 --tester="<your name>"
 node perf/run.mjs --round=1 --tc=all --tester="<your name>"
 ```
 
-Start with the three smoke cases. `--tc=all` asks before the capacity runs and again
-before PERF-CART-05 (limiter ON; the script takes a token, then waits for you to restart
-the gateway). Set `K6=<path>` if k6 is not on PATH. Set
-`K6_PROMETHEUS_RW_SERVER_URL` to also stream metrics to Prometheus.
+Start with the smoke cases. PERF-LOAD-07 asks you to stop the AI services when its
+hold phase starts. WEB-02 and SHIP-02 start `tc/read.js` (200 VUs) in the background.
+`K6=<path>` if k6 is not on PATH. `K6_PROMETHEUS_RW_SERVER_URL` streams to Prometheus.
 
-Evidence per test case in `perf/results/R<round>/<TC>/` (git-ignored):
-`summary.json` (thresholds, p50/p90/p95/p99/max per endpoint and phase), `metrics.csv.gz`
-(raw), `timeline.csv` (per-minute p95/RPS/failures), `k6.log`, `run.json` (verdict).
+Evidence in `perf/results/R<round>/<TC>/` (git-ignored): `summary.json`, `metrics.csv.gz`
+(raw), `timeline.csv` (per minute), `k6.log`, `run.json`, plus `companion/` for the
+background load.
 
 ### Verdict
 
 | Situation | Excel |
 |---|---|
-| Cart money/quantity/owner mismatch, or PH/PD visible | **Failed** (the run stops at the first mismatch) |
-| Login returned 401/423 (fixture or password problem) | Pending: aborted (stops at once so accounts are not locked) |
-| Unexpected failure > 10 % (safety stop) | Pending: aborted |
-| An acceptance threshold crossed | **Failed** |
-| PERF-CART-05 window changed between request 1 and 201 | Pending: invalid run |
-| Fewer than 200 samples for an endpoint in the measured phase | Pending: inconclusive |
+| Money, stock or leak invariant broken | **Failed** (the run stops at the first one) |
+| A precondition not met: service not deployed, fixture missing | Pending: blocked |
+| Missing environment variable | Pending: not run |
+| Login 401/423, or > 10 % unexpected failures for 60 s | Pending: aborted |
+| An acceptance threshold crossed; stress breaking point < 200 VUs | **Failed** |
+| LOAD-07 without any fallback (AI not stopped), contention never hit | Pending: invalid run |
+| Ran on the UC-03 fallback because ai-search was down | Pending: degraded |
+| Fewer samples than required | Pending: inconclusive |
 | Everything within thresholds | **Passed** |
 
-The verdict covers what k6 measures. Before you finalise a soak or spike result, check
-Grafana for OOM, crashes, or heap/DB/Redis growth that is never explained.
+Before you mark soak, spike or stress final, also check Grafana for OOM, crashes and
+unexplained growth.
 
-## 4. Fill the Excel report
+## 4. The Excel report
 
-```
-node perf/report/fill-excel.mjs --round=1                     # writes perf/results/VMarket_Test_Report.R1.xlsx
-node perf/report/fill-excel.mjs --round=1 --in-place          # updates docs/VMarket_Test_Report.xlsx
-```
+- `node perf/report/rebuild-excel.mjs` rewrites the performance part of
+  `docs/VMarket_Test_Report.xlsx` from `test-cases.mjs`: the sheet layout, formulas,
+  drop-downs, the Test Cases function table and rules, and the totals. The first run
+  keeps a backup next to the file.
+- `node perf/report/fill-excel.mjs --round=1 [--in-place]` writes a round's status, date
+  and tester. It also writes `perf/results/R1/report.md` and `report.csv` with the
+  actual values and evidence paths.
 
-It sets Round N status, test date (dd/mm/yyyy, Asia/Bangkok) and tester on each test
-case's row. The sheet's formulas recalculate when the file is opened. It also writes
-`perf/results/R<n>/report.md` and `report.csv` with the actual p95, samples, failure rate,
-counters and evidence paths, because the sheet has no Actual / Evidence / Defect column.
-The Excel report is a local working file and is not committed.
+The workbook is a local working file and is not committed.
 
 ## Safety
 
-- Only against ENV-P or a local stack. Scripts that change data refuse a non-local
-  `BASE_URL` without `ALLOW_REMOTE=true` (`--allow-remote` for the fixture).
-- No orders, payments, refunds or payouts are created. The cart test only switches one
-  line between quantity 1 and 2.
-- Cart lines take `unitPrice` from the request, so the fixture uses each variant's real
-  price. Cart results are compared with the manifest, never with the response under test.
+- Only ENV-P or a local stack: scripts that change data refuse a non-local `BASE_URL`
+  without `ALLOW_REMOTE=true` (`--allow-remote` for the fixture).
+- COD only. Checkout orders are cancelled at once. Contention orders are cancelled in
+  teardown, and the reservation must return to 0.
+- Cart and order checks compare with the manifest, never with the response under test.

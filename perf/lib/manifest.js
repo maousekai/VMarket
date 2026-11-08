@@ -1,36 +1,40 @@
-// Fixture manifest written by fixtures/prepare.mjs. It holds the ids, record counts
-// and the expected cart contents, so checks never take their expected values from
-// the response under test. No passwords or tokens are stored in it.
+// Fixture manifest written by fixtures/prepare.mjs: ids, record counts and the
+// expected state (carts, order history, contention stock, deliveries). Checks take
+// their expected values from here, never from the response being checked.
+// It holds no passwords, tokens or cookies.
 import { SharedArray } from 'k6/data';
 
 const PATH = __ENV.MANIFEST || '../fixtures/out/manifest.json';
 
 function load() {
-  let raw;
   try {
-    raw = open(PATH);
+    return JSON.parse(open(PATH));
   } catch (e) {
-    throw new Error(`Cannot read the fixture manifest at ${PATH}. Run fixtures/prepare.mjs first, or pass -e MANIFEST=<path>.`);
+    throw new Error(`BLOCKED: fixture manifest ${PATH} not found or invalid; run perf/fixtures/prepare.mjs first (or pass -e MANIFEST=<path>).`);
   }
-  return JSON.parse(raw);
 }
 
-// Small parts are copied per VU; the large arrays are shared read-only between VUs.
 const whole = load();
+const catalog = whole.catalog || {};
 export const MANIFEST_INFO = {
   runId: whole.runId,
   baseUrl: whole.baseUrl,
   createdAt: whole.createdAt,
-  buyers: whole.buyers,
-  categories: whole.catalog.categories,
-  activeProducts: whole.catalog.activeProducts,
-  hidden: whole.catalog.hidden,
-  pageSize: whole.catalog.pageSize || 20,
+  buyers: whole.buyers || {},
+  categories: catalog.categories || [],
+  activeProducts: catalog.activeProducts || 0,
+  hidden: catalog.hidden || {},
+  shops: catalog.shops || [],
+  priceRange: catalog.priceRange || { min: 0, max: 0 },
+  keywords: catalog.keywords || [],
+  contention: whole.contention || [],
+  seller: whole.seller || null,
 };
 
-export const PRODUCT_IDS = new SharedArray('product-ids', () => load().catalog.productIds || []);
-export const CARTS = new SharedArray('carts', () => load().carts || []);
+export const PRODUCTS = new SharedArray('products', () => load().catalog.products || []); // {id, shopId, categoryId, name, variants:[{id, price, available}]}
+export const CARTS = new SharedArray('carts', () => load().carts || []); // indexed by shopper buyer index
+export const ORDER_HISTORY = new SharedArray('order-history', () => load().orderHistory || []); // [{buyer, orderIds}]
+export const DELIVERIES = new SharedArray('deliveries', () => load().deliveries || []); // [{buyer, orderId, assignmentId, shipper}]
+export const IMAGES = new SharedArray('images', () => load().images || []); // [{path, bytes, type}]
 
-export function hiddenIds() {
-  return Object.values(MANIFEST_INFO.hidden || {}).filter(Boolean);
-}
+export const hiddenIds = () => Object.values(MANIFEST_INFO.hidden).filter(Boolean);

@@ -147,7 +147,7 @@ export function setCell(xml, ref, text, styleFrom) {
     style = from ? (from[1].match(/\ss="(\d+)"/) || [])[1] : undefined;
   }
   const cell = `<c r="${ref}"${style !== undefined ? ` s="${style}"` : ''} t="inlineStr"><is><t>${esc(text)}</t></is></c>`;
-  if (existing) return xml.replace(cellRe, cell);
+  if (existing) return xml.replace(cellRe, () => cell); // function: text may contain "$1"
 
   const rowRe = new RegExp(`(<row r="${row}"[^>]*?)(/>|>([\\s\\S]*?)</row>)`);
   const rowMatch = xml.match(rowRe);
@@ -155,6 +155,6 @@ export function setCell(xml, ref, text, styleFrom) {
   const cells = [...(rowMatch[3] || '').matchAll(/<c r="([A-Z]+)\d+"[\s\S]*?(?:\/>|<\/c>)/g)];
   const after = cells.find((c) => colIndex(c[1]) > colIndex(ref));
   const inner = rowMatch[3] || '';
-  const newInner = after ? inner.replace(after[0], cell + after[0]) : inner + cell;
-  return xml.replace(rowRe, `${rowMatch[1]}>${newInner}</row>`);
+  const newInner = after ? inner.replace(after[0], () => cell + after[0]) : inner + cell;
+  return xml.replace(rowRe, () => `${rowMatch[1]}>${newInner}</row>`);
 }
