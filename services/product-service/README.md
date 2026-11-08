@@ -131,6 +131,9 @@ Consumer nhận `OrderPlaced`, `OrderStatusChanged`, `PaymentSucceeded`,
 transactional outbox. Outbox thử lại tới `OUTBOX_MAX_ATTEMPTS` lần rồi giữ event
 ở trạng thái `DEAD` để xử lý thủ công; xem [docs/event-bus.md](../../docs/event-bus.md).
 
+`ReviewCreated` được áp dụng theo `revision` tăng dần (lưu ở `Product.ratingRevision`), không
+theo timestamp envelope — bản tin có revision nhỏ hơn hoặc bằng bản đã lưu bị bỏ qua.
+
 Khi triển khai consumer mới, dùng quy trình chuyển queue trong tài liệu Event Bus
 để drain queue `product.events` cũ trước khi xóa. Consumer AI Search cũng dùng
 queue versioned `ai-search.events.v2`.

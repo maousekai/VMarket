@@ -17,6 +17,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -25,20 +26,23 @@ import lombok.Setter;
 /**
  * Một đơn hàng (FR-ORDER-01).
  *
- * <p>
- * <b>Địa chỉ giao hàng là snapshot</b> — các cột {@code recipientName}...
- * {@code streetAddress} được chép từ sổ địa chỉ của user-service tại thời điểm
- * đặt
+ * <p><b>Địa chỉ giao hàng là snapshot</b> — các cột {@code recipientName}...
+ * {@code streetAddress} được chép từ sổ địa chỉ của user-service tại thời điểm đặt
  * hàng, KHÔNG tham chiếu lại bảng {@code addresses}: người dùng sửa/xoá địa chỉ
  * sau đó không được làm đổi thông tin của đơn đã đặt.
  *
- * <p>
- * Tham chiếu liên hệ với service khác chỉ là id trần (không FK): {@code userId}
+ * <p>Tham chiếu liên hệ với service khác chỉ là id trần (không FK): {@code userId}
  * thuộc CSDL của auth-service, {@code productId}/{@code shopId} thuộc CSDL của
  * product-service — SRS mục 5 quy định database-per-service.
  */
 @Entity
-@Table(name = "orders")
+@Table(
+		name = "orders",
+		uniqueConstraints = {
+			@UniqueConstraint(
+					name = "idx_orders_user_idempotency",
+					columnNames = {"user_id", "idempotency_key"})
+		})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -50,12 +54,10 @@ public class Order extends BaseEntity {
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 20)
 	private OrderStatus status;
-	@Column(name = "payment_method", nullable = false, length = 10)
-	private String paymentMethod = "COD";
-	@Column(name = "payment_expires_at")
-	private Instant paymentExpiresAt;
-	@Column(name = "stock_reserved", nullable = false)
-	private boolean stockReserved;
+    @Column(name = "payment_method", nullable = false, length = 10) private String paymentMethod = "COD";
+    @Column(name = "payment_expires_at") private Instant paymentExpiresAt;
+    @Column(name = "stock_reserved", nullable = false) private boolean stockReserved;
+
 
 	@Column(name = "recipient_name", nullable = false, length = 100)
 	private String recipientName;
@@ -92,10 +94,8 @@ public class Order extends BaseEntity {
 	/**
 	 * Tổng tiền = tổng {@code lineTotal} của các item.
 	 *
-	 * <p>
-	 * Được tính một lần lúc tạo đơn và không bao giờ đổi theo giá hiện tại của
-	 * sản phẩm: đơn hàng là một giao dịch đã chốt, giá đổi sau chỉ ảnh hưởng đơn
-	 * mới.
+	 * <p>Được tính một lần lúc tạo đơn và không bao giờ đổi theo giá hiện tại của
+	 * sản phẩm: đơn hàng là một giao dịch đã chốt, giá đổi sau chỉ ảnh hưởng đơn mới.
 	 */
 	@Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
 	private BigDecimal totalAmount;
@@ -112,8 +112,10 @@ public class Order extends BaseEntity {
 	private Instant deliveredAt;
 
 	/**
-	 * Phiên bản cho Optimistic Locking (PBL6-53) chống mất dữ liệu khi hai thao tác
-	 * cùng sửa một đơn hàng song song (Lost Update Anomaly).
+	 * Lớp phòng thủ bổ sung cho các đường ghi không đi qua khoá dòng (PBL6-53).
+	 * Các luồng hiện tại đều tuần tự hoá bằng {@code PESSIMISTIC_WRITE} /
+	 * {@code SELECT ... FOR UPDATE}. Lưu ý: chỉ sửa {@link OrderItem} thì version
+	 * của đơn không tăng, nên ghi item vẫn phải giữ khoá dòng của đơn.
 	 */
 	@Version
 	@Column(name = "version", nullable = false)
@@ -124,8 +126,7 @@ public class Order extends BaseEntity {
 	 * bộ item trong cùng transaction (một đơn không item là đơn hỏng). items được
 	 * gán từ bên trong service nên khởi tạo danh sách rỗng thay vì null.
 	 *
-	 * <p>
-	 * {@code @OrderBy("id")} — ULID sắp theo thời gian nên item hiện theo đúng
+	 * <p>{@code @OrderBy("id")} — ULID sắp theo thời gian nên item hiện theo đúng
 	 * thứ tự thêm vào, ổn định giữa các lần đọc.
 	 */
 	@OneToMany(mappedBy = "order", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)

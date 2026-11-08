@@ -211,7 +211,7 @@ class ProductInfrastructureIntegrationTest {
 	@Test
 	void poisonEventIsRetriedAndDeadLetteredByRealListener() {
 		EventEnvelope envelope = new EventEnvelope("poison-review", EventType.REVIEW_CREATED,
-				Instant.now().toEpochMilli(), new ReviewCreated("review-1", "p1", 6, 1));
+				Instant.now().toEpochMilli(), new ReviewCreated("review-1", "p1", 6, 1, 1L));
 		MessageProperties properties = new MessageProperties();
 		properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
 		rabbitTemplate.send(eventExchange.getName(), EventType.REVIEW_CREATED,
