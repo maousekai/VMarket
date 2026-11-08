@@ -12,6 +12,7 @@ import {
   type ProductSummary,
 } from '@/api/catalog'
 import { getForYou, getSimilar } from '@/api/recommendations'
+import { getProductRatingSummary, listProductReviews } from '@/api/reviews'
 import { useAuth } from '@/auth/AuthProvider'
 
 const MINUTE = 60_000
@@ -142,4 +143,29 @@ export function useSimilarProducts(id: string) {
     },
   })
   return { detail, similar }
+}
+
+export const REVIEWS_PAGE_SIZE = 10
+
+/** Star distribution of a product (review-service, public). */
+export function useRatingSummary(productId: string) {
+  return useQuery({
+    queryKey: ['catalog', 'rating-summary', productId],
+    queryFn: () => getProductRatingSummary(productId),
+    enabled: !!productId,
+    staleTime: MINUTE,
+  })
+}
+
+/** Public reviews of a product, newest first, optionally limited to one star rating. */
+export function useProductReviews(productId: string, rating?: number) {
+  return useInfiniteQuery({
+    queryKey: ['catalog', 'reviews', productId, rating ?? 'all'],
+    queryFn: ({ pageParam }) =>
+      listProductReviews(productId, { rating, page: pageParam, size: REVIEWS_PAGE_SIZE }),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.page + 1 < last.totalPages ? last.page + 1 : undefined),
+    enabled: !!productId,
+    staleTime: MINUTE,
+  })
 }

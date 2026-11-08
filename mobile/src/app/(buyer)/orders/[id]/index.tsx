@@ -29,7 +29,15 @@ import {
   useOrderReturns,
   useWasPaid,
 } from '@/features/orders/hooks'
-import { ORDERS, backOr, goHome, orderSubPath, returnPath, reviewPath } from '@/features/orders/nav'
+import {
+  ORDERS,
+  backOr,
+  goHome,
+  orderSubPath,
+  paymentPath,
+  returnPath,
+  reviewPath,
+} from '@/features/orders/nav'
 import {
   isCancellable,
   orderStatusInfo,
@@ -172,6 +180,14 @@ export default function OrderDetailScreen() {
                       : 'Bạn đã đánh giá tất cả sản phẩm'
                     : 'Chia sẻ cảm nhận của bạn về sản phẩm trong đơn.'
                 }
+              />
+            ) : null}
+
+            {order.paymentMethod === 'PAYOS' && order.status === 'WAITING_PAYMENT' ? (
+              <Button
+                testID="order-pay"
+                title="Tiếp tục thanh toán"
+                onPress={() => router.push(paymentPath(order.id))}
               />
             ) : null}
 

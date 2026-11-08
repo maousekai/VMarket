@@ -23,6 +23,7 @@ import {
 import { useAuth } from '@/auth/AuthProvider'
 import { useToast } from '@/components/ui'
 import { variantLabel } from './format'
+import { attemptSignature, resolveAttempt, type PlaceAttempt } from './placeAttempt'
 
 export const CART_KEY = ['cart'] as const
 const DISPLAY_STALE_MS = 5 * 60_000
@@ -122,18 +123,11 @@ export const useAddresses = (enabled: boolean) =>
 export type PlaceResult = { kind: 'issues' } | { kind: 'placed'; result: PlaceOrderResult }
 
 /**
- * The key of the last order attempt, kept at module level (not in the component) so that leaving
- * and re-entering checkout after a timeout/5xx reuses it. It is tied to user + address + payment
- * method + cart contents, and dropped on success or a non-retryable error.
+ * The last order attempt, kept at module level (not in the component) so that leaving and
+ * re-entering checkout after a timeout/5xx reuses its key. It is tied to user + address + payment
+ * method (see placeAttempt.ts) and dropped on success or a non-retryable error.
  */
-let placeAttempt: { key: string; signature: string } | null = null
-
-const cartSignature = (cart: Cart | undefined) =>
-  (cart?.groups ?? [])
-    .flatMap((g) => g.items)
-    .map((i) => `${i.productId}:${i.variantId ?? ''}:${i.quantity}:${i.unitPrice}`)
-    .sort()
-    .join(',')
+let placeAttempt: PlaceAttempt | null = null
 
 /**
  * Validates the cart (unless skipped) and creates the order. The Idempotency-Key belongs to one
@@ -149,19 +143,21 @@ export function usePlaceOrder(paymentMethod: PaymentMethod, addressId: string | 
   const mutation = useMutation({
     mutationFn: async (options: { skipValidation?: boolean } = {}): Promise<PlaceResult> => {
       if (!addressId) throw new Error('NO_ADDRESS')
-      if (!options.skipValidation && !(await validateCart()).ok) return { kind: 'issues' }
-      const signature = [
-        userId,
-        addressId,
-        paymentMethod,
-        cartSignature(queryClient.getQueryData<Cart>(CART_KEY)),
-      ].join('|')
-      if (placeAttempt?.signature !== signature) {
-        placeAttempt = { key: newIdempotencyKey(), signature }
+      const { attempt, retry } = resolveAttempt(
+        placeAttempt,
+        attemptSignature(userId, addressId, paymentMethod),
+        Date.now(),
+        newIdempotencyKey,
+      )
+      // Retrying an attempt whose result never arrived: the server may already have created the
+      // orders and emptied the cart, so go straight to POST with the same key (it replays them,
+      // or validates the cart itself when nothing was created) instead of judging the cart first.
+      if (!retry && !options.skipValidation && !(await validateCart()).ok) {
+        return { kind: 'issues' }
       }
-      const attemptKey = placeAttempt.key
+      placeAttempt = attempt
       try {
-        const result = await placeOrder({ addressId, paymentMethod, idempotencyKey: attemptKey })
+        const result = await placeOrder({ addressId, paymentMethod, idempotencyKey: attempt.key })
         placeAttempt = null
         void queryClient.invalidateQueries({ queryKey: CART_KEY })
         return { kind: 'placed', result }

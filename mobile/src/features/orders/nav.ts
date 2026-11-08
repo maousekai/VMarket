@@ -8,6 +8,7 @@ export const goHome = () => router.replace('/(buyer)')
 
 export const orderPath = (id: string) => `/orders/${id}` as Href
 export const orderSubPath = (id: string, sub: string) => `/orders/${id}/${sub}` as Href
+export const paymentPath = (orderId: string) => `/payment/${orderId}` as Href
 export const returnPath = (id: string) => `/returns/${id}` as Href
 export const reviewPath = (orderId: string, itemId?: string) =>
   (itemId ? `/reviews/${orderId}?itemId=${itemId}` : `/reviews/${orderId}`) as Href

@@ -17,7 +17,7 @@ import { useLocationSharing } from '@/features/shipper/location/useLocation'
  */
 export default function ShipperTasksScreen() {
   const q = useAssignments()
-  useLocationSharing(q.assignments, q.isSuccess)
+  useLocationSharing(q.assignments, q.complete)
   const active = useMemo(() => sortActive(q.assignments), [q.assignments])
   const waiting = active.filter((a) => a.status === 'ASSIGNED')
   const district = waiting.length ? parseOrder(waiting[0].orderSnapshot).receiver.district : ''

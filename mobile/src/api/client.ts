@@ -10,6 +10,8 @@ import { AuthStore, type TokenResponse } from '@/auth/session'
 import { API_BASE_URL } from '@/lib/config'
 import { uuid } from '@/lib/uuid'
 
+import { decideReplay } from './sessionGuard'
+
 declare module 'axios' {
   interface AxiosRequestConfig {
     /** Do not attach Authorization and do not try to refresh on 401. */
@@ -181,7 +183,14 @@ api.interceptors.response.use(
     config.authRetried = true
     // Another request may already have refreshed while this one was in flight.
     if (config.authToken === AuthStore.getAccessToken()) await refreshSession()
-    if (AuthStore.getSnapshot().phase !== 'authenticated') return Promise.reject(error)
+    // The wait can span a logout + sign-in as someone else. The request belongs to the session it
+    // was issued in: replaying it with the new user's token would run A's action on B's data.
+    const decision = decideReplay({
+      issuedGeneration: config.authGeneration,
+      currentGeneration: AuthStore.getGeneration(),
+      authenticated: AuthStore.getSnapshot().phase === 'authenticated',
+    })
+    if (decision === 'reject') return Promise.reject(error)
     config.headers.set('Authorization', `Bearer ${AuthStore.getAccessToken()}`)
     config.authToken = AuthStore.getAccessToken()
     return api(config)

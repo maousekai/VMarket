@@ -5,7 +5,7 @@ import {
   useQueryClient,
   type InfiniteData,
 } from '@tanstack/react-query'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 
 import { api } from '@/api/client'
 import {
@@ -22,7 +22,11 @@ import type { OrderItem } from './lib/order'
 const LIST_KEY = ['shipper', 'assignments'] as const
 const detailKey = (orderId: string) => ['shipper', 'detail', orderId] as const
 
-/** All assignments of the signed-in shipper (newest first), 100 per page. */
+/**
+ * All assignments of the signed-in shipper (newest first), 100 per page. The API has no status
+ * filter and an old IN_TRANSIT order can sit behind 100 newer ones, so every page is loaded;
+ * `complete` says the list (and therefore the GPS tracker input) is whole.
+ */
 export function useAssignments() {
   const { isShipper } = useAuth()
   const query = useInfiniteQuery({
@@ -34,8 +38,12 @@ export function useAssignments() {
     enabled: isShipper,
     refetchInterval: 60_000,
   })
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = query
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError) void fetchNextPage()
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage])
   const assignments = useMemo(() => query.data?.pages.flat() ?? [], [query.data])
-  return { ...query, assignments }
+  return { ...query, assignments, complete: query.isSuccess && !hasNextPage }
 }
 
 export function useDelivery(orderId: string) {
