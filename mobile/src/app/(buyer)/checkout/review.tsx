@@ -4,13 +4,13 @@ import { useState } from 'react'
 
 import { validateCart, type CartIssue } from '@/api/cart'
 import type { PaymentMethod } from '@/api/checkout'
-import { getApiError } from '@/api/client'
 import { ErrorState, Screen, Skeleton, useToast } from '@/components/ui'
 import { StatusScreen, type StatusCard } from '@/features/checkout/components/StatusScreen'
 import {
   CART_KEY,
   applyIssues,
   findLine,
+  goAfterPlace,
   usePlaceOrder,
   useCartDetails,
 } from '@/features/checkout/hooks'
@@ -137,17 +137,12 @@ export default function CheckoutReviewScreen() {
           message: 'Giá hoặc tồn kho vừa thay đổi tiếp, vui lòng xem lại.',
         })
         void validation.refetch()
-      } else if (method === 'COD') {
-        router.replace({
-          pathname: '/checkout/cod-success',
-          params: { ids: result.order.id },
-        } as never)
       } else {
-        router.replace(`/payment/${result.order.id}` as Href)
+        goAfterPlace(result.result, method)
       }
     } catch (error) {
-      toast.show({ type: 'error', message: getApiError(error).message })
-      void queryClient.invalidateQueries({ queryKey: CART_KEY })
+      const e = placeOrder.handleError(error)
+      if (e.code !== 'CART_CHANGED') void queryClient.invalidateQueries({ queryKey: CART_KEY })
     } finally {
       setApplying(false)
     }

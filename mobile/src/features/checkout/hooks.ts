@@ -1,12 +1,13 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { router, type Href } from 'expo-router'
 import { getApiError, newIdempotencyKey } from '@/api/client'
 import {
   getProductInfo,
   getShopName,
   listAddresses,
   placeOrder,
-  type Order,
   type PaymentMethod,
+  type PlaceOrderResult,
   type ProductInfo,
 } from '@/api/checkout'
 import {
@@ -20,6 +21,7 @@ import {
   type CartItem,
 } from '@/api/cart'
 import { useAuth } from '@/auth/AuthProvider'
+import { useToast } from '@/components/ui'
 import { variantLabel } from './format'
 
 export const CART_KEY = ['cart'] as const
@@ -117,7 +119,7 @@ export function useCartActions() {
 export const useAddresses = (enabled: boolean) =>
   useQuery({ queryKey: ['addresses'], queryFn: listAddresses, enabled })
 
-export type PlaceResult = { kind: 'issues' } | { kind: 'order'; order: Order }
+export type PlaceResult = { kind: 'issues' } | { kind: 'placed'; result: PlaceOrderResult }
 
 /**
  * The key of the last order attempt, kept at module level (not in the component) so that leaving
@@ -142,6 +144,7 @@ export function usePlaceOrder(paymentMethod: PaymentMethod, addressId: string | 
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const userId = user?.userId ?? ''
+  const toast = useToast()
 
   const mutation = useMutation({
     mutationFn: async (options: { skipValidation?: boolean } = {}): Promise<PlaceResult> => {
@@ -158,17 +161,53 @@ export function usePlaceOrder(paymentMethod: PaymentMethod, addressId: string | 
       }
       const attemptKey = placeAttempt.key
       try {
-        const order = await placeOrder({ addressId, paymentMethod, idempotencyKey: attemptKey })
+        const result = await placeOrder({ addressId, paymentMethod, idempotencyKey: attemptKey })
         placeAttempt = null
         void queryClient.invalidateQueries({ queryKey: CART_KEY })
-        return { kind: 'order', order }
+        return { kind: 'placed', result }
       } catch (error) {
         if (!getApiError(error).retryable) placeAttempt = null
         throw error
       }
     },
   })
-  return { submit: mutation.mutateAsync, isPending: mutation.isPending }
+
+  /** Shows the error; a changed cart is refreshed and the user is sent back to review it. */
+  const handleError = (error: unknown) => {
+    const e = getApiError(error)
+    if (e.code === 'CART_CHANGED') {
+      void queryClient.invalidateQueries({ queryKey: CART_KEY })
+      toast.show({ type: 'error', message: e.message })
+      router.replace('/cart' as Href)
+    } else if (e.code === 'CART_VALIDATION_UNAVAILABLE') {
+      toast.show({
+        type: 'error',
+        message: 'Chưa kiểm tra được giỏ hàng lúc này, vui lòng thử lại sau.',
+      })
+    } else {
+      toast.show({ type: 'error', message: e.message })
+    }
+    return e
+  }
+
+  return { submit: mutation.mutateAsync, isPending: mutation.isPending, handleError }
+}
+
+/** One order keeps the old flow; several orders (one per shop) go to the checkout summary. */
+export function goAfterPlace(result: PlaceOrderResult, paymentMethod: PaymentMethod) {
+  if (result.orders.length > 1) {
+    router.replace({
+      pathname: '/checkout/placed',
+      params: { ids: result.orders.map((o) => o.id).join(',') },
+    } as never)
+  } else if (paymentMethod === 'COD') {
+    router.replace({
+      pathname: '/checkout/cod-success',
+      params: { ids: result.orders[0].id },
+    } as never)
+  } else {
+    router.replace(`/payment/${result.orders[0].id}` as Href)
+  }
 }
 
 /** Writes validation fixes into the cart: the order snapshots cart prices and quantities. */

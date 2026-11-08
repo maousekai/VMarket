@@ -1,16 +1,19 @@
 import { router, useLocalSearchParams, type Href } from 'expo-router'
 
-import { getApiError } from '@/api/client'
-import { AppText, ErrorState, Screen, Skeleton, useToast } from '@/components/ui'
+import { AppText, ErrorState, Screen, Skeleton } from '@/components/ui'
 import { StatusScreen } from '@/features/checkout/components/StatusScreen'
 import { addressLine, recipientLine } from '@/features/checkout/format'
-import { useAddresses, useCartDetails, usePlaceOrder } from '@/features/checkout/hooks'
+import {
+  goAfterPlace,
+  useAddresses,
+  useCartDetails,
+  usePlaceOrder,
+} from '@/features/checkout/hooks'
 import { formatVnd } from '@/lib/format'
 
 /** Figma 3.36 "Đặt hàng COD": confirmation before creating a cash-on-delivery order. */
 export default function CheckoutCodScreen() {
   const { addressId } = useLocalSearchParams<{ addressId?: string }>()
-  const toast = useToast()
   const { cartQuery, cart, groups } = useCartDetails()
   const addressesQuery = useAddresses(true)
   const placeOrder = usePlaceOrder('COD', addressId)
@@ -61,13 +64,10 @@ export default function CheckoutCodScreen() {
       if (result.kind === 'issues') {
         router.push({ pathname: '/checkout/review', params: { pm: 'COD', addressId } } as never)
       } else {
-        router.replace({
-          pathname: '/checkout/cod-success',
-          params: { ids: result.order.id },
-        } as never)
+        goAfterPlace(result.result, 'COD')
       }
     } catch (error) {
-      toast.show({ type: 'error', message: getApiError(error).message })
+      placeOrder.handleError(error)
     }
   }
 

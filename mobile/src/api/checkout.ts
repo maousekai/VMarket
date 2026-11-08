@@ -30,6 +30,15 @@ export interface Order {
   paymentMethod: PaymentMethod
   paymentExpiresAt: string | null
   stockReserved: boolean
+  /** Set by the split-order backend (one order per shop); absent on old orders. */
+  shopId?: string | null
+  checkoutId?: string | null
+}
+
+export interface PlaceOrderResult {
+  checkoutId: string
+  totalAmount: number
+  orders: Order[]
 }
 
 export interface Address {
@@ -76,10 +85,12 @@ export async function placeOrder(input: {
   addressId: string
   paymentMethod: PaymentMethod
   idempotencyKey: string
-}): Promise<Order> {
+}): Promise<PlaceOrderResult> {
   const { idempotencyKey, ...body } = input
   return (
-    await api.post<Order>('/api/orders', body, { headers: { 'Idempotency-Key': idempotencyKey } })
+    await api.post<PlaceOrderResult>('/api/orders', body, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
   ).data
 }
 

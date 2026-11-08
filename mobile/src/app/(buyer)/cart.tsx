@@ -20,6 +20,7 @@ import { ShopGroupCard } from '@/features/checkout/components/ShopGroupCard'
 import {
   useAddresses,
   useCartActions,
+  goAfterPlace,
   useCartDetails,
   usePlaceOrder,
   type CartLineView,
@@ -66,13 +67,12 @@ export default function CartScreen() {
       if (result.kind === 'issues') {
         router.push({ pathname: '/checkout/review', params: { pm: 'PAYOS', addressId } } as never)
       } else {
-        router.replace(`/payment/${result.order.id}` as Href)
+        goAfterPlace(result.result, 'PAYOS')
       }
     } catch (error) {
-      const e = getApiError(error)
+      const e = placeOrder.handleError(error)
       if (e.code === 'CART_EMPTY') void refetchCart()
       if (e.code === 'ADDRESS_NOT_FOUND') void refetchAddresses()
-      toast.show({ type: 'error', message: e.message })
     }
   }
 
@@ -169,7 +169,7 @@ export default function CartScreen() {
       ))}
       {groups.length > 1 ? (
         <AppText variant="caption" color="textSecondary">
-          Sản phẩm từ các gian hàng được đặt chung trong một đơn hàng.
+          Mỗi gian hàng sẽ được tách thành một đơn hàng riêng.
         </AppText>
       ) : null}
 

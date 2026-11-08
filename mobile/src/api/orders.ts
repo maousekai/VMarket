@@ -30,6 +30,8 @@ export interface Order {
   paymentMethod: 'COD' | 'PAYOS'
   paymentExpiresAt: string | null
   stockReserved: boolean
+  shopId?: string | null
+  checkoutId?: string | null
   /** Not returned yet (backend gap); used for the return window when present. */
   deliveredAt?: string | null
 }
