@@ -40,6 +40,7 @@ import {
   addDays,
   addressLine,
   daysLeft,
+  itemKey,
   orderCode,
   returnCode,
   shortDate,
@@ -69,7 +70,7 @@ export default function OrderDetailScreen() {
     !!order?.items.length && order.items.every((i) => !!i.id && returnedIds.has(i.id))
   const pendingReviews = useQuery({
     queryKey: ['reviews', 'pending', id],
-    queryFn: () => listPendingReviews(id),
+    queryFn: () => listPendingReviews(order?.items ?? [], id),
     enabled: authed && order?.status === 'COMPLETED',
     retry: false,
   })
@@ -214,7 +215,12 @@ export default function OrderDetailScreen() {
                 testID="order-review"
                 title="Đánh giá sản phẩm"
                 onPress={() =>
-                  router.push(reviewPath(order.id, pendingReviews.data?.[0]?.orderItemId))
+                  router.push(
+                    reviewPath(
+                      order.id,
+                      pendingReviews.data?.[0] && itemKey(pendingReviews.data[0]),
+                    ),
+                  )
                 }
               />
             ) : null}

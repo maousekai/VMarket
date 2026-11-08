@@ -5,9 +5,11 @@ import { useState } from 'react'
 import { getApiError } from '@/api/client'
 import type { OrderItem } from '@/api/orders'
 import {
-  MAX_REVIEW_IMAGES,
+  MAX_REVIEW_COMMENT,
   createReview,
-  isReviewApiMissing,
+  isAlreadyReviewed,
+  isNotReviewable,
+  isReviewDependencyDown,
   listPendingReviews,
 } from '@/api/reviews'
 import { useAuth } from '@/auth/AuthProvider'
@@ -22,21 +24,14 @@ import {
   useToast,
 } from '@/components/ui'
 import { AuthGate } from '@/features/orders/components/AuthGate'
-import { MediaPicker } from '@/features/orders/components/MediaPicker'
 import { RatingStars } from '@/features/orders/components/RatingStars'
 import { orderKeys, useItemLabels, useOrder } from '@/features/orders/hooks'
-import {
-  ImageTooLargeError,
-  encodeImages,
-  pickImages,
-  type PickedImage,
-} from '@/features/orders/media'
 import { backOr, orderPath, orderSubPath, reviewPath } from '@/features/orders/nav'
 import { orderStatusInfo } from '@/features/orders/status'
 import { itemKey, orderCode } from '@/features/orders/text'
 
-const MISSING_API =
-  'Hệ thống đánh giá chưa sẵn sàng nên chưa thể gửi đánh giá lúc này. Vui lòng thử lại sau.'
+const NOT_REVIEWABLE =
+  'Đơn hàng này chưa thể đánh giá. Bạn chỉ đánh giá được sản phẩm trong đơn đã Hoàn thành của chính mình.'
 
 export default function ReviewScreen() {
   const { orderId, itemId } = useLocalSearchParams<{ orderId: string; itemId?: string }>()
@@ -50,37 +45,30 @@ export default function ReviewScreen() {
   const { label } = useItemLabels(order?.items ?? [])
   const pending = useQuery({
     queryKey: ['reviews', 'pending', orderId],
-    queryFn: () => listPendingReviews(orderId),
+    queryFn: () => listPendingReviews(order?.items ?? [], orderId),
     enabled: authed && order?.status === 'COMPLETED',
     retry: false,
   })
 
   const [rating, setRating] = useState(5)
   const [comment, setComment] = useState('')
-  const [files, setFiles] = useState<PickedImage[]>([])
   const [done, setDone] = useState<{ item: OrderItem; rating: number }[]>([])
   const [unavailable, setUnavailable] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   const doneKeys = new Set(done.map((d) => itemKey(d.item)))
-  const pendingIds = pending.data ? new Set(pending.data.map((p) => p.orderItemId)) : null
-  const remaining = (order?.items ?? []).filter(
-    (i) => !doneKeys.has(itemKey(i)) && (!pendingIds || !i.id || pendingIds.has(i.id)),
-  )
+  const remaining = (pending.data ?? []).filter((i) => !doneKeys.has(itemKey(i)))
   const current = remaining.find((i) => itemKey(i) === itemId) ?? remaining[0]
   const justDone = done[done.length - 1]
-  const over = files.length > MAX_REVIEW_IMAGES
 
   const submit = useMutation({
     mutationFn: async () => {
       if (!current) return
-      const imageUrls = await encodeImages(files)
       await createReview({
         orderId,
-        orderItemId: current.id,
         productId: current.productId,
         rating,
-        comment: comment.trim(),
-        imageUrls,
+        comment: comment.trim() || undefined,
       })
     },
     onSuccess: () => {
@@ -88,16 +76,30 @@ export default function ReviewScreen() {
       setDone((d) => [...d, { item: current, rating }])
       setRating(5)
       setComment('')
-      setFiles([])
+      setFormError(null)
       qc.invalidateQueries({ queryKey: ['reviews', 'pending', orderId] })
       qc.invalidateQueries({ queryKey: orderKeys.detail(orderId) })
     },
     onError: (e) => {
-      if (e instanceof ImageTooLargeError) {
-        return toast.show({ type: 'error', message: 'Ảnh quá lớn, hãy chọn ảnh nhỏ hơn.' })
+      if (isAlreadyReviewed(e)) {
+        // Another device/session already reviewed it: refresh the pending list.
+        qc.invalidateQueries({ queryKey: ['reviews', 'pending', orderId] })
+        return setFormError('Sản phẩm này đã được đánh giá.')
       }
-      if (isReviewApiMissing(e)) return setUnavailable(true)
-      toast.show({ type: 'error', message: getApiError(e).message })
+      if (isNotReviewable(e)) return setUnavailable(true)
+      const err = getApiError(e)
+      if (err.code === 'IMAGE_URL_NOT_ALLOWED') {
+        return setFormError('Chưa hỗ trợ đính kèm ảnh.')
+      }
+      if (err.code === 'VALIDATION_ERROR') {
+        return setFormError(
+          err.fieldErrors.comment ?? err.fieldErrors.rating ?? 'Nội dung đánh giá chưa hợp lệ.',
+        )
+      }
+      if (isReviewDependencyDown(e)) {
+        return setFormError('Hệ thống đang bận, vui lòng thử lại sau ít phút.')
+      }
+      toast.show({ type: 'error', message: err.message })
     },
   })
 
@@ -135,15 +137,17 @@ export default function ReviewScreen() {
         </>
       )
     }
-    if (unavailable || (pending.isError && isReviewApiMissing(pending.error) && !justDone)) {
+    if (unavailable || (pending.isError && isNotReviewable(pending.error) && !justDone)) {
       return (
         <>
-          <InfoCard title="Chưa thể đánh giá" body={MISSING_API} />
+          <InfoCard title="Chưa thể đánh giá" body={NOT_REVIEWABLE} />
           {toOrder('primary')}
         </>
       )
     }
     if (pending.isPending) return <Skeleton height={130} />
+    if (pending.isError)
+      return <ErrorState error={pending.error} onRetry={() => pending.refetch()} />
 
     if (!current) {
       return justDone ? (
@@ -177,58 +181,35 @@ export default function ReviewScreen() {
             <AppText testID="review-summary">
               {`${l.variant ? `${l.name} / ${l.variant}` : l.name} · ${orderCode(order.id)}`}
             </AppText>
-            {over ? null : (
-              <>
-                <AppText variant="label">Chấm điểm *</AppText>
-                <RatingStars value={rating} onChange={setRating} disabled={submit.isPending} />
-                <TextField
-                  label="Nhận xét"
-                  testID="review-comment"
-                  multiline
-                  maxLength={500}
-                  value={comment}
-                  onChangeText={setComment}
-                  placeholder="Chia sẻ cảm nhận của bạn"
-                />
-              </>
-            )}
-            <MediaPicker
-              testID="review-images"
-              label="Ảnh"
-              files={files}
-              onChange={setFiles}
-              max={MAX_REVIEW_IMAGES}
-              unit="ảnh"
-              overTitle={`Tối đa ${MAX_REVIEW_IMAGES} ảnh`}
-              overSuffix="để gửi đánh giá."
-              hint={`Tối đa ${MAX_REVIEW_IMAGES} ảnh cho mỗi đánh giá.`}
-              disabled={submit.isPending}
+            <AppText variant="label">Chấm điểm *</AppText>
+            <RatingStars value={rating} onChange={setRating} disabled={submit.isPending} />
+            <TextField
+              label="Nhận xét"
+              testID="review-comment"
+              multiline
+              maxLength={MAX_REVIEW_COMMENT}
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Chia sẻ cảm nhận của bạn"
+              helper="Chưa hỗ trợ đính kèm ảnh."
+              error={formError ?? undefined}
             />
-            {over ? (
-              <>
-                <Button
-                  title="Chọn lại ảnh"
-                  onPress={async () => setFiles(await pickImages(MAX_REVIEW_IMAGES))}
-                />
-                <Button title="Quay lại" kind="secondary" onPress={() => setFiles([])} />
-              </>
-            ) : (
-              <>
-                <Button
-                  testID="review-submit"
-                  title="Gửi đánh giá"
-                  loading={submit.isPending}
-                  onPress={() => submit.mutate()}
-                />
-                <Button
-                  testID="review-later"
-                  title="Để sau"
-                  kind="secondary"
-                  disabled={submit.isPending}
-                  onPress={backOr(`/orders/${orderId}`)}
-                />
-              </>
-            )}
+            <Button
+              testID="review-submit"
+              title="Gửi đánh giá"
+              loading={submit.isPending}
+              onPress={() => {
+                setFormError(null)
+                submit.mutate()
+              }}
+            />
+            <Button
+              testID="review-later"
+              title="Để sau"
+              kind="secondary"
+              disabled={submit.isPending}
+              onPress={backOr(`/orders/${orderId}`)}
+            />
           </>
         )}
       </>
