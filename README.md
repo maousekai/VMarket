@@ -74,21 +74,21 @@ tách rời với các service khác.
 
 ## Chạy hạ tầng (tối ưu tài nguyên)
 
-Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. Chỉ khi bật profile Search
-mới cần đặt rõ `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` (password trong example để
-trống): container `minio` từ chối khởi động khi thiếu một trong hai, không có
-credential mặc định. Các lệnh Compose khác không phụ thuộc hai biến này. Giữ nguyên
+Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. `MINIO_ROOT_USER` và
+`MINIO_ROOT_PASSWORD` là **bắt buộc** vì MinIO chạy mặc định cùng hạ tầng (lưu ảnh
+đại diện / logo / ảnh bìa). Container `minio` từ chối khởi động khi thiếu một trong
+hai và password phải dài ít nhất 8 ký tự; không có credential mặc định. Giữ nguyên
 `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
 `AUTH_JWT_SECRET` và `INTERNAL_API_KEY` cũng không có giá trị mặc định trong
-`docker-compose.yml`: thiếu thì các service dùng chúng (auth, user, shop, gateway,
-chatbot) dừng lúc khởi động thay vì chạy bằng secret công khai. Nếu `.env` có từ
-trước, thêm hai biến này theo `.env.example` (tối thiểu 32 ký tự; môi trường thật
-dùng chuỗi ngẫu nhiên).
+`docker-compose.yml`: thiếu thì các service dùng chúng (auth, user, shop, order,
+product, gateway, chatbot) dừng lúc khởi động thay vì chạy bằng secret công khai.
+Nếu `.env` có từ trước, thêm hai biến này theo `.env.example` (tối thiểu 32 ký tự;
+môi trường thật dùng chuỗi ngẫu nhiên).
 
 ```bash
-# Bộ nhẹ mặc định (~1.5GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ
-docker compose up -d postgres mongo mongo-init-replica redis rabbitmq
+# Bộ nhẹ mặc định (~1.75GB RAM): PostgreSQL + MongoDB + Redis + RabbitMQ + MinIO
+docker compose up -d postgres mongo mongo-init-replica redis rabbitmq minio
 
 # Chỉ định lẻ khi cần
 docker compose up -d postgres redis
@@ -354,6 +354,8 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 | User      | `curl http://localhost:8082/api/users/health`         | `{"status":"UP",...}`       |
 | User (cần token) | `curl http://localhost:8082/api/users/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Shop      | `curl http://localhost:8083/api/shops/health`         | `{"status":"UP",...}`       |
+| Order     | `curl http://localhost:8086/actuator/health`          | `{"status":"UP"}`           |
+| Product   | `curl http://localhost:8084/actuator/health`          | `{"status":"UP"}`           |
 | Chatbot   | `curl http://localhost:8102/api/ai/chat/health`       | `{"status":"UP","database":"ready","knowledge":"ready",...}` |
 | Shop (cần token) | `curl http://localhost:8083/api/shops/me`      | `401` khi chưa đăng nhập — đúng như thiết kế |
 | Qua gateway | `curl http://localhost:8080/api/auth/health`        | `{"status":"UP",...}`       |

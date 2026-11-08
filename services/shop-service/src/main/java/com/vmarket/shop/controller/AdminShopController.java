@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.vmarket.shop.dto.ErrorResponse;
 import com.vmarket.shop.dto.PageResponse;
 import com.vmarket.shop.dto.ReasonRequest;
+import com.vmarket.shop.dto.ShopCountsResponse;
 import com.vmarket.shop.dto.ShopProfileChangeResponse;
 import com.vmarket.shop.dto.ShopResponse;
 import com.vmarket.shop.dto.ShopStatusHistoryResponse;
@@ -84,6 +85,13 @@ public class AdminShopController {
 			@RequestParam(defaultValue = "20") @Min(value = 1, message = "size phải >= 1")
 			@Max(value = MAX_PAGE_SIZE, message = "size tối đa 100") int size) {
 		return moderationService.search(status, keyword, page, size);
+	}
+
+	@Operation(summary = "Số lượng gian hàng theo trạng thái",
+			description = "Dùng cho tab và badge của trang Admin. Đếm trong một truy vấn, gồm cả trạng thái 0.")
+	@GetMapping("/counts")
+	public ShopCountsResponse counts() {
+		return moderationService.counts();
 	}
 
 	@Operation(summary = "Chi tiết hồ sơ gian hàng", description = "Mọi trạng thái, kèm thông tin chủ gian hàng.")

@@ -19,6 +19,8 @@ spring:
 app:
   jobs:
     enabled: false
+  internal:
+    api-key: test-only-internal-api-key-0123456789-0123456789
   delivery:
     internal-api-key: test-only-delivery-api-key-0123456789-0123456789
   events:

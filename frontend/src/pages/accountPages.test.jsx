@@ -125,12 +125,12 @@ describe('Profile page additions', () => {
     )
   })
 
-  it('shows the email verification state from the session', () => {
+  it('does not show an email verification badge under the email', () => {
     view(<ProfilePage />, auth({ session: { ...session, emailVerified: false } }))
-    expect(screen.getByText('Email chưa xác thực')).toBeTruthy()
+    expect(screen.queryByText('Email chưa xác thực')).toBeNull()
     cleanup()
     view(<ProfilePage />, auth({ session: { ...session, emailVerified: true } }))
-    expect(screen.getByText('Email đã xác thực')).toBeTruthy()
+    expect(screen.queryByText('Email đã xác thực')).toBeNull()
   })
 
   it('replaces the phone hint with its validation error', () => {
@@ -214,11 +214,18 @@ describe('Address book', () => {
     expect(second.getByText('Ghi chú: Gọi trước khi giao')).toBeTruthy()
   })
 
+  it('shows only one add button when the address book is empty', async () => {
+    view(<AddressBookPage />)
+    expect(await screen.findByText('Chưa có địa chỉ giao hàng')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Thêm địa chỉ mới' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Thêm địa chỉ đầu tiên' })).toBeNull()
+  })
+
   it('shows the empty state and creates the first address as the default', async () => {
     listMyAddresses.mockResolvedValueOnce([]).mockResolvedValue([home])
     createAddress.mockResolvedValue(home)
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog', { name: 'Thêm địa chỉ nhận hàng' })
     const select = screen.getByLabelText(/Địa chỉ mặc định/)
     expect(select.value).toBe('yes')
@@ -237,7 +244,7 @@ describe('Address book', () => {
 
   it('validates required fields and the phone number before calling the API', async () => {
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     fillAddress({ recipient: '', phone: '0905 123 456' })
     click('Lưu địa chỉ')
@@ -249,7 +256,7 @@ describe('Address book', () => {
 
   it('offers only the wards of the former Da Nang in a grouped dropdown', async () => {
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     const ward = screen.getByLabelText(/Phường \/ xã/)
     expect(ward.tagName).toBe('SELECT')
@@ -271,7 +278,7 @@ describe('Address book', () => {
 
   it('fixes the province and has no district field', async () => {
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     const province = screen.getByLabelText(/Tỉnh \/ thành/)
     expect(province.tagName).toBe('SELECT')
@@ -283,7 +290,7 @@ describe('Address book', () => {
   it('requires choosing a ward and never sends a district', async () => {
     createAddress.mockResolvedValue(home)
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     fillAddress({ ward: '' })
     click('Lưu địa chỉ')
@@ -372,7 +379,7 @@ describe('Address book', () => {
     createAddress.mockRejectedValueOnce(conflict).mockRejectedValueOnce(conflict)
     createAddress.mockResolvedValue(home)
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     fillAddress()
     click('Lưu địa chỉ')
@@ -401,7 +408,7 @@ describe('Address book', () => {
       },
     })
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     fillAddress()
     click('Lưu địa chỉ')
@@ -411,10 +418,10 @@ describe('Address book', () => {
 
   it('closes the dialog with Escape or Quay lại without saving', async () => {
     view(<AddressBookPage />)
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
-    await clickWhenReady('Thêm địa chỉ đầu tiên')
+    await clickWhenReady('Thêm địa chỉ mới')
     await screen.findByRole('dialog')
     click('Quay lại')
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -533,6 +540,21 @@ describe('Change password page', () => {
     expect(screen.getByLabelText(/^Xác nhận mật khẩu mới/).getAttribute('aria-invalid')).toBe(
       'true',
     )
+  })
+
+  it('shows matching feedback as soon as the confirmation is typed', () => {
+    view(<ChangePasswordPage />)
+    fill(/^Mật khẩu mới/, 'New@12345')
+
+    fill(/^Xác nhận mật khẩu mới/, 'New@1234')
+    expect(screen.getByText('Mật khẩu xác nhận không khớp.')).toBeTruthy()
+
+    fill(/^Xác nhận mật khẩu mới/, 'New@12345')
+    expect(screen.getByText('Mật khẩu trùng khớp.').className).toBe('account-field__success')
+    expect(screen.queryByText('Mật khẩu xác nhận không khớp.')).toBeNull()
+
+    fill(/^Mật khẩu mới/, 'New@12346')
+    expect(screen.getByText('Mật khẩu xác nhận không khớp.')).toBeTruthy()
   })
 
   it('rejects a weak or unchanged new password locally', () => {

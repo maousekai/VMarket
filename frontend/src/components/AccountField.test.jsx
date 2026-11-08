@@ -7,18 +7,23 @@ afterEach(cleanup)
 
 describe('AccountField password toggle', () => {
   it('shows exactly one show/hide button on a password field and toggles the input type', () => {
-    render(<AccountField label="Mật khẩu mới" type="password" defaultValue="Secret@123" />)
+    const { container } = render(
+      <AccountField label="Mật khẩu mới" type="password" defaultValue="Secret@123" />,
+    )
     const input = screen.getByLabelText(/^Mật khẩu mới/)
     const buttons = screen.getAllByRole('button')
     expect(buttons).toHaveLength(1)
     expect(buttons[0].getAttribute('aria-label')).toBe('Hiện mật khẩu mới')
+    expect(container.querySelector('.password-toggle__slash')).toBeNull()
     expect(input.type).toBe('password')
     fireEvent.click(buttons[0])
     expect(input.type).toBe('text')
     expect(buttons[0].getAttribute('aria-label')).toBe('Ẩn mật khẩu mới')
     expect(buttons[0].getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('.password-toggle__slash')).not.toBeNull()
     fireEvent.click(buttons[0])
     expect(input.type).toBe('password')
+    expect(container.querySelector('.password-toggle__slash')).toBeNull()
   })
 
   it('has no toggle on other kinds of fields', () => {

@@ -42,8 +42,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("9");
-		assertThat(flyway.info().applied()).hasSize(9);
+		assertThat(current.getVersion().getVersion()).isEqualTo("10");
+		assertThat(flyway.info().applied()).hasSize(10);
 	}
 
 	@Test

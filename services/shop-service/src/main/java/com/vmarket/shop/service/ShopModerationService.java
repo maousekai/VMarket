@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.shop.dto.PageResponse;
+import com.vmarket.shop.dto.ShopCountsResponse;
 import com.vmarket.shop.dto.ShopProfileChangeResponse;
 import com.vmarket.shop.dto.ShopResponse;
 import com.vmarket.shop.dto.ShopStatusHistoryResponse;
@@ -44,25 +45,47 @@ public class ShopModerationService {
 	private final ShopStatusHistoryRepository historyRepository;
 	private final ShopProfileChangeRepository profileChangeRepository;
 	private final ShopStatusTransitioner transitioner;
+	private final ShopProfileEnricher profileEnricher;
 
 	@Transactional(readOnly = true)
 	public PageResponse<ShopResponse> search(ShopStatus status, String keyword, int page, int size) {
 		var result = shopRepository.findAll(ShopSpecifications.matching(status, keyword),
 				PageRequest.of(page, size, NEWEST_FIRST));
-		return PageResponse.from(result, ShopResponse::from);
+		var items = profileEnricher.enrichAll(result.getContent().stream().map(ShopResponse::from).toList());
+		return new PageResponse<>(items, result.getNumber(), result.getSize(),
+				result.getTotalElements(), result.getTotalPages());
+	}
+
+	@Transactional(readOnly = true)
+	public ShopCountsResponse counts() {
+		long pending = 0;
+		long active = 0;
+		long rejected = 0;
+		long suspended = 0;
+		for (var row : shopRepository.countByStatus()) {
+			switch (row.getStatus()) {
+				case PENDING -> pending = row.getCount();
+				case ACTIVE -> active = row.getCount();
+				case REJECTED -> rejected = row.getCount();
+				case SUSPENDED -> suspended = row.getCount();
+			}
+		}
+		return new ShopCountsResponse(pending, active, rejected, suspended,
+				pending + active + rejected + suspended);
 	}
 
 	@Transactional(readOnly = true)
 	public ShopResponse get(String shopId) {
-		return ShopResponse.from(mustFind(shopId));
+		return profileEnricher.enrich(ShopResponse.from(mustFind(shopId)));
 	}
 
 	@Transactional(readOnly = true)
 	public List<ShopStatusHistoryResponse> history(String shopId) {
 		mustFind(shopId);
-		return historyRepository.findByShopIdOrderByCreatedAtAscIdAsc(shopId).stream()
+		var rows = historyRepository.findByShopIdOrderByCreatedAtAscIdAsc(shopId).stream()
 				.map(ShopStatusHistoryResponse::from)
 				.toList();
+		return profileEnricher.enrichHistory(rows);
 	}
 
 	/**
@@ -111,7 +134,7 @@ public class ShopModerationService {
 		transitioner.apply(shop, action, adminId, reason == null ? null : reason.trim());
 		Shop saved = shopRepository.saveAndFlush(shop);
 		log.info("Admin {} thực hiện {} gian hàng id={}", adminId, action, shopId);
-		return ShopResponse.from(saved);
+		return profileEnricher.enrich(ShopResponse.from(saved));
 	}
 
 	private Shop mustFind(String shopId) {

@@ -18,6 +18,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import tools.jackson.databind.ObjectMapper;
 import com.vmarket.events.EventPublisher;
+import com.vmarket.shop.client.OrderServiceClient;
+import com.vmarket.shop.client.ProductServiceClient;
+import com.vmarket.shop.client.UserServiceClient;
 import com.vmarket.shop.config.ShopJwtProperties;
 import com.vmarket.shop.repository.ShopProfileChangeRepository;
 import com.vmarket.shop.repository.ShopRepository;
@@ -46,6 +49,9 @@ abstract class ShopApiTestSupport {
 	@Autowired ShopProfileChangeRepository profileChanges;
 
 	@MockitoBean EventPublisher eventPublisher;
+	@MockitoBean UserServiceClient userServiceClient;
+	@MockitoBean OrderServiceClient orderServiceClient;
+	@MockitoBean ProductServiceClient productServiceClient;
 
 	@BeforeEach
 	void cleanDatabase() {

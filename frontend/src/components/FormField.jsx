@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import eye from '../assets/auth/eye.png'
+import PasswordToggleIcon from './PasswordToggleIcon'
 
 export default function FormField({
   label,
@@ -7,6 +7,7 @@ export default function FormField({
   type = 'text',
   error,
   hint,
+  success = false,
   describedBy,
   ...props
 }) {
@@ -35,12 +36,15 @@ export default function FormField({
             aria-pressed={visible}
             onClick={() => setVisible(!visible)}
           >
-            <img src={eye} width="18" height="18" alt="" />
+            <PasswordToggleIcon visible={visible} />
           </button>
         )}
       </div>
       {help && (
-        <p id={`${id}-help`} className={error ? 'field-error' : 'field-hint'}>
+        <p
+          id={`${id}-help`}
+          className={error ? 'field-error' : success ? 'field-success' : 'field-hint'}
+        >
           {help}
         </p>
       )}

@@ -195,14 +195,20 @@ export function addShop(id, status = 'PENDING') {
   if (!['PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED'].includes(status))
     throw new Error('Unknown shop status')
   const shopId = `01E2E${randomUUID().replaceAll('-', '').toUpperCase().slice(0, 21)}`
+  const shopName = `Gian hàng E2E ${id}`
+  // name_key mirrors Shop.nameKeyOf(): NFC, collapse spaces, lowercase. Admin search
+  // filters on name_key, so a synthetic key would make the fixture unfindable by name.
+  const nameKey = shopName.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()
   // API IDs are opaque strings. Fixtures only fill data, never edit schema.
   sql(
     'vmarket_shop',
     `INSERT INTO shops (id, owner_id, name, name_key, contact_email, contact_phone,
-      province, district, ward, street_address, status)
-      VALUES ('${shopId}', ${accountId(id)}, 'Gian hàng E2E ${id}', 'e2e-${id}',
-      'shop@e2e.vmarket.test', '0912345678', 'Đà Nẵng', 'Hải Châu', 'Hải Châu', '1 Hải Phòng', '${status}')`,
+      province, district, ward, street_address, status, approved_at)
+      VALUES ('${shopId}', ${accountId(id)}, '${shopName}', '${nameKey}',
+      'shop@e2e.vmarket.test', '0912345678', 'Đà Nẵng', 'Hải Châu', 'Phường Hải Châu',
+      '1 Hải Phòng', '${status}', ${status === 'ACTIVE' ? 'now()' : 'NULL'})`,
   )
+  return shopId
 }
 
 export async function login(page, account, { navigate = true, email = account.email } = {}) {

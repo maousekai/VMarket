@@ -26,3 +26,14 @@ export async function browseProducts({
   if (categoryId) params.categoryId = categoryId
   return (await apiClient.get('/api/products', { ...publicRequest, params })).data
 }
+
+export const listProducts = async ({ shopId, page = 0, size = 20, sort = 'NEWEST' } = {}) =>
+  (
+    await apiClient.get('/api/products', {
+      ...publicRequest,
+      params: { shopId, page, size, sort },
+    })
+  ).data
+
+export const getProduct = async (productId) =>
+  (await apiClient.get(`/api/products/${encodeURIComponent(productId)}`, publicRequest)).data

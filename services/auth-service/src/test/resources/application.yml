@@ -21,6 +21,9 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:5173
+  # Test khong mo ket noi RabbitMQ.
+  events:
+    listen: false
 
 auth:
   jwt:
