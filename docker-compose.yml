@@ -568,6 +568,11 @@ services:
       # Origin FE duoc phep goi API qua gateway (phai trung voi FRONTEND_PORT).
       # Spring relaxed binding: APP_CORS_ALLOWED_ORIGINS -> app.cors.allowed-origins
       APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
+      # Rate limit theo IP (mac dinh bat). Chi tat tren moi truong test khi chay
+      # kiem thu hieu nang tu mot may (perf/README.md).
+      APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
+      APP_RATE_LIMIT_CAPACITY: ${APP_RATE_LIMIT_CAPACITY:-200}
+      APP_RATE_LIMIT_WINDOW_SECONDS: ${APP_RATE_LIMIT_WINDOW_SECONDS:-60}
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     # host-gateway: giu host.docker.internal hoat dong ca tren Linux
