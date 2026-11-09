@@ -49,3 +49,59 @@
   gap: 8px;
   font-weight: 500;
 }
+
+/* Admin orders drawer and dispute resolution (Figma 2158:11568, 2158:14163) */
+.admin-order {
+  display: grid;
+  gap: 14px;
+}
+.admin-order__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.admin-order__row small {
+  color: var(--color-subtle);
+}
+.admin-order__facts {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+.admin-order__facts div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.admin-order__facts div + div {
+  border-top: 1px solid var(--color-border);
+}
+.admin-order__facts dt {
+  color: var(--color-muted);
+}
+.admin-order__facts dd {
+  margin: 0;
+}
+.admin-dispute__choice {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 14px;
+}
+.admin-dispute__choice legend {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.admin-dispute__choice label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}

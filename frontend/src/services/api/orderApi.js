@@ -96,3 +96,30 @@ export const rejectReturn = async (returnId, reason) =>
 
 export const confirmReturnReceipt = async (returnId) =>
   (await apiClient.post(`${sellerReturnUrl(returnId)}/confirm-receipt`)).data
+
+// ---- Admin ----
+
+const adminUrl = `${ordersUrl}/admin`
+
+export const listAdminOrders = async ({ userId, ...query } = {}) =>
+  normalizePage(
+    (await apiClient.get(adminUrl, pageParams({ ...query, ...(userId ? { userId } : {}) }))).data,
+  )
+
+export const getAdminOrder = async (orderId) =>
+  (await apiClient.get(`${adminUrl}/${encodeURIComponent(orderId)}`)).data
+
+export const adminCancelOrder = async (orderId, reason) =>
+  (await apiClient.post(`${adminUrl}/${encodeURIComponent(orderId)}/cancel`, { reason })).data
+
+export const listAdminReturns = async (query) =>
+  normalizePage((await apiClient.get(`${adminUrl}/returns`, pageParams(query))).data)
+
+export const resolveReturn = async (returnId, { approved, restock, note }) =>
+  (
+    await apiClient.post(`${adminUrl}/returns/${encodeURIComponent(returnId)}/resolve`, {
+      approved,
+      restock,
+      note: note?.trim() || null,
+    })
+  ).data
