@@ -19,10 +19,17 @@ public record ShopStatusHistoryResponse(
 
 		@Schema(example = "01JBQ9YDX7K3M8N5P2R4T6V8W9", description = "userId người thao tác") String changedBy,
 
+		@Schema(description = "Tên người thao tác, enrich từ user-service; null nếu không đọc được")
+		String actorName,
+
 		Instant createdAt) {
 
 	public static ShopStatusHistoryResponse from(ShopStatusHistory h) {
 		return new ShopStatusHistoryResponse(h.getFromStatus(), h.getToStatus(), h.getReason(), h.getChangedBy(),
-				h.getCreatedAt());
+				null, h.getCreatedAt());
+	}
+
+	public ShopStatusHistoryResponse withActor(String actorName) {
+		return new ShopStatusHistoryResponse(fromStatus, toStatus, reason, changedBy, actorName, createdAt);
 	}
 }

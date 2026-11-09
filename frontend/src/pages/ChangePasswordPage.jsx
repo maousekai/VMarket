@@ -22,6 +22,11 @@ export default function ChangePasswordPage() {
   const [saving, setSaving] = useState(false)
   // After 504 PASSWORD_CHANGE_UNKNOWN the request must never be resent.
   const unknown = failure?.code === 'PASSWORD_CHANGE_UNKNOWN'
+  const confirmFilled = Boolean(values.confirmPassword)
+  const passwordsMatch = confirmFilled && values.confirmPassword === values.newPassword
+  const confirmError =
+    fieldErrors.confirmPassword ||
+    (confirmFilled && !passwordsMatch ? 'Mật khẩu xác nhận không khớp.' : undefined)
 
   function onChange(event) {
     const { name, value } = event.target
@@ -105,6 +110,9 @@ export default function ChangePasswordPage() {
             required
             autoComplete="new-password"
             {...field('confirmPassword')}
+            error={confirmError}
+            hint={passwordsMatch ? 'Mật khẩu trùng khớp.' : undefined}
+            success={passwordsMatch}
           />
           {unknown && (
             <div className="account-notice account-notice--warning" role="alert">

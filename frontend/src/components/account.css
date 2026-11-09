@@ -414,15 +414,20 @@
 .account-field input:disabled {
   opacity: 0.7;
 }
+.account-field__error,
+.account-field__hint,
+.account-field__success {
+  font-size: 12px;
+  margin: 0;
+}
 .account-field__error {
   color: #b91c1c;
-  font-size: 13px;
-  margin: 0;
 }
 .account-field__hint {
   color: var(--color-muted);
-  font-size: 12px;
-  margin: 0;
+}
+.account-field__success {
+  color: #15803d;
 }
 .account-actions {
   display: flex;
@@ -488,6 +493,13 @@
 }
 .account-notice p {
   margin: 6px 0 0;
+}
+.account-notice ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.account-notice li + li {
+  margin-top: 4px;
 }
 .account-state {
   padding: 32px;

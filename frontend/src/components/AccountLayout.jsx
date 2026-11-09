@@ -19,7 +19,6 @@ export default function AccountLayout({ title, current, canChangeAvatar = false,
   const { session, userProfile, profileState, saveProfile } = useAuth()
   const [changingAvatar, setChangingAvatar] = useState(false)
   const displayName = userProfile?.fullName || session.username
-  const emailVerified = session.emailVerified ?? session.status === 'ACTIVE'
   return (
     <main className="account-page">
       <nav className="account-breadcrumb" aria-label="Đường dẫn">
@@ -48,9 +47,6 @@ export default function AccountLayout({ title, current, canChangeAvatar = false,
             )}
             <strong>{displayName}</strong>
             <span>{session.email}</span>
-            <span className={`account-badge${emailVerified ? '' : ' account-badge--pending'}`}>
-              {emailVerified ? 'Email đã xác thực' : 'Email chưa xác thực'}
-            </span>
           </section>
           <nav className="account-card account-side-nav" aria-label="Tài khoản">
             {accountLinks.map((link) => (

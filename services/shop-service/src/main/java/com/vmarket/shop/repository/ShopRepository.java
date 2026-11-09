@@ -4,6 +4,7 @@ import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 
 import com.vmarket.shop.entity.Shop;
 import com.vmarket.shop.entity.ShopStatus;
@@ -28,4 +29,14 @@ public interface ShopRepository extends JpaRepository<Shop, String>, JpaSpecific
 	boolean existsByNameKey(String nameKey);
 
 	boolean existsByNameKeyAndIdNot(String nameKey, String id);
+
+	/** Đếm gian hàng theo trạng thái cho tab / badge của Admin trong một truy vấn. */
+	@Query("select s.status as status, count(s) as count from Shop s group by s.status")
+	java.util.List<ShopStatusCountRow> countByStatus();
+
+	interface ShopStatusCountRow {
+		ShopStatus getStatus();
+
+		long getCount();
+	}
 }
