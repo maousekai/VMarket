@@ -597,6 +597,9 @@ services:
     networks:
       - vmarket-network
     mem_limit: 512m
+    # Redis listener (tracking realtime) lam app dung han neu luc khoi dong chua
+    # resolve duoc host redis (gap khi ca stack len cung luc) -> tu khoi dong lai.
+    restart: on-failure:5
     environment:
       <<: *common-environment
       DB_NAME: vmarket_delivery
