@@ -287,8 +287,18 @@ class OrderApiTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].status").value("PENDING"));
 
+        // Chi tiết trả kèm id từng dòng hàng: buyer cần nó làm orderItemId khi trả hàng.
+        Order own = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0);
+        String orderId = own.getId();
+        mockMvc.perform(get("/api/orders/" + orderId).header(HttpHeaders.AUTHORIZATION, aliceToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder(own.getItems().stream()
+                                .map(i -> i.getId()).toArray())))
+                .andExpect(jsonPath("$.updatedAt").exists())
+                .andExpect(jsonPath("$.deliveredAt").value(org.hamcrest.Matchers.nullValue()));
+
         // Bob đoán đúng id cũng không đọc được (IDOR).
-        String orderId = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0).getId();
         mockMvc.perform(get("/api/orders/" + orderId).header(HttpHeaders.AUTHORIZATION, bobToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("ORDER_NOT_FOUND"));
