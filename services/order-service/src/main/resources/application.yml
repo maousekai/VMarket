@@ -23,6 +23,11 @@ spring:
     # Cho phep migrate tren DB da co bang (vmarket_order duoc tao san boi container)
     baseline-on-migrate: true
     baseline-version: 0
+  servlet:
+    multipart:
+      # Anh minh chung toi da 5 MB (ImageKind.EVIDENCE); du phong overhead multipart.
+      max-file-size: 6MB
+      max-request-size: 7MB
   rabbitmq:
     publisher-confirm-type: correlated
     publisher-returns: true
@@ -44,6 +49,15 @@ management:
 # (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
 
 app:
+  # Kho anh MinIO (services/shared-media) cho anh minh chung tra hang (PBL6-30).
+  # Thieu credential la fail luc khoi dong; gia tri local nam o application-dev.yml.
+  media:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-origin: ${MINIO_PUBLIC_ORIGIN:http://localhost:9000}
+    bucket: ${MINIO_BUCKET:vmarket-media}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
+    region: ${MINIO_REGION:us-east-1}
   internal:
     # Khoá cho các endpoint /internal/orders/** (shop-service đọc thống kê).
     api-key: ${INTERNAL_API_KEY}

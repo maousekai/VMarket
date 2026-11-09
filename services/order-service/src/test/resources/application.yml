@@ -19,6 +19,13 @@ spring:
 app:
   jobs:
     enabled: false
+  media:
+    endpoint: http://minio.test:9000
+    public-origin: http://localhost:9000
+    bucket: vmarket-media-test
+    access-key: test-access-key
+    secret-key: test-secret-key
+    region: us-east-1
   internal:
     api-key: test-only-internal-api-key-0123456789-0123456789
   delivery:

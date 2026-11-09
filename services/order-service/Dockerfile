@@ -51,8 +51,12 @@ COPY services/${SERVICE_NAME}/pom.xml ${SERVICE_NAME}/pom.xml
 # Install its parent descriptor and library before resolving service dependencies.
 COPY services/shared-events/pom.xml shared-events/pom.xml
 COPY services/shared-events/src shared-events/src
+# shared-media (return evidence uploads, PBL6-30) is internal too.
+COPY services/shared-media/pom.xml shared-media/pom.xml
+COPY services/shared-media/src shared-media/src
 RUN mvn -B --no-transfer-progress -f pom.xml -N install -DskipTests \
- && mvn -B --no-transfer-progress -f shared-events/pom.xml install -DskipTests
+ && mvn -B --no-transfer-progress -f shared-events/pom.xml install -DskipTests \
+ && mvn -B --no-transfer-progress -f shared-media/pom.xml install -DskipTests
 
 # go-offline keo ve toan bo dependency + plugin can cho build.
 # Dependency nam han trong layer image (khong dung cache mount) de CI

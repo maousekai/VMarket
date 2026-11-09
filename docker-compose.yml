@@ -446,6 +446,13 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       USER_SERVICE_URL: http://user-service:8082
       CART_SERVICE_URL: http://cart-service:8085
+      # MinIO - anh minh chung tra hang (PBL6-30). Cung bo bien voi user/shop-service.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
       # Lay shopId cua seller (GET /api/shops/me) cho API /api/orders/seller/**.
       SHOP_SERVICE_URL: http://shop-service:8083
     ports:
@@ -454,6 +461,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      minio:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       rabbitmq:

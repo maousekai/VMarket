@@ -15,6 +15,10 @@ auth:
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
 
 app:
+  # MinIO chay trong docker compose voi credential local trong .env.example.
+  media:
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
   internal:
     # Local mvnw: shop-service gọi thống kê bằng khoá này. Phải trùng INTERNAL_API_KEY
     # mà shop-service nhận từ docker compose / .env (dev default bên dưới).
