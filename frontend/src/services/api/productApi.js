@@ -91,3 +91,36 @@ export const deleteProduct = async (productId) => {
 /** Gui lai san pham da bi Admin go sau khi chinh sua. */
 export const resubmitProduct = async (productId) =>
   (await apiClient.post(`${productUrl(productId)}/moderation/resubmit`, null, keyed())).data
+
+// ---- Admin ----
+
+export const listAdminProducts = async () =>
+  (await apiClient.post('/api/products/admin/query')).data
+
+export const moderateProduct = async (productId, { removed, reason }) =>
+  (
+    await apiClient.patch(
+      `${productUrl(productId)}/moderation`,
+      { removed, reason: reason?.trim() || null },
+      keyed(),
+    )
+  ).data
+
+const categoriesUrl = '/api/products/categories'
+const categoryUrl = (categoryId) => `${categoriesUrl}/${encodeURIComponent(categoryId)}`
+
+/** Cay danh muc day du, ke ca danh muc dang an. */
+export const listAdminCategories = async () =>
+  (await apiClient.post(`${categoriesUrl}/admin/query`)).data
+
+export const createCategory = async (body) => (await apiClient.post(categoriesUrl, body)).data
+
+export const updateCategory = async (categoryId, body) =>
+  (await apiClient.put(categoryUrl(categoryId), body)).data
+
+export const setCategoryVisibility = async (categoryId, active) =>
+  (await apiClient.patch(`${categoryUrl(categoryId)}/visibility`, { active })).data
+
+export const deleteCategory = async (categoryId) => {
+  await apiClient.delete(categoryUrl(categoryId))
+}

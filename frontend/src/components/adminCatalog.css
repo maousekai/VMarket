@@ -1,0 +1,51 @@
+/* Admin catalog: categories (Figma 2158:16041) and product moderation (2158:10289) */
+.admin-catalog {
+  display: grid;
+  gap: 16px;
+}
+.admin-catalog__name {
+  display: inline-block;
+  font-weight: 600;
+}
+.admin-catalog__name small {
+  color: var(--color-subtle);
+  font-weight: 400;
+}
+.admin-catalog__tree tr.is-inactive td {
+  color: var(--color-subtle);
+}
+.admin-catalog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  white-space: nowrap;
+}
+.admin-catalog__danger {
+  color: #b91c1c;
+}
+.admin-catalog__form {
+  display: grid;
+  gap: 14px;
+}
+.admin-catalog__form label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.admin-catalog__form input:not([type='checkbox']),
+.admin-catalog__form select,
+.admin-catalog__form textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-weight: 400;
+}
+.admin-catalog__form .admin-catalog__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}

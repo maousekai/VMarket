@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import apiClient, { bindSessionManager } from './apiClient'
-import { browseProducts, listCategories, PRODUCT_SORT } from './productApi'
+import {
+  browseProducts,
+  createProduct,
+  listCategories,
+  moderateProduct,
+  PRODUCT_SORT,
+  setCategoryVisibility,
+} from './productApi'
 import { getForYou } from './recommendationApi'
 import { getPublicShop } from './shopApi'
 
@@ -42,6 +49,41 @@ describe('product catalog API', () => {
   it('passes a trimmed keyword and category filter', async () => {
     await browseProducts({ keyword: ' áo thun ', categoryId: 'cat-1' })
     expect(sent().params).toMatchObject({ q: 'áo thun', categoryId: 'cat-1', sort: 'NEWEST' })
+  })
+})
+
+describe('product management API', () => {
+  it('passes price and rating filters and skips a zero rating', async () => {
+    await browseProducts({ minPrice: 0, maxPrice: 500000, minRating: 0 })
+    expect(sent().params).toEqual({
+      sort: 'NEWEST',
+      page: 0,
+      size: 20,
+      minPrice: 0,
+      maxPrice: 500000,
+    })
+  })
+
+  it('creates a product with the seller token and an Idempotency-Key', async () => {
+    await createProduct({ name: 'Áo' }, 'key-1')
+    expect(sent().method).toBe('post')
+    expect(sent().url).toBe('/api/products')
+    expect(sent().headers.get('Idempotency-Key')).toBe('key-1')
+    expect(sent().headers.get('Authorization')).toBe('Bearer token-123')
+  })
+
+  it('moderates a product with a trimmed reason and a fresh Idempotency-Key', async () => {
+    await moderateProduct('p 1', { removed: true, reason: '  Hàng giả ' })
+    expect(sent().method).toBe('patch')
+    expect(sent().url).toBe('/api/products/p%201/moderation')
+    expect(JSON.parse(sent().data)).toEqual({ removed: true, reason: 'Hàng giả' })
+    expect(sent().headers.get('Idempotency-Key')).toBeTruthy()
+  })
+
+  it('toggles category visibility', async () => {
+    await setCategoryVisibility('c1', false)
+    expect(sent().url).toBe('/api/products/categories/c1/visibility')
+    expect(JSON.parse(sent().data)).toEqual({ active: false })
   })
 })
 
