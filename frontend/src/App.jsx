@@ -24,6 +24,8 @@ import SellerPage from './pages/SellerPage'
 import SellerRegisterPage from './pages/SellerRegisterPage'
 import SellerSettingsPage from './pages/SellerSettingsPage'
 import SellerDashboardPage from './pages/SellerDashboardPage'
+import SellerProductsPage from './pages/SellerProductsPage'
+import SellerProductFormPage from './pages/SellerProductFormPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
 import RoleAreaPage from './pages/RoleAreaPage'
@@ -66,6 +68,9 @@ export default function App() {
           <Route path="/seller" element={<SellerLayout />}>
             <Route index element={<SellerPage />} />
             <Route path="dashboard" element={<SellerDashboardPage />} />
+            <Route path="products" element={<SellerProductsPage />} />
+            <Route path="products/new" element={<SellerProductFormPage />} />
+            <Route path="products/:productId/edit" element={<SellerProductFormPage />} />
             <Route path="settings" element={<SellerSettingsPage />} />
           </Route>
         </Route>

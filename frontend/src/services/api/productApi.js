@@ -1,4 +1,5 @@
 import apiClient from './apiClient'
+import { newIdempotencyKey } from './userApi'
 
 // Danh muc va danh sach san pham la API cong khai: khong gui token de mot phien het han
 // khong lam hong trang chu cua khach.
@@ -9,6 +10,25 @@ export const PRODUCT_SORT = Object.freeze({
   bestSelling: 'BEST_SELLING',
   priceAsc: 'PRICE_ASC',
   priceDesc: 'PRICE_DESC',
+})
+
+export const PRODUCT_STATUS = Object.freeze({
+  draft: 'DRAFT',
+  active: 'ACTIVE',
+  hidden: 'HIDDEN',
+})
+
+// Gioi han cua ProductRequest phia backend (product-service).
+export const PRODUCT_LIMITS = Object.freeze({
+  name: 200,
+  description: 10000,
+  images: 9,
+  sku: 100,
+  maxPageSize: 100,
+})
+
+const keyed = (idempotencyKey = newIdempotencyKey()) => ({
+  headers: { 'Idempotency-Key': idempotencyKey },
 })
 
 export const listCategories = async () =>
@@ -49,3 +69,25 @@ export const listProducts = async ({ shopId, page = 0, size = 20, sort = 'NEWEST
 /** {product, similarProducts}; 404 khi san pham an, bi go hoac shop bi dinh chi. */
 export const getProduct = async (productId) =>
   (await apiClient.get(`/api/products/${encodeURIComponent(productId)}`, publicRequest)).data
+
+const productUrl = (productId) => `/api/products/${encodeURIComponent(productId)}`
+
+// ---- Seller ----
+
+/** Toan bo san pham cua seller dang dang nhap (khong phan trang phia server). */
+export const listMySellerProducts = async () =>
+  (await apiClient.post('/api/products/seller/query')).data
+
+export const createProduct = async (body, idempotencyKey) =>
+  (await apiClient.post('/api/products', body, keyed(idempotencyKey))).data
+
+export const updateProduct = async (productId, body, idempotencyKey) =>
+  (await apiClient.put(productUrl(productId), body, keyed(idempotencyKey))).data
+
+export const deleteProduct = async (productId) => {
+  await apiClient.delete(productUrl(productId), keyed())
+}
+
+/** Gui lai san pham da bi Admin go sau khi chinh sua. */
+export const resubmitProduct = async (productId) =>
+  (await apiClient.post(`${productUrl(productId)}/moderation/resubmit`, null, keyed())).data
