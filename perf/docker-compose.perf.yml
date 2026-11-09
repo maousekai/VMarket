@@ -1,0 +1,93 @@
+# Services the performance test needs that the root docker-compose.yml does not run
+# yet (PBL6-64): product, cart, order and delivery. Use it together with the root file:
+#
+#   docker compose -f docker-compose.yml -f perf/docker-compose.perf.yml up -d --build \
+#     product-service cart-service order-service delivery-service
+#
+# Paths are relative to the repository root (the first compose file). Secrets come
+# from the same .env as the rest of the stack. Ports are published on the host
+# because the gateway reaches business services at ${BACKEND_SERVICES_HOST}:<port>.
+x-perf-service: &perf-service
+  restart: unless-stopped
+  networks: [vmarket-network]
+  environment: &perf-env
+    SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+    AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+    INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_PORT: 5672
+    RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+    RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+
+services:
+  product-service:
+    <<: *perf-service
+    container_name: VMarket-product-service
+    build: { context: ., dockerfile: services/product-service/Dockerfile }
+    ports: ["8084:8084"]
+    environment:
+      <<: *perf-env
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_REPLICA_SET: rs0
+      MONGO_DIRECT_CONNECTION: "true"
+    depends_on:
+      mongo: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  cart-service:
+    <<: *perf-service
+    container_name: VMarket-cart-service
+    build: { context: ., dockerfile: services/cart-service/Dockerfile }
+    ports: ["8085:8085"]
+    environment:
+      <<: *perf-env
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PRODUCT_SERVICE_URL: http://product-service:8084
+    depends_on:
+      redis: { condition: service_started }
+      product-service: { condition: service_started }
+
+  order-service:
+    <<: *perf-service
+    container_name: VMarket-order-service
+    build: { context: ., dockerfile: services/order-service/Dockerfile }
+    ports: ["8086:8086"]
+    environment:
+      <<: *perf-env
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vmarket_order
+      DB_USERNAME: ${POSTGRES_USER:-vmarket}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
+      CART_SERVICE_URL: http://cart-service:8085
+      USER_SERVICE_URL: http://user-service:8082
+      # No PayOS switch exists in order-service: the test scripts only ever send COD.
+    depends_on:
+      postgres: { condition: service_healthy }
+      cart-service: { condition: service_started }
+
+  delivery-service:
+    <<: *perf-service
+    container_name: VMarket-delivery-service
+    build: { context: ., dockerfile: services/delivery-service/Dockerfile }
+    ports: ["8088:8088"]
+    environment:
+      <<: *perf-env
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vmarket_delivery
+      DB_USERNAME: ${POSTGRES_USER:-vmarket}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      AUTH_SERVICE_URL: http://auth-service:8081
+      ORDER_SERVICE_URL: http://order-service:8086
+      SHOP_SERVICE_URL: http://shop-service:8083
+      # The buyer's browser / k6 opens this URL; publish it where clients can reach it.
+      DELIVERY_WS_URL: ${DELIVERY_WS_URL:-ws://localhost:8088/api/delivery/ws}
+    depends_on:
+      postgres: { condition: service_healthy }
+      order-service: { condition: service_started }
