@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import AddToCartActions from '../components/AddToCartActions'
 import ProductGrid from '../components/ProductGrid'
 import SectionError from '../components/SectionError'
 import StarIcon from '../components/StarIcon'
@@ -164,7 +165,7 @@ export function PurchasePanel({ product, renderActions }) {
             : 'Chọn đủ phân loại để xem tồn kho'}
         </span>
       </div>
-      {renderActions?.({ variant, quantity: qty, soldOut: stock === 0 })}
+      {renderActions?.({ product, variant, quantity: qty, soldOut: stock === 0 })}
     </div>
   )
 }
@@ -255,7 +256,9 @@ export function ProductDetailView({ detail, categoryTree, renderActions }) {
   )
 }
 
-export default function ProductDetailPage({ renderActions }) {
+const defaultActions = (props) => <AddToCartActions {...props} />
+
+export default function ProductDetailPage({ renderActions = defaultActions }) {
   const { productId } = useParams()
   const load = useCallback(() => getProduct(productId), [productId])
   const detail = useRemoteData(load, productId)

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ProductDetailPage from './ProductDetailPage'
+import { AuthContext } from '../auth/useAuth'
 import { getProduct, listCategories } from '../services/api/productApi'
 import { getPublicShop } from '../services/api/shopApi'
 
@@ -33,11 +34,13 @@ const product = {
 
 const renderPage = (props = {}) =>
   render(
-    <MemoryRouter initialEntries={['/products/p1']}>
-      <Routes>
-        <Route path="/products/:productId" element={<ProductDetailPage {...props} />} />
-      </Routes>
-    </MemoryRouter>,
+    <AuthContext.Provider value={{ session: null, bootstrapState: 'ready' }}>
+      <MemoryRouter initialEntries={['/products/p1']}>
+        <Routes>
+          <Route path="/products/:productId" element={<ProductDetailPage {...props} />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthContext.Provider>,
   )
 
 beforeEach(() => {
@@ -68,6 +71,7 @@ describe('ProductDetailPage', () => {
     fireEvent.click(increase)
     expect(screen.getByRole('textbox', { name: 'Số lượng' })).toHaveValue('3')
     expect(increase).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Thêm vào giỏ hàng' })).toBeEnabled()
   })
 
   it('tells the buyer when the chosen variant is sold out', async () => {
