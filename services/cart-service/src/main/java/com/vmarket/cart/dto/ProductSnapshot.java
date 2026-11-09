@@ -7,11 +7,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
  * Snapshot mới nhất của một sản phẩm lấy từ product-service qua API đồng bộ
- * (FR-CART-03). Hình dạng này là hợp đồng giữa cart-service và
- * {@code GET /api/products/{productId}} của product-service (PBL6-15).
- *
- * <p>{@code @JsonIgnoreProperties(ignoreUnknown = true)} để product-service bổ sung
- * trường mới không làm cart-service đọc lỗi.
+ * (FR-CART-03). Đây là mô hình NỘI BỘ mà {@code CheckoutService} kiểm tra; JSON
+ * thật của {@code GET /api/products/{productId}} (PBL6-15) được đọc bằng
+ * {@link ProductDetailPayload} rồi chuyển sang đây.
  *
  * @param productId sản phẩm
  * @param shopId    gian hàng bán
