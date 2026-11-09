@@ -2,6 +2,8 @@ package com.vmarket.order.exception;
 
 import java.util.List;
 
+import jakarta.persistence.OptimisticLockException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -62,6 +64,23 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
 		return ResponseEntity.status(HttpStatus.NOT_FOUND)
 				.body(ErrorResponse.of("NOT_FOUND", "Không tìm thấy tài nguyên"));
+	}
+
+	/**
+	 * Xung đột Optimistic Locking (PBL6-53): hai thao tác cùng sửa một đơn hàng song song.
+	 * Request tới sau bị từ chối với 409 CONCURRENT_MODIFICATION để client tải lại dữ liệu mới nhất,
+	 * thay vì âm thầm ghi đè dữ liệu của nhau.
+	 */
+	@ExceptionHandler({
+			ObjectOptimisticLockingFailureException.class,
+			OptimisticLockException.class
+	})
+	public ResponseEntity<ErrorResponse> handleOptimisticLock(Exception ex) {
+		log.warn("Hai thao tác cùng sửa một đơn hàng song song (PBL6-53): {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(ErrorResponse.of(
+						"CONCURRENT_MODIFICATION",
+						"Đơn hàng vừa được cập nhật bởi một thao tác khác, vui lòng tải lại rồi thử lại"));
 	}
 
 	@ExceptionHandler(Exception.class)
