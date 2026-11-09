@@ -15,6 +15,7 @@ function SellerIcon({ name }) {
       'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 4-2.1-.7a7 7 0 0 0-.6-1.4l1-2-2.2-2.2-2 1a7 7 0 0 0-1.4-.6L13 4h-2l-.7 2.1a7 7 0 0 0-1.4.6l-2-1L4.7 7.9l1 2a7 7 0 0 0-.6 1.4L3 12v2l2.1.7a7 7 0 0 0 .6 1.4l-1 2 2.2 2.2 2-1a7 7 0 0 0 1.4.6L11 22h2l.7-2.1a7 7 0 0 0 1.4-.6l2 1 2.2-2.2-1-2a7 7 0 0 0 .6-1.4L21 14v-2Z',
     store: 'M4 4h16l1 6H3l1-6Zm1 8h14v8H5v-8Zm3 2v4h3v-4H8Z',
     home: 'm12 3 9 8h-3v9h-5v-6h-2v6H6v-9H3l9-8Z',
+    orders: 'M7 3h10l1 4H6l1-4Zm-2 6h14v12H5V9Zm4 3v2h6v-2H9Z',
     box: 'M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.2 6.3 3.1L12 10.4 5.7 7.3 12 4.2ZM5 9l6 3v7.6l-6-3V9Zm8 10.6V12l6-3v7.6l-6 3Z',
   }
   return (
@@ -165,6 +166,14 @@ export default function SellerLayout() {
           >
             <SellerIcon name="box" />
             <span>Quản lý sản phẩm</span>
+          </NavLink>
+          <NavLink
+            to="/seller/orders"
+            className={({ isActive }) => `seller-nav__link${isActive ? ' is-active' : ''}`}
+            onClick={() => setOpen(false)}
+          >
+            <SellerIcon name="orders" />
+            <span>Đơn hàng & trả hàng</span>
           </NavLink>
           <NavLink
             to="/seller/settings"

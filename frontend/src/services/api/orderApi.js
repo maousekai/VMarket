@@ -22,6 +22,12 @@ export function normalizePage(data) {
   }
 }
 
+const pageParams = ({ status, page = 0, size = 10, ...rest } = {}) => {
+  const params = { page, size, ...rest }
+  if (status) params.status = status
+  return { params }
+}
+
 // ---- Buyer ----
 
 export const placeOrder = async ({ addressId, note, paymentMethod }, idempotencyKey) =>
@@ -66,3 +72,27 @@ export async function uploadReturnEvidence(file) {
 export const deleteReturnEvidence = async (url) => {
   await apiClient.delete(`${ordersUrl}/returns/evidence`, { params: { url } })
 }
+
+// ---- Seller ----
+
+const sellerUrl = `${ordersUrl}/seller`
+
+export const listSellerOrders = async (query) =>
+  normalizePage((await apiClient.get(sellerUrl, pageParams(query))).data)
+
+export const confirmSellerOrder = async (orderId) =>
+  (await apiClient.post(`${sellerUrl}/${encodeURIComponent(orderId)}/confirm`)).data
+
+export const listSellerReturns = async (query) =>
+  normalizePage((await apiClient.get(`${sellerUrl}/returns`, pageParams(query))).data)
+
+const sellerReturnUrl = (returnId) => `${sellerUrl}/returns/${encodeURIComponent(returnId)}`
+
+export const acceptReturn = async (returnId) =>
+  (await apiClient.post(`${sellerReturnUrl(returnId)}/accept`)).data
+
+export const rejectReturn = async (returnId, reason) =>
+  (await apiClient.post(`${sellerReturnUrl(returnId)}/reject`, { reason })).data
+
+export const confirmReturnReceipt = async (returnId) =>
+  (await apiClient.post(`${sellerReturnUrl(returnId)}/confirm-receipt`)).data

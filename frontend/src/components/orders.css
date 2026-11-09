@@ -420,3 +420,34 @@
     font-size: 11px;
   }
 }
+
+/* Seller order processing (Figma 2136:1624, 2152:9298) */
+.seller-order__buyer {
+  display: grid;
+  gap: 2px;
+  padding: 0 16px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.seller-order__buyer strong {
+  color: var(--color-text);
+}
+.seller-order__delivery,
+.seller-order__error,
+.seller-order__evidence {
+  margin: 0 16px 8px;
+}
+.seller-order__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.seller-order__hint {
+  color: #15803d;
+  font-size: 13px;
+  font-weight: 600;
+}
+.order-list.is-loading {
+  opacity: 0.6;
+}
