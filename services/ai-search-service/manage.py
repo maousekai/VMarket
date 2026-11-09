@@ -6,10 +6,12 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 
 import httpx
 import pika
+from elasticsearch import NotFoundError
 from dotenv import dotenv_values
 
 from contract import IMAGE_PATH, INDEX_PREFIX, MAX_PAGE_SIZE, SEARCH_PATH, SNAPSHOTS_PATH
@@ -18,7 +20,9 @@ from event_consumer import connection_parameters, declare_topology, validate_eve
 from images import ImageEncoder, WEIGHTS_URL, decoded_image, s3_client
 from llm import Expander
 from schemas import MAX_FILE, Snapshot
-from search import SearchStore, image_threshold, index_definition
+from search import SearchStore, image_threshold, index_definition, text_threshold, TEXT_FIELDS
+from semantic import TextEmbeddings, fingerprint as text_fingerprint
+from text_maintenance import cache_weights, calibrate_text, probe as text_probe
 from settings import ROOT, Settings, endpoint
 
 
@@ -36,6 +40,31 @@ def topology(settings, require_stopped=False):
         declare_topology(channel, settings)
         if require_stopped and channel.queue_declare(queue=settings.queue, passive=True).method.consumer_count:
             raise ValueError("Stop Search workers before rebuilding")
+
+
+def sync_catalog(settings):
+    # Bind durable events before export so concurrent catalog changes are replayed by workers.
+    topology(settings)
+    store = SearchStore(settings)
+    try:
+        _, meta = store.meta()
+    except NotFoundError:
+        if store.client.indices.exists(index=settings.alias):
+            raise ValueError('Search alias is occupied; use explicit maintenance recovery') from None
+        encoder = ImageEncoder(settings)
+        encoder.load()
+        definition = index_definition(encoder.fingerprint, settings,
+            text_fingerprint(settings) if settings.text_enabled else None)
+        definition['aliases'] = {settings.alias: {'is_write_index': True}}
+        store.client.indices.create(index=INDEX_PREFIX + 'catalog-' + uuid.uuid4().hex, body=definition)
+        meta = definition['mappings']['_meta']
+    count = 0
+    for snapshot in snapshots(settings):
+        store.apply_snapshot(snapshot, int(time.time() * 1000), meta.get('encoderFingerprint'))
+        count += 1
+    store.client.indices.refresh(index=settings.alias)
+    store.client.close()
+    print(f'Synchronized {count} Product snapshots; existing index/calibration preserved')
 
 
 def weights(settings):
@@ -169,7 +198,8 @@ def reindex(settings, args):
         log_failure("previous_index_unavailable", error)
         if client.indices.exists(index=settings.alias):
             raise ValueError("Alias is not a valid managed Search index") from None
-    client.indices.create(index=args.target, body=index_definition(encoder.fingerprint, settings))
+    definition = index_definition(encoder.fingerprint, settings, text_fingerprint(settings) if settings.text_enabled else None)
+    client.indices.create(index=args.target, body=definition)
     revisions = {}
     for snapshot in snapshots(settings):
         if snapshot.id in revisions:
@@ -184,16 +214,42 @@ def reindex(settings, args):
     bad = client.count(index=args.target, query={"terms": {"imageState": ["failed", "pending"]}})["count"]
     if bad:
         raise ValueError("Candidate has failed/pending images")
-    # A second snapshot pass detects ordinary mutations; quiescence remains an operator prerequisite.
-    current = {s.id: s.productVersion for s in snapshots(settings)}
-    if current != revisions or client.count(index=args.target)["count"] != len(revisions):
-        raise ValueError("Catalog changed during maintenance or export count mismatch")
+    if settings.text_enabled:
+        text_encoder = TextEmbeddings(settings)
+        try:
+            deadline = time.monotonic() + max(30, len(revisions) * settings.text_catalog_timeout * 3)
+            while client.count(index=args.target, query={'term': {'textState': 'pending'}})['count']:
+                if time.monotonic() > deadline:
+                    raise ValueError('Text rebuild deadline exceeded; active alias preserved')
+                store.process_text_job(text_encoder)
+                client.indices.refresh(index=args.target)
+                time.sleep(0.1)
+            if client.count(index=args.target, query={'terms': {'textState': ['pending', 'failed']}})['count']:
+                raise ValueError('Candidate has failed/pending text vectors')
+        finally:
+            asyncio.run(text_encoder.close())
     if args.calibration:
         calibration = calibrate(store, encoder, json.loads(Path(args.calibration).read_text(encoding="utf-8")))
     else:
         calibration = (previous_meta or {}).get("calibration", {})
         image_threshold(previous_meta or {}, encoder.fingerprint)
-    meta = {"searchSchema": 1, "encoderFingerprint": encoder.fingerprint, "calibration": calibration}
+    meta = {**definition['mappings']['_meta'], 'calibration': calibration}
+    if settings.text_enabled:
+        manifest_path = getattr(args, 'text_calibration', None)
+        if manifest_path:
+            report = asyncio.run(calibrate_text(store, settings, json.loads(Path(manifest_path).read_text(encoding='utf-8'))))
+            write_json(ROOT / '.local/text-calibration-report.json', report)
+            if not report['validated']:
+                raise ValueError('Text quality gate failed; active alias preserved')
+            meta['textCalibration'] = report
+        else:
+            if text_threshold(previous_meta or {}, text_fingerprint(settings)) is None:
+                raise ValueError('Matching validated text calibration required; provide --text-calibration')
+            meta['textCalibration'] = previous_meta['textCalibration']
+    # Recheck after calibration; quiescence remains an operator prerequisite.
+    current = {s.id: s.productVersion for s in snapshots(settings)}
+    if current != revisions or client.count(index=args.target)["count"] != len(revisions):
+        raise ValueError("Catalog changed during maintenance or export count mismatch")
     client.indices.put_mapping(index=args.target, _meta=meta)
     actions = [{"remove": {"index": previous_name, "alias": settings.alias}}] if previous_name else []
     actions.append({"add": {"index": args.target, "alias": settings.alias, "is_write_index": True}})
@@ -263,6 +319,20 @@ def retry_images(settings, product_id):
     source.update(imageState="pending", imageAttempts=0, imageError=None, imageNextAttempt=0)
     if not store.save_job(hit, source):
         raise ValueError("Product changed; retry using its current state")
+
+
+def retry_text(settings, product_id):
+    store = SearchStore(settings)
+    name, meta = store.meta()
+    if meta.get('textFingerprint') != text_fingerprint(settings):
+        raise ValueError('Text model/index mismatch; rebuild required')
+    hit = store.client.get(index=name, id=product_id)
+    source = hit['_source']
+    if not source['catalogVisible'] or source['deleted'] or source.get('textState') != 'failed':
+        raise ValueError('Only a current visible failed text job can be reset')
+    source.update(textState='pending', textAttempts=0, textNextAttempt=0, textError=None)
+    if not store.save_job(hit, source, TEXT_FIELDS):
+        raise ValueError('Product changed; retry using current state')
 
 
 def replay_dead(settings, limit):
@@ -345,6 +415,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("weights")
+    commands.add_parser('sync-catalog')
+    commands.add_parser('text-weights')
+    commands.add_parser('text-probe')
+    quality = commands.add_parser('text-quality')
+    quality.add_argument('--input', required=True)
+    retry = commands.add_parser('retry-text')
+    retry.add_argument('--product-id', required=True)
     commands.add_parser("llm-probe")
     commands.add_parser("topology")
     replay = commands.add_parser("replay-dead")
@@ -352,6 +429,7 @@ def main():
     rebuild = commands.add_parser("reindex")
     rebuild.add_argument("--target", required=True)
     rebuild.add_argument("--calibration")
+    rebuild.add_argument('--text-calibration')
     rebuild.add_argument("--maintenance", action="store_true")
     fixtures = commands.add_parser("seed")
     fixtures.add_argument("--input", default=".local/fixtures-input.json")
@@ -364,6 +442,20 @@ def main():
     settings = Settings.load()
     if args.command == "weights":
         weights(settings)
+    elif args.command == 'sync-catalog':
+        sync_catalog(settings)
+    elif args.command == 'text-weights':
+        cache_weights(settings)
+    elif args.command == 'text-probe':
+        asyncio.run(text_probe(settings))
+    elif args.command == 'text-quality':
+        report = asyncio.run(calibrate_text(SearchStore(settings), settings, json.loads(Path(args.input).read_text(encoding='utf-8'))))
+        write_json(ROOT / '.local/text-calibration-report.json', report)
+        if not report['validated']:
+            raise ValueError('Text quality gate failed')
+        print('Text quality gates passed; report written without changing active index metadata')
+    elif args.command == 'retry-text':
+        retry_text(settings, args.product_id)
     elif args.command == "llm-probe":
         asyncio.run(llm_probe(settings))
     elif args.command == "topology":

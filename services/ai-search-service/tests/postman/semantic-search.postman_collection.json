@@ -1,0 +1,20 @@
+{
+  "info": {"name": "AI Search FR-SRCH-06", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+  "variable": [{"key":"baseUrl","value":"http://localhost:18080"}],
+  "item": [
+    {"name":"Guest health", "request":{"method":"GET","url":"{{baseUrl}}/api/ai/search/health"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Search responds', () => pm.response.to.have.status(200));", "pm.test('Semantic readiness is reported', () => pm.expect(pm.response.json()).to.have.property('semantic'));"],"type":"text/javascript"}}]},
+    {"name":"Guest hybrid search", "request":{"method":"GET","url":"{{baseUrl}}/api/ai/search?keyword=ch%E1%BB%91ng%20r%C3%A9t"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Guest search succeeds', () => pm.response.to.have.status(200));", "pm.test('Semantic fixture union is present', () => { const b=pm.response.json(); pm.expect(b.totalElements).to.eql(10); pm.expect(b.results.map(p=>p.id)).to.include('warmth'); });", "pm.test('Pagination is consistent and products unique', () => { const b=pm.response.json(); pm.expect(b.totalPages).to.eql(Math.ceil(b.totalElements/b.size)); pm.expect(new Set(b.results.map(p=>p.id)).size).to.eql(b.results.length); });"],"type":"text/javascript"}}]},
+    {"name":"Actual variant price gap", "request":{"method":"GET","url":"{{baseUrl}}/api/ai/search?keyword=ch%E1%BB%91ng%20r%C3%A9t&minPrice=200&maxPrice=900"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Gap excludes test variants at 100 and 1000', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().totalElements).to.eql(0); });"],"type":"text/javascript"}}]},
+    {"name":"Paged price sort", "request":{"method":"GET","url":"{{baseUrl}}/api/ai/search?keyword=ch%E1%BB%91ng%20r%C3%A9t&sort=PRICE_ASC&size=1&page=1"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Requested sort and page accepted', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().page).to.eql(1); pm.expect(pm.response.json().results.length).to.be.at.most(1); });"],"type":"text/javascript"}}]},
+    {"name":"Invalid price range", "request":{"method":"GET","url":"{{baseUrl}}/api/ai/search?keyword=ao&minPrice=2&maxPrice=1"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Shared validation envelope', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error.code).to.eql('INVALID_QUERY'); });"],"type":"text/javascript"}}]},
+    {"name":"Private snapshots blocked", "request":{"method":"GET","url":"{{baseUrl}}/api/products/internal/search-snapshots/warmth"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Internal snapshot is not public', () => pm.expect([401,403,404]).to.include(pm.response.code));"],"type":"text/javascript"}}]},
+    {"name":"Private embeddings blocked", "request":{"method":"POST","url":"{{baseUrl}}/v1/embeddings"},
+     "event":[{"listen":"test","script":{"exec":["pm.test('Companion has no public route', () => pm.expect([401,403,404]).to.include(pm.response.code));"],"type":"text/javascript"}}]}
+  ]
+}

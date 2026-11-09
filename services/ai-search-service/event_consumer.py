@@ -66,6 +66,8 @@ class Workers:
         self.stop = threading.Event()
         self.synchronized = False
         self.metadata_lag_ms = self.image_lag_ms = None
+        self.text_lag_ms = None
+        self.text_embeddings = None
         self.dead_letters = 0
         self.quarantined = 0
         self.metadata_backlog = None
@@ -196,10 +198,32 @@ class Workers:
                 self.stop.wait(2)
 
     def start(self):
-        for function in (self.consume, self.images):
+        functions = [self.consume, self.images]
+        if self.text_embeddings:
+            functions.append(self.texts)
+        for function in functions:
             thread = threading.Thread(target=function, daemon=True, name=function.__name__)
             thread.start()
             self.threads.append(thread)
+
+    def texts(self):
+        while not self.stop.is_set():
+            try:
+                self.store.process_text_job(self.text_embeddings)
+                name, meta = self.store.meta()
+                if meta.get('searchSchema') != 2:
+                    self.text_lag_ms = None
+                else:
+                    result = self.store.client.search(index=name, body={'size': 0,
+                        'query': {'terms': {'textState': ['pending', 'failed']}},
+                        'aggs': {'oldest': {'min': {'field': 'eventAt'}}}})
+                    oldest = result['aggregations']['oldest']['value']
+                    self.text_lag_ms = max(0, int(time.time() * 1000 - oldest)) if oldest is not None else 0
+                self.stop.wait(0.1)
+            except Exception as error:
+                self.text_lag_ms = None
+                log_failure('text_worker_unavailable', error)
+                self.stop.wait(2)
 
     def close(self):
         self.stop.set()

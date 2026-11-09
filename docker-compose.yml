@@ -1,8 +1,8 @@
 # ============================================================
 # VMarket - Docker Compose (HA TANG CHUNG + API GATEWAY + FRONTEND)
 # ============================================================
-# - Ha tang: PostgreSQL, MongoDB, Redis, RabbitMQ (+ Elasticsearch
-#   profile "search").
+# - Ha tang: PostgreSQL, MongoDB, Redis, RabbitMQ, Elasticsearch.
+# - AI Search (8100) va text encoder noi bo chay trong cung Compose.
 # - 2 lop "mat" de FE ket noi duoc BE ngay khi `docker compose up -d`:
 #     + api-gateway (localhost:8080): browser goi vao day. Gateway trong
 #       container tro cac URL service den host.docker.internal (cac
@@ -29,8 +29,8 @@
 #
 # TỐI ƯU TÀI NGUYÊN:
 # - Ha tang nhe mac dinh ~1.75GB RAM (da gom MinIO cho anh dai dien / gian hang).
-#   Elasticsearch nang (~1GB) dat profile "search" - chi bat khi lam AI Search:
-#     docker compose --profile search up -d
+#   Chi bat cac service can dung, vi du Search va cac phu thuoc:
+#     docker compose up -d ai-search-service api-gateway
 # - Logging tap trung + monitoring (Loki, Promtail, Prometheus, Grafana ~0.9GB)
 #   dat profile "monitoring" (PBL6-40) - bat khi can xem log/dashboard:
 #     docker compose --profile monitoring up -d
@@ -98,9 +98,15 @@ x-service-urls: &service-urls
   DELIVERY_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8088
   REVIEW_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8089
   NOTIFICATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8090
-  AI_SEARCH_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8100
+  AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
   RECOMMENDATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8101
   CHATBOT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8102
+
+x-search-image: &search-image
+  image: ${COMPOSE_PROJECT_NAME:-vmarket}-ai-search-service
+  build:
+    context: .
+    dockerfile: services/ai-search-service/Dockerfile
 
 services:
   # PostgreSQL - CSDL quan he cho: auth, user, shop, order, payment, delivery, review
@@ -204,16 +210,17 @@ services:
       timeout: 10s
       retries: 10
 
-  # Elasticsearch - CHI cho AI Search (nang ~1GB). Bat khi can:
-  #   docker compose --profile search up -d
+  # Elasticsearch belongs to the main Search stack; persistent data stays in its existing volume.
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
     container_name: VMarket-elasticsearch
-    profiles: ["search"]
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      node.processors: "1"
+      xpack.ml.enabled: "false"
+      ingest.geoip.downloader.enabled: "false"
+      ES_JAVA_OPTS: "-Xms384m -Xmx384m"
     ports:
       - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
     volumes:
@@ -221,15 +228,130 @@ services:
     networks:
       - vmarket-network
     mem_limit: 1g
+    memswap_limit: 1g
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS --max-time 5 http://localhost:9200/_cluster/health >/dev/null || exit 1"]
       interval: 20s
       timeout: 10s
       retries: 12
 
+  ai-search-service:
+    <<: *search-image
+    container_name: VMarket-ai-search-service
+    networks: [vmarket-network]
+    mem_limit: 512m
+    memswap_limit: 512m
+    read_only: true
+    tmpfs:
+      - /app/tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./services/ai-search-service/models:/app/models:ro
+    env_file:
+      - path: ./services/ai-search-service/.env
+        required: false
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      EMBEDDING_WEIGHTS_PATH: /app/models/mobilenet_v3_small.pth
+      TEXT_EMBEDDING_URL: ${TEXT_EMBEDDING_URL:-http://ai-search-text:8103/v1}
+      TEXT_EMBEDDING_PROVIDER: ${TEXT_EMBEDDING_PROVIDER:-native}
+    ports: ['127.0.0.1:${AI_SEARCH_SERVICE_PORT:-8100}:8100']
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      ai-search-text:
+        condition: service_started
+      ai-search-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8100/api/ai/search/health', timeout=4)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # One-shot safe catch-up from Product's authenticated snapshots; never invents calibration.
+  ai-search-init:
+    <<: *search-image
+    container_name: VMarket-ai-search-init
+    networks: [vmarket-network]
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /app/tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./services/ai-search-service/models:/app/models:ro
+    env_file:
+      - path: ./services/ai-search-service/.env
+        required: false
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      EMBEDDING_WEIGHTS_PATH: /app/models/mobilenet_v3_small.pth
+      TEXT_EMBEDDING_PROVIDER: ${TEXT_EMBEDDING_PROVIDER:-native}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    command: ['python', 'manage.py', 'sync-catalog']
+
+  # Private FR-SRCH-06 component of AI Search; same image, no published port.
+  ai-search-text:
+    <<: *search-image
+    container_name: VMarket-ai-search-text
+    networks: [vmarket-network]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    read_only: true
+    tmpfs:
+      - /app/tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./services/ai-search-service/models:/app/models:ro
+    env_file:
+      - path: ./services/ai-search-service/.env
+        required: false
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      TEXT_EMBEDDING_PROVIDER: native
+      TEXT_EMBEDDING_PATH: /app/models/multilingual-e5-small
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    command: ['uvicorn', 'text_encoder:app', '--host', '0.0.0.0', '--port', '8103', '--workers', '1', '--no-access-log']
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import os, urllib.request; r=urllib.request.Request('http://localhost:8103/internal/health', headers={'X-Internal-Api-Key':os.environ['INTERNAL_API_KEY']}); urllib.request.urlopen(r, timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # MinIO-compatible media storage (avatar, logo, cover, product images).
   # Chay MAC DINH cung ha tang: user-service / shop-service can no de upload anh.
-  # Khong bat buoc voi AI Search (Elasticsearch van nam trong profile "search").
+  # AI Search uses a separate read-only credential from its private service .env.
   minio:
     # Maintained MinIO fork; original 2025 community image failed the security scan.
     image: ${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac}
@@ -562,6 +684,7 @@ services:
       PRODUCT_SERVICE_URL: http://product-service:8084
       ORDER_SERVICE_URL: http://order-service:8086
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
+      AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}

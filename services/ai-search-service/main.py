@@ -15,7 +15,8 @@ from diagnostics import log_failure
 from images import ImageEncoder
 from llm import Expander
 from schemas import MAX_BODY, MAX_FILE, SearchError, error_response, image_too_large, parse_query
-from search import SearchStore, image_threshold
+from search import SearchStore, image_threshold, text_threshold
+from semantic import TextEmbeddings
 from settings import ROOT, Settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -24,12 +25,15 @@ logging.getLogger("elastic_transport.transport").setLevel(logging.WARNING)
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 
-def create_app(settings=None, store=None, encoder=None, expander=None, run_workers=True):
+def create_app(settings=None, store=None, encoder=None, expander=None, run_workers=True, text_embeddings=None):
     settings = settings or Settings.load()
     store = store or SearchStore(settings)
     encoder = encoder or ImageEncoder(settings)
     expander = expander or Expander(settings)
+    text_embeddings = text_embeddings or TextEmbeddings(settings)
     workers = Workers(store, encoder) if run_workers else None
+    if workers:
+        workers.text_embeddings = text_embeddings
 
     @asynccontextmanager
     async def lifespan(app):
@@ -47,10 +51,12 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
         if workers:
             await asyncio.to_thread(workers.close)
         await expander.client.aclose()
+        await text_embeddings.close()
         store.client.close()
 
     app = FastAPI(title="VMarket AI Search", version="1.0.0", lifespan=lifespan)
     app.state.store, app.state.encoder, app.state.expander = store, encoder, expander
+    app.state.text_embeddings = text_embeddings
     app.state.image_busy = False
     app.add_middleware(CORSMiddleware, allow_origins=[s.strip() for s in settings.cors.split(",") if s.strip()],
                        allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
@@ -71,8 +77,18 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
     @app.get(SEARCH_PATH)
     async def keyword_search(request: Request):
         params = parse_query(request.query_params, "keyword")
-        terms = await expander.expand_query(params["keyword"])
-        return await dependency_call(store.keyword, params, terms)
+        try:
+            async with asyncio.timeout(0.5):
+                terms, vector = await asyncio.gather(expander.expand_query(params['keyword']), text_embeddings.query(params['keyword']))
+        except TimeoutError:
+            terms, vector = [], None
+        try:
+            async with asyncio.timeout(0.4):
+                if vector is None:
+                    return await dependency_call(store.keyword, params, terms)
+                return await dependency_call(store.keyword, params, terms, vector, text_embeddings.fingerprint)
+        except TimeoutError:
+            raise SearchError(503, 'SEARCH_UNAVAILABLE', 'Search deadline exceeded') from None
 
     @app.get(SUGGESTIONS_PATH)
     async def suggestions(request: Request):
@@ -114,15 +130,19 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
     @app.get(HEALTH_PATH)
     async def health():
         text = image = "unavailable"
+        semantic = 'unavailable'
         try:
             _, meta = await asyncio.to_thread(store.meta)
             text = "ready"
+            if text_threshold(meta, text_embeddings.fingerprint) is not None and settings.text_configured:
+                if await text_embeddings.probe():
+                    semantic = 'ready' if not workers or workers.text_lag_ms == 0 else 'degraded'
             if encoder.ready:
                 image_threshold(meta, encoder.fingerprint)
                 image = "ready"
         except Exception as error:
             log_failure("search_health_degraded", error)
-        return {"status": "UP", "text": text, "image": image,
+        return {"status": "UP", "text": text, "image": image, 'semantic': semantic,
                 "synchronization": "ready" if workers and workers.synchronization_ready else "degraded",
                 "llm": "configured" if settings.llm_configured else "degraded"}
 

@@ -1,16 +1,127 @@
 # AI Search — PBL6-21
 
-FR-SRCH-01–05: Vietnamese keyword/synonym/fuzzy search, product-name suggestions,
-versioned event synchronization, and CNN image search. Default embedding is CPU
-PyTorch MobileNetV3 Small; the optional query-expansion LLM uses an operator-selected
+FR-SRCH-01–06: Vietnamese keyword/synonym/fuzzy search, product-name suggestions,
+versioned event synchronization, CNN image search, and automatic hybrid semantic search.
+CPU PyTorch MobileNetV3 Small encodes images; multilingual-e5-small encodes text in a
+private companion process belonging to this same AI Search service. The optional query-expansion LLM uses an operator-selected
 cloud provider. Elasticsearch 8.19, RabbitMQ, Product Catalog and MinIO-compatible
-media storage are dependencies. No recommendation service is required. FR-SRCH-06,
-text-vector search and a Search frontend are outside this implementation.
+media storage are dependencies. No recommendation service is required. A Search
+frontend remains outside this implementation.
 
-Only `mobilenet_v3_small` is implemented for embeddings (576 dimensions, L2 normalized).
+Image embeddings use `mobilenet_v3_small` (576 dimensions, L2 normalized).
+Text embeddings default to pinned `intfloat/multilingual-e5-small` (384 dimensions,
+256 tokens, masked mean pooling and L2 normalization).
 LLM providers use OpenAI-compatible Chat Completions; native/container Ollama is optional
 for the LLM only. No cloud endpoint/model/key is supplied by default. Keyword search
 works without an LLM; image search requires cached verified weights and calibration.
+
+## FR-SRCH-06 deployment and maintenance
+
+Semantic search uses the existing `GET /api/ai/search`, including guest access,
+filters, sorts, exact totals and pagination. Compatible calibrated vectors add
+semantic matches to lexical matches. Unavailable embeddings or calibration preserve
+lexical search; incomplete/timed-out Elasticsearch searches return 503, never partial counts.
+The private `/v1/embeddings` endpoint requires `X-Internal-Api-Key` and has no gateway route.
+
+Cache text weights once before starting the native companion. From the repository root
+in PowerShell, after configuring the service `.env`:
+
+```powershell
+docker compose build ai-search-service
+docker compose run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py weights
+docker compose run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py text-weights
+# Main Compose starts only Search and its real dependencies; no overlay/profile required.
+docker compose up -d ai-search-service api-gateway
+docker compose exec ai-search-service python manage.py text-probe
+```
+
+The main Compose file keeps Search at 512 MiB, native text at 1 GiB/one CPU/no swap,
+and runtime models read-only. `ai-search-text` is a private component of this service;
+it publishes no port. The gateway uses `http://ai-search-service:8100`.
+The one-shot `ai-search-init` binds durable Product events before exporting the real
+catalog through authenticated snapshots. On an empty ES volume it atomically creates
+a managed index/alias without inventing image or semantic calibration. On later runs,
+it preserves the existing schema/calibration and applies only newer Product revisions.
+The API starts after this catch-up completes; live Product outbox events keep it current.
+`docker compose exec ai-search-service python manage.py sync-catalog` safely repeats catch-up.
+Do not start the entire stack just to test this requirement. The older focused semantic smoke
+needs ES, RabbitMQ, the private companion, Search and gateway; its authenticated
+Product HTTP stub and empty catalog images avoid Mongo/Postgres/MinIO entirely.
+For the real main-stack workflow, use the existing Compose containers and a reversible
+one-unit Product reservation/release (PowerShell from the repository root):
+
+```powershell
+Get-Content -Raw services/ai-search-service/tests/system/test_main_compose.py | docker compose exec -T -e SEARCH_MAIN_COMPOSE_MUTATION=true ai-search-service python -
+```
+
+This checks Product → Mongo transactional outbox → RabbitMQ → Search → Elasticsearch
+→ guest gateway search, verifies native embeddings and blocked internal routes, then
+restores the reserved stock in `finally`. A released reservation remains as an audit record;
+no order, account or shop is created. It also checks that the configured MinIO reader
+cannot list bucket contents. Configure a separate `s3:GetObject`-only media account in
+the private service `.env`, following the MinIO setup below; no root/admin key is passed
+to Search. Models must be cached before startup; missing/invalid calibration keeps
+image/semantic readiness unavailable while keyword search works.
+Search uses one native slot, at most eight waiting queries and one catalog request,
+alternating admissions while both have work. Query queueing/transport must fit 300 ms.
+Startup verifies local model files and warms inference before readiness. No runtime downloads occur.
+
+Existing strict legacy indexes continue keyword/image operations and event ACKs
+without receiving text fields. To enable semantics, stop Search and pause all catalog
+writers, then run the existing maintenance rebuild with both image and text calibration:
+
+```powershell
+# From services/ai-search-service with dependencies and companion reachable:
+.\.venv\Scripts\python.exe manage.py reindex --maintenance --target vmarket-products-v1-semantic-001 --calibration .local/search-fixtures.json --text-calibration tests/fixtures/semantic-quality.json
+.\.venv\Scripts\python.exe manage.py text-quality --input tests/fixtures/semantic-quality.json
+.\.venv\Scripts\python.exe manage.py retry-text --product-id PRODUCT_ID
+```
+
+The supplied semantic manifest contains small demo products and disjoint Vietnamese
+calibration/held-out queries; seed equivalent products through authorized Product APIs
+and map its IDs to your catalog before a real rebuild. The system harness owns only
+disposable fixtures. Quality reports are diagnostic: a failed gate exits nonzero, and
+rebuild preserves the active alias. Validated text calibration is reused only with the
+same fingerprint. Backend, revision, dimensions or preprocessing changes require rebuild.
+Rebuild verifies vectors, preserves image calibration and checks catalog revisions again
+before alias switching. Catalog overload leaves durable text intent pending without
+exhausting retries; processing failures have three persisted attempts and manual recovery.
+
+Use `TEXT_EMBEDDING_*` settings from the env examples independently of `EMBEDDING_*`
+(images) and `LLM_*` (expansion). Cloud embeddings require an HTTPS `/v1` base URL,
+model, revision, dimension, API key and `ALLOW_EXTERNAL_EMBEDDING_TEXT=true`; this
+explicitly permits query and product text transmission. Ollama uses its private
+OpenAI-compatible `/v1/embeddings` URL and an operator-pinned model revision. Neither
+provider starts or receives traffic automatically when native inference fails.
+For cloud/Ollama, start the dependencies first and use `docker compose up -d --no-deps
+ai-search-service` to omit the native companion. Model/provider changes require matching calibration and rebuild.
+
+Health adds `semantic=ready|degraded|unavailable`. Outstanding/failed text jobs and recent
+provider failures degrade readiness; ready documents remain searchable while others
+are pending. Legacy schema, missing calibration or incompatible/unavailable model
+leaves semantics unavailable. HTTP 200 health continues to mean the process responds.
+
+Offline and real ES checks run through the existing unit/integration discovery commands.
+The focused system test is `tests/system/test_semantic_pipeline.py`; it requires explicit
+`SEARCH_SYSTEM_URL`, optional `SEARCH_GATEWAY_URL`, a `fr-srch06-test-` index alias/queue,
+private encoder and real ES/Rabbit settings, and reachability from Search to the runner's
+authenticated snapshot stub on port 8084. It never starts Docker or downloads models.
+`SEARCH_SEMANTIC_LOAD_SECONDS=5` enables two short 200-user probes with one-second think
+time and catalog text mutations every two seconds; these diagnose capacity, not full-stack
+qualification. Results go to `.local/text-system-quality.json` and `.local/text-system-load.json`.
+Service completion logs record semantic use and search duration without query/product text.
+The reusable gateway collection is `tests/postman/semantic-search.postman_collection.json`:
+
+```powershell
+postman collection run tests/postman/semantic-search.postman_collection.json --reporters cli --no-report-events
+```
+
+That collection's price-gap assertion expects the isolated fixtures at VND 100/1000.
+Run it against the system harness fixtures while `SEARCH_POSTMAN_HANDOFF=true`; remove
+`.local/postman-ready` after the CLI finishes so the harness can complete cleanup.
+Real-model quality, semantic execution >=95%, <=1-second searches, <=60-second vector
+synchronization, native peak <=80% of 1 GiB, and the full-project <7 GB ceiling remain
+deployment gates. See current evidence and failures in `VERIFICATION.md`.
 
 Contracts: [public search](../../docs/openapi/ai-search-service.yaml),
 [Product snapshots](../../docs/openapi/product-search-internal.yaml).
@@ -59,7 +170,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests/unit -v
 # Switch to repo root; named services start only the required infrastructure:
 Push-Location ../..
-docker compose --profile search up -d elasticsearch minio rabbitmq
+docker compose up -d elasticsearch minio rabbitmq
 Pop-Location
 .\.venv\Scripts\python.exe -m unittest discover -s tests/integration -v
 .\.venv\Scripts\python.exe -m pip install -r requirements-local.txt

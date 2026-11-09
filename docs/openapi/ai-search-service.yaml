@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: VMarket AI Search (FR-SRCH-01–05)
+  title: VMarket AI Search (FR-SRCH-01–06)
   version: 1.0.0
 servers:
   - url: http://localhost:8080
@@ -21,6 +21,10 @@ paths:
         Prices are integer VND; minPrice <= maxPrice. Filters match an actual active variant.
         Category includes descendants. Price sorting uses minimum active variant price in both directions.
         Sort ties use product ID ascending. Optional bounded LLM expansion falls back to lexical search.
+        Automatically combines lexical and calibrated semantic matches when compatible text vectors
+        and query embeddings are available. Provider/compatibility failures preserve lexical search.
+        Semantic admission respects the same filters and all sorts; totals remain exact.
+        Timed-out or incomplete Elasticsearch responses return 503 without partial results.
       responses:
         '200':
           description: Visible products; empty results on no match
@@ -125,11 +129,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status, text, image, synchronization, llm]
+                required: [status, text, image, semantic, synchronization, llm]
                 properties:
                   status: {type: string, enum: [UP]}
                   text: {type: string, enum: [ready, unavailable]}
                   image: {type: string, enum: [ready, unavailable]}
+                  semantic:
+                    type: string
+                    enum: [ready, degraded, unavailable]
+                    description: Requires matching text schema/model/calibration and encoder availability. Outstanding or failed text jobs and recent embedding failures degrade readiness; legacy indexes remain unavailable for semantic search.
                   synchronization:
                     type: string
                     enum: [ready, degraded]

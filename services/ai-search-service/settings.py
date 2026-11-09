@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -62,6 +63,18 @@ class Settings:
     embedding_model: str = env_field("EMBEDDING_MODEL", "mobilenet_v3_small")
     weights: str = env_field("EMBEDDING_WEIGHTS_PATH", str(ROOT / "models/mobilenet_v3_small.pth"))
     weights_sha256: str = env_field("EMBEDDING_WEIGHTS_SHA256", "")
+    text_enabled: bool = env_field("TEXT_EMBEDDING_ENABLED", True, boolean)
+    text_provider: str = env_field("TEXT_EMBEDDING_PROVIDER", "native")
+    text_url: str = env_field("TEXT_EMBEDDING_URL", "http://127.0.0.1:8103/v1")
+    text_model: str = env_field("TEXT_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+    text_revision: str = env_field("TEXT_EMBEDDING_REVISION", "614241f622f53c4eeff9890bdc4f31cfecc418b3")
+    text_dims: int = env_field("TEXT_EMBEDDING_DIMS", 384, int)
+    text_tokens: int = env_field("TEXT_EMBEDDING_MAX_TOKENS", 256, int)
+    text_path: str = env_field("TEXT_EMBEDDING_PATH", str(ROOT / "models/multilingual-e5-small"))
+    text_key: str = env_field("TEXT_EMBEDDING_API_KEY", "")
+    external_embeddings: bool = env_field("ALLOW_EXTERNAL_EMBEDDING_TEXT", False, boolean)
+    text_query_ms: int = env_field("TEXT_QUERY_TIMEOUT_MS", 300, int)
+    text_catalog_timeout: float = env_field("TEXT_CATALOG_TIMEOUT_SECONDS", 5.0, float)
     llm_enabled: bool = env_field("LLM_ENABLED", True, boolean)
     llm_provider: str = env_field("LLM_PROVIDER", "openai_compatible")
     llm_url: str = env_field("LLM_BASE_URL", "")
@@ -100,6 +113,15 @@ class Settings:
         return cls(**options)
 
     def __post_init__(self):
+        if self.text_provider not in {"native", "cloud", "ollama"}:
+            raise ValueError("Unsupported TEXT_EMBEDDING_PROVIDER")
+        endpoint(self.text_url, https=self.text_provider == "cloud")
+        if (not self.text_model or not self.text_revision or not 1 <= self.text_dims <= 4096
+                or not 1 <= self.text_tokens <= 256 or not 1 <= self.text_query_ms <= 300
+                or not math.isfinite(self.text_catalog_timeout) or not 0 < self.text_catalog_timeout <= 30):
+            raise ValueError("Invalid text embedding configuration")
+        if self.text_provider == "native" and not re.fullmatch(r"[a-f0-9]{40}", self.text_revision):
+            raise ValueError("Native text revision must be a pinned commit")
         for value in (self.es_url, self.product_url, self.minio_endpoint, self.minio_origin):
             endpoint(value)
         if self.llm_url:
@@ -131,3 +153,7 @@ class Settings:
     def llm_configured(self):
         return self.llm_enabled and bool(self.llm_url and self.llm_model) and (
             self.llm_provider == "ollama" or bool(self.llm_key and self.external_text))
+
+    @property
+    def text_configured(self):
+        return self.text_enabled and (self.text_provider != "cloud" or bool(self.external_embeddings and self.text_key))
