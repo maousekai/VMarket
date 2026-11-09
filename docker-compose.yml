@@ -426,7 +426,7 @@ services:
       start_period: 40s
 
   # Order Service (PBL6-27) - don hang, van chuyen, thong ke gian hang.
-  # Phat/nghe event qua RabbitMQ; goi cart-service (chua container hoa) qua may host.
+  # Phat/nghe event qua RabbitMQ; doc/xoa gio qua cart-service trong network.
   order-service:
     build:
       context: .
@@ -445,7 +445,9 @@ services:
       # cung dung khoa nay de tin header X-User-Id khi order-service doc/xoa gio.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       USER_SERVICE_URL: http://user-service:8082
-      CART_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8085
+      CART_SERVICE_URL: http://cart-service:8085
+      # Lay shopId cua seller (GET /api/shops/me) cho API /api/orders/seller/**.
+      SHOP_SERVICE_URL: http://shop-service:8083
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${ORDER_SERVICE_PORT:-8086}:8086"
@@ -493,6 +495,112 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8084/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Cart Service (PBL6-16) - gio hang Redis, kiem tra gia/ton kho truoc thanh toan.
+  # order-service doc/xoa gio bang INTERNAL_API_KEY + X-User-Id (cung khoa voi order).
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    container_name: VMarket-cart-service
+    networks:
+      - vmarket-network
+    mem_limit: 384m
+    environment:
+      <<: *common-environment
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      # PHAI TRUNG AUTH_JWT_SECRET cua auth-service de verify access token.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # Kiem tra gia/ton kho hien tai khi buyer bam thanh toan (FR-CART-03).
+      PRODUCT_SERVICE_URL: http://product-service:8084
+    ports:
+      # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
+      - "${CART_SERVICE_PORT:-8085}:8085"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8085/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Payment Service (PBL6-19) - COD va PayOS. PayOS TAT mac dinh (PAYOS_ENABLED=false):
+  # COD van chay day du; muon thu QR thi dien PAYOS_* trong .env.
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    container_name: VMarket-payment-service
+    networks:
+      - vmarket-network
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_payment
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      ORDER_SERVICE_URL: http://order-service:8086
+      PAYOS_ENABLED: ${PAYOS_ENABLED:-false}
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:5173/payment/return}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:5173/payment/cancel}
+    ports:
+      - "${PAYMENT_SERVICE_PORT:-8087}:8087"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8087/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Delivery Service (PBL6-20) - seller ban giao, admin phan cong shipper, cap nhat
+  # trang thai giao -> order-service nghe DeliveryStatusChanged qua RabbitMQ.
+  delivery-service:
+    build:
+      context: .
+      dockerfile: services/delivery-service/Dockerfile
+    container_name: VMarket-delivery-service
+    networks:
+      - vmarket-network
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_delivery
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      ORDER_SERVICE_URL: http://order-service:8086
+      SHOP_SERVICE_URL: http://shop-service:8083
+      # Browser mo WebSocket qua gateway (cung origin voi API).
+      DELIVERY_WS_URL: ${DELIVERY_WS_URL:-ws://localhost:8080/api/delivery/ws}
+    ports:
+      - "${DELIVERY_SERVICE_PORT:-8088}:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8088/actuator/health >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -560,7 +668,10 @@ services:
       USER_SERVICE_URL: http://user-service:8082
       SHOP_SERVICE_URL: http://shop-service:8083
       PRODUCT_SERVICE_URL: http://product-service:8084
+      CART_SERVICE_URL: http://cart-service:8085
       ORDER_SERVICE_URL: http://order-service:8086
+      PAYMENT_SERVICE_URL: http://payment-service:8087
+      DELIVERY_SERVICE_URL: http://delivery-service:8088
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
