@@ -5,6 +5,7 @@ import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
 import HomePage from './pages/HomePage'
 import SearchPage from './pages/SearchPage'
+import ProductDetailPage from './pages/ProductDetailPage'
 import AboutPage from './pages/AboutPage'
 import NotFoundPage from './pages/NotFoundPage'
 import LoginPage from './pages/LoginPage'
@@ -71,6 +72,7 @@ export default function App() {
         <Route element={<ApplicationLayout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/products/:productId" element={<ProductDetailPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route element={<RouteGuard />}>
             <Route path="/profile" element={<ProfilePage />} />

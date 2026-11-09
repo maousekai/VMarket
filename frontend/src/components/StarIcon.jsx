@@ -1,7 +1,7 @@
-export default function StarIcon({ size = 12 }) {
+export default function StarIcon({ size = 12, className = '' }) {
   return (
     <svg
-      className="star-icon"
+      className={`star-icon${className ? ` ${className}` : ''}`}
       width={size}
       height={size}
       viewBox="0 0 12 12"
