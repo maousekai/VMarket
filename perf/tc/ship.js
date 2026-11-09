@@ -12,7 +12,7 @@ import { WebSocket } from 'k6/websockets';
 import { setTimeout } from 'k6/timers';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { BASE_URL, NFR, SUMMARY_TREND_STATS, THRESHOLD_KINDS, blocked, guardWritableTarget, intEnv, requireEnv } from '../lib/config.js';
-import { DELIVERIES } from '../lib/manifest.js';
+import { DELIVERIES, MANIFEST_INFO } from '../lib/manifest.js';
 import { buyerEmail, login } from '../lib/session.js';
 import { requireServices } from '../lib/probe.js';
 import { writeSummary } from '../lib/summary.js';
@@ -45,7 +45,7 @@ export const options = {
 };
 
 export function setup() {
-  if (COUNT < 1) blocked('fixture missing: deliveries in transit (manifest.deliveries); run prepare.mjs --only=deliveries');
+  if (COUNT < 1) blocked(MANIFEST_INFO.ordersUnavailable ? `no delivery can be created because placing an order fails: ${MANIFEST_INFO.ordersUnavailable}` : 'fixture missing: deliveries in transit (manifest.deliveries); run prepare.mjs --only=deliveries');
   const pw = requireEnv('PERF_PASSWORD');
   const out = [];
   for (const d of DELIVERIES.slice(0, COUNT)) {

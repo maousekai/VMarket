@@ -114,7 +114,7 @@ export function readOnce(prepared) {
     case 'orders': {
       const { data } = get('/api/orders', { endpoint: 'GET /api/orders', token: auth() });
       const expected = (ORDER_HISTORY[buyer] || {}).orderIds || [];
-      check(data, { 'order history contains this buyer\'s fixture orders': (d) => Array.isArray(d) && expected.every((id) => d.some((o) => o.id === id)) });
+      check(data, { "order history is a list containing this buyer's fixture orders": (d) => Array.isArray(d) && expected.every((id) => d.some((o) => o.id === id)) });
       break;
     }
     case 'orderDetail': {

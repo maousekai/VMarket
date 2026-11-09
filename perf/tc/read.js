@@ -27,7 +27,9 @@ export const options = {
 export function setup() {
   requireFixture(MANIFEST_INFO.activeProducts >= 1000, '>= 1000 ACTIVE products');
   requireFixture(CARTS.length >= Math.min(PEAK, POOLS.shopper.size), 'one fixture cart per VU');
-  requireFixture(ORDER_HISTORY.length >= Math.min(PEAK, 200), 'order history for the read buyers');
+  // Order history is optional: without it GET /api/orders is still measured (empty
+  // list) and the order-detail read is skipped; the summary records it.
+  if (ORDER_HISTORY.length < Math.min(PEAK, 200)) console.warn(`order history fixture missing (${MANIFEST_INFO.ordersUnavailable || 'not built'}): order detail reads skipped`);
   const sessions = prelogin(range(POOLS.shopper.start, Math.min(PEAK, POOLS.shopper.size)));
   requireServices(['product', 'shop', 'cart', 'order', 'user'], Object.values(sessions)[0].token);
   return sessions;

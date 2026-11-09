@@ -155,13 +155,15 @@ const buyerUsername = (i) => `${PREFIX}.${String(i).padStart(4, '0')}`;
 const buyerEmail = (i) => `${buyerUsername(i)}@${DOMAIN}`;
 const shipperEmail = (i) => `perf.shipper.${String(i).padStart(3, '0')}@${DOMAIN}`;
 
+// Products created in the same instant share createdAt, so the default NEWEST order is
+// not stable across pages: an item can appear on two pages. De-duplicate by id.
 async function allPages(path) {
-  const items = [];
+  const items = new Map();
   for (let page = 0; ; page++) {
     const sep = path.includes('?') ? '&' : '?';
     const data = await api('GET', `${path}${sep}page=${page}&size=100`);
-    items.push(...data.content);
-    if (page + 1 >= data.totalPages || data.content.length === 0) return items;
+    for (const item of data.content) items.set(item.id, item);
+    if (page + 1 >= data.totalPages || data.content.length === 0) return [...items.values()];
   }
 }
 
@@ -633,9 +635,22 @@ async function main() {
     m.buyersDetail = buyers;
     m.buyers = { prefix: PREFIX, domain: DOMAIN, count: buyers.length, verified, pools: POOLS };
   }
-  if (STEPS.has('history')) m.orderHistory = await buildHistory(m.buyersDetail, m.catalog);
+  // Orders depend on order-service accepting the catalog's ids. If placing an order
+  // fails, record why and keep building the rest: order-dependent test cases then
+  // report "blocked" with this reason instead of the whole fixture failing.
+  const orderStep = async (label, build) => {
+    try {
+      return await build();
+    } catch (error) {
+      console.warn(`\n! ${label} skipped: placing an order failed (${error.message}).`);
+      m.ordersUnavailable = `${label}: ${error.message}`;
+      return [];
+    }
+  };
+  if (STEPS.has('history')) m.orderHistory = await orderStep('history', () => buildHistory(m.buyersDetail, m.catalog));
   if (STEPS.has('carts')) m.carts = await buildCarts(m.buyersDetail, catalogResult);
-  if (STEPS.has('deliveries')) m.deliveries = await buildDeliveries(m.buyersDetail, m.catalog, previous.deliveries || []);
+  if (STEPS.has('deliveries')) m.deliveries = await orderStep('deliveries', () => buildDeliveries(m.buyersDetail, m.catalog, previous.deliveries || []));
+  if (STEPS.has('history') && STEPS.has('deliveries') && m.orderHistory.length && m.deliveries.length) delete m.ordersUnavailable;
   if (STEPS.has('images')) m.images = await buildImages(m.catalog);
 
   Object.assign(m, { runId: `perf-${startedAt.toISOString().replace(/[:.]/g, '-')}`, createdAt: startedAt.toISOString(), baseUrl: API, gitSha: gitSha() });

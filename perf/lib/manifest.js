@@ -29,6 +29,7 @@ export const MANIFEST_INFO = {
   keywords: catalog.keywords || [],
   contention: whole.contention || [],
   seller: whole.seller || null,
+  ordersUnavailable: whole.ordersUnavailable || null, // why the order fixture could not be built
 };
 
 export const PRODUCTS = new SharedArray('products', () => load().catalog.products || []); // {id, shopId, categoryId, name, variants:[{id, price, available}]}

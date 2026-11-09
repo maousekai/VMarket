@@ -94,10 +94,14 @@ for (const { run, summary } of runs.sort((a, b) => a.run.tc.localeCompare(b.run.
     md.push(`| ${run.tc} | ${run.verdict} | ${run.reason || ''} | ${e.endpoint} (${e.phase}) | ${n(e.count)} | ${n(e.p95, 1)} | ${n(e.p99, 1)} | ${summary ? n(summary.failureRate * 100, 2) + '%' : '-'} | ${summary ? n(summary.checkRate * 100, 2) + '%' : '-'} | ${summary ? n(summary.vusMax) : '-'} | ${evidence} |`);
     csv.push([run.tc, run.verdict, `"${(run.reason || '').replace(/"/g, "'")}"`, run.startedAt, `"${e.endpoint}"`, e.phase, n(e.count), n(e.p50, 1), n(e.p95, 1), n(e.p99, 1), n(e.max, 1), summary ? n(summary.failureRate, 4) : '', summary ? n(summary.checkRate, 4) : '', summary ? n(summary.vusMax) : '', summary ? n(summary.rps, 2) : '', evidence].join(','));
   }
-  if (summary) {
-    const c = summary.counters;
-    md.push(`| | | counters: sessions created ${c.sessions_created}, closed ${c.sessions_closed}; cart invariant violations ${c.cart_invariant_violations}; unsellable leaks ${c.catalog_unsellable_leaks} | | | | | | | | |`);
+  if (summary && summary.custom) {
+    // Business metrics (invariants, LCP, shipper latency, index sync, fallback share...)
+    const shown = Object.entries(summary.custom)
+      .filter(([, v]) => v && (v.count !== undefined || v.rate !== undefined || v['p(95)'] !== undefined))
+      .map(([k, v]) => `${k}: ${v['p(95)'] !== undefined ? `p95 ${n(v['p(95)'], 0)}` : v.rate !== undefined && v.count === undefined ? `${n(v.rate * 100, 2)}%` : `count ${n(v.count)}`}`);
+    if (shown.length) md.push(`| | | ${shown.join('; ')} | | | | | | | | |`);
   }
+  if (summary && summary.breakingPoint) md.push(`| | | stress: last good step ${summary.breakingPoint.lastGoodVus} VUs, first failing step ${summary.breakingPoint.firstBadVus || 'none'} | | | | | | | | |`);
 }
 md.push('', 'Server-side evidence (CPU/RAM/GC, DB pool, Redis) comes from Grafana for the same time range; attach screenshots before marking a soak/spike as final.');
 writeFileSync(resolve(resultsDir, 'report.md'), md.join('\n') + '\n');

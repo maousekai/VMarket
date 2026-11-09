@@ -73,8 +73,9 @@ export function setup() {
 export function browse() {
   browseJourney();
 }
-export function search() {
-  searchJourney();
+export function search(data) {
+  // ai-search not deployed: basic search (UC-03). LOAD-07: the service is stopped mid-run.
+  searchJourney({ aiAvailable: DEGRADE || data.degraded.length === 0, tolerate: DEGRADE });
 }
 export function cart(data) {
   cartIteration(data.sessions);

@@ -52,6 +52,7 @@ function variantState(c, token) {
 }
 
 export function setup() {
+  if (MANIFEST_INFO.ordersUnavailable) blocked(`placing an order fails, contention cannot be measured: ${MANIFEST_INFO.ordersUnavailable}`);
   const count = __ENV.PROFILE === 'smoke' ? 2 : VUS;
   const sessions = prelogin(range(POOLS.order.start, count));
   requireServices(['product', 'cart', 'order', 'user'], Object.values(sessions)[0].token);
