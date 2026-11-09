@@ -7,16 +7,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-/** V12: backfill orders.shop_id chỉ cho đơn đúng 1 shop; idempotency unique mở rộng theo shop. */
+/** V13: backfill orders.shop_id chỉ cho đơn đúng 1 shop; idempotency unique mở rộng theo shop. */
 class SplitOrdersMigrationTest {
 
     private static final String SHOP_A = "01JBQ9SHOP00000000000000A1";
     private static final String SHOP_B = "01JBQ9SHOP00000000000000B1";
 
     @Test
-    void v12BackfillsShopIdOnlyForSingleShopOrders() {
+    void v13BackfillsShopIdOnlyForSingleShopOrders() {
         String url = "jdbc:h2:mem:split-orders-migration;MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
-        Flyway.configure().dataSource(url, "sa", "").target("11").load().migrate();
+        Flyway.configure().dataSource(url, "sa", "").target("12").load().migrate();
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(url, "sa", ""));
 
         insertOrder(jdbc, "order-single", "key-1");

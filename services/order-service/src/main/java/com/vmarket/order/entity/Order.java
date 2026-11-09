@@ -18,6 +18,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -117,6 +118,16 @@ public class Order extends BaseEntity {
 
 	@Column(name = "delivered_at")
 	private Instant deliveredAt;
+
+	/**
+	 * Lớp phòng thủ bổ sung cho các đường ghi không đi qua khoá dòng (PBL6-53).
+	 * Các luồng hiện tại đều tuần tự hoá bằng {@code PESSIMISTIC_WRITE} /
+	 * {@code SELECT ... FOR UPDATE}. Lưu ý: chỉ sửa {@link OrderItem} thì version
+	 * của đơn không tăng, nên ghi item vẫn phải giữ khoá dòng của đơn.
+	 */
+	@Version
+	@Column(name = "version", nullable = false)
+	private Long version;
 
 	/**
 	 * Item của đơn. {@code mappedBy} + {@code cascade ALL} để lưu đơn là lưu trọn
