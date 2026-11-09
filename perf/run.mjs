@@ -59,7 +59,9 @@ export function verdict(summary, exitCode, log = '') {
   if (summary.degraded && summary.degraded.length) return { result: 'Pending', reason: `degraded: ${summary.degraded.join('; ')}` };
   const samples = failed.filter((t) => t.kind === 'samples');
   if (samples.length) return { result: 'Pending', reason: `inconclusive: fewer samples than required (${samples.map((t) => t.metric).join(', ')})` };
-  if (summary.breakingPoint && summary.breakingPoint.lastGoodVus < 200) return { result: 'Failed', reason: `breaking point below 200 VUs (last good step ${summary.breakingPoint.lastGoodVus})` };
+  const bp = summary.breakingPoint;
+  if (bp && bp.complete === false && bp.lastGoodVus < 200) return { result: 'Pending', reason: `inconclusive: stress run stopped at the ${bp.reachedVus} VU step before reaching 200 VUs` };
+  if (bp && bp.lastGoodVus < 200) return { result: 'Failed', reason: `breaking point below 200 VUs (last good step ${summary.breakingPoint.lastGoodVus})` };
   if (exitCode !== 0) return { result: 'Pending', reason: `k6 exit ${exitCode} without a failed threshold` };
   return { result: 'Passed', reason: '' };
 }

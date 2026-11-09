@@ -101,7 +101,20 @@ for (const { run, summary } of runs.sort((a, b) => a.run.tc.localeCompare(b.run.
       .map(([k, v]) => `${k}: ${v['p(95)'] !== undefined ? `p95 ${n(v['p(95)'], 0)}` : v.rate !== undefined && v.count === undefined ? `${n(v.rate * 100, 2)}%` : `count ${n(v.count)}`}`);
     if (shown.length) md.push(`| | | ${shown.join('; ')} | | | | | | | | |`);
   }
-  if (summary && summary.breakingPoint) md.push(`| | | stress: last good step ${summary.breakingPoint.lastGoodVus} VUs, first failing step ${summary.breakingPoint.firstBadVus || 'none'} | | | | | | | | |`);
+  if (summary && summary.breakingPoint) {
+    const bp = summary.breakingPoint;
+    // Summaries written before steps carried `reached` have no completeness flag:
+    // derive it from the per-step request count so an aborted run is never shown as
+    // "every step good".
+    const reached = (bp.steps || []).filter((s) => s.reached !== undefined ? s.reached : (s.requests || 0) > 0);
+    const known = (bp.steps || []).some((s) => s.reached !== undefined || s.requests !== undefined);
+    const text = bp.complete === false
+      ? `stress incomplete: run stopped at the ${bp.reachedVus} VU step; last good step ${bp.lastGoodVus} VUs, no failing step reached`
+      : !known
+        ? `stress: per-step coverage not recorded (summary predates the fix); breaking point not established`
+        : `stress: last good step ${bp.lastGoodVus} VUs, first failing step ${bp.firstBadVus || 'none'} (${reached.length}/${bp.steps.length} steps run)`;
+    md.push(`| | | ${text} | | | | | | | | |`);
+  }
 }
 md.push('', 'Server-side evidence (CPU/RAM/GC, DB pool, Redis) comes from Grafana for the same time range; attach screenshots before marking a soak/spike as final.');
 writeFileSync(resolve(resultsDir, 'report.md'), md.join('\n') + '\n');

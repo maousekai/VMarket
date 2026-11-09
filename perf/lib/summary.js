@@ -59,21 +59,48 @@ export function summarize(data, extra = {}) {
 }
 
 // Stress: first step where an endpoint's p95 exceeds its budget or failures exceed 1 %.
+// A step with no request is a step the run never reached (aborted early, e.g. by a
+// data invariant): it is reported as not reached, never as passed, and the
+// breaking point is then incomplete rather than "every step good".
 export function breakingPoint(data, budgets) {
   const steps = [];
   for (const n of STRESS_STEPS) {
     const failed = data.metrics[`http_req_failed{phase:step-${n}}`];
+    const requests = failed ? (failed.values.passes || 0) + (failed.values.fails || 0) : 0;
+    if (requests === 0) {
+      steps.push({ vus: n, reached: false, requests: 0, failureRate: null, overBudget: [], ok: null });
+      continue;
+    }
     const over = Object.entries(budgets)
       .map(([endpoint, p95]) => {
         const m = data.metrics[`http_req_duration{endpoint:${endpoint},phase:step-${n}}`];
         return m && m.values.count > 0 && m.values['p(95)'] > p95 ? `${endpoint} p95 ${Math.round(m.values['p(95)'])} > ${p95}` : null;
       })
       .filter(Boolean);
-    const failure = failed ? failed.values.rate : 0;
-    steps.push({ vus: n, failureRate: failure, overBudget: over, ok: over.length === 0 && failure < MAX_FAILURE_RATE });
+    const failure = failed.values.rate;
+    steps.push({ vus: n, reached: true, requests, failureRate: failure, overBudget: over, ok: over.length === 0 && failure < MAX_FAILURE_RATE });
   }
-  const first = steps.find((s) => !s.ok);
-  return { lastGoodVus: first ? (steps[steps.indexOf(first) - 1] || { vus: 0 }).vus : STRESS_STEPS[STRESS_STEPS.length - 1], firstBadVus: first ? first.vus : null, steps };
+  return stressOutcome(steps);
+}
+
+// lastGoodVus: highest step that passed before the first failing or unreached step
+// (0 when none passed). complete: every step ran, or a failing step was found.
+export function stressOutcome(steps) {
+  const stop = steps.findIndex((s) => s.ok !== true);
+  const first = stop >= 0 && steps[stop].ok === false ? steps[stop] : null;
+  const lastGood = stop === -1 ? steps[steps.length - 1] : steps[stop - 1];
+  return {
+    lastGoodVus: lastGood ? lastGood.vus : 0,
+    firstBadVus: first ? first.vus : null,
+    complete: stop === -1 || first !== null,
+    reachedVus: Math.max(0, ...steps.filter((s) => s.reached).map((s) => s.vus)),
+    steps,
+  };
+}
+
+export function stressText(bp) {
+  if (!bp.complete) return `stress incomplete: run stopped at the ${bp.reachedVus} VU step; last good step ${bp.lastGoodVus} VUs, no failing step reached`;
+  return `stress: last good step ${bp.lastGoodVus} VUs, first failing step ${bp.firstBadVus || 'none'}`;
 }
 
 export function textReport(s) {
@@ -88,7 +115,7 @@ export function textReport(s) {
   for (const [k, v] of Object.entries(s.custom)) {
     lines.push(`${k}: ${Object.entries(v).map(([a, b]) => `${a}=${fmt(b)}`).join(' ')}`);
   }
-  if (s.breakingPoint) lines.push(`\nstress: last good step ${s.breakingPoint.lastGoodVus} VUs, first failing step ${s.breakingPoint.firstBadVus || 'none'}`);
+  if (s.breakingPoint) lines.push(`\n${stressText(s.breakingPoint)}`);
   if (s.degraded && s.degraded.length) lines.push(`\nDEGRADED: ${s.degraded.join('; ')}`);
   lines.push('\nthresholds');
   for (const t of s.thresholds) if (t.kind !== 'info') lines.push(`  ${t.ok ? 'PASS' : 'FAIL'}  [${t.kind}] ${t.metric}: ${t.expression}`);
