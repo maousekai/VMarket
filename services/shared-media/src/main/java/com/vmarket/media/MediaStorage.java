@@ -193,8 +193,9 @@ public class MediaStorage {
 				"Action":["s3:GetObject"],"Resource":[
 				"arn:aws:s3:::%s/avatars/*",
 				"arn:aws:s3:::%s/shops/*",
-				"arn:aws:s3:::%s/products/*"]}]}
-				""".formatted(bucket, bucket, bucket);
+				"arn:aws:s3:::%s/products/*",
+				"arn:aws:s3:::%s/returns/*"]}]}
+				""".formatted(bucket, bucket, bucket, bucket);
 		try {
 			s3.putBucketPolicy(PutBucketPolicyRequest.builder()
 					.bucket(bucket)

@@ -483,10 +483,19 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # order-service / shop-service goi /internal/** bang cung khoa nay.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # MinIO - upload anh san pham (PBL6-28). Cung bo bien voi user/shop-service.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${PRODUCT_SERVICE_PORT:-8084}:8084"
     depends_on:
+      minio:
+        condition: service_healthy
       mongo:
         condition: service_healthy
       rabbitmq:

@@ -17,4 +17,6 @@ public interface ProductRepository extends MongoRepository<Product, String> {
 	List<Product> findAllByDeletedAtIsNullOrderByUpdatedAtDesc();
 	boolean existsByCategoryIdAndDeletedAtIsNull(String categoryId);
 	boolean existsByBrandIdAndDeletedAtIsNull(String brandId);
+	/** Ảnh còn được sản phẩm (chưa xoá) của seller tham chiếu — không được xoá khỏi kho. */
+	boolean existsBySellerIdAndImageUrlsAndDeletedAtIsNull(String sellerId, String imageUrl);
 }
