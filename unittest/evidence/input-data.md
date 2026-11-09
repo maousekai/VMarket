@@ -54,3 +54,23 @@ Mặc định chỉ tạo các variant cần cho từng test. Riêng STK chỉ t
 | UT-STK-08 | O1 CONFIRMED[P1/V1×3], stock7,reserved0,cả soldCount3; release(O1); mong đợi RELEASED,stock10,reserved0,cả soldCount0 |
 
 Fixture là mới cho từng ID và từng dataset (a)/(b). Các chuỗi literal trong bảng alias phải được dùng thống nhất trong request, mock lookup, reservation/event và assertion. Không coi “item như trên” là yêu cầu chạy TC trước rồi dùng lại state của nó.
+
+## Supplemental unit-review datasets — 9 November 2026
+
+These use the existing service-unit fixtures independently of the original 25 sheet cases.
+
+| Area | Dataset / expected assertion |
+| --- | --- |
+| Cart Redis failure | Seed p1/red/shop-1 qty2 at100000; independently fail read/write/delete. CartStorageException retains cause; Map unchanged; no EXPIRE. |
+| Cart malformed JSON | Seed `{invalid-json`; read is empty without writes; next add recovers a valid cart with qty2 and amount200000. |
+| Cart same-instance concurrency | Seed qty1; two workers synchronize each of40 additions. One line, qty81, amount8100000. |
+| Inventory order conflict | RESERVED order-1 holds product-1/variant-1 qty3; retry qty4 returns INVENTORY_CONFLICT/409 without writes/events. |
+| Inventory multi-product shortage | First product stock10/reserved2 requests3; second stock1/reserved0 requests2. INSUFFICIENT_STOCK/409; both models unchanged; no writes/events. |
+| Inventory duplicate merge | Quantities2+3 merge to5; stock10/reserved1 becomes reserved6; one saved/event item with quantity5. |
+| Inventory overflow | Duplicate quantities Integer.MAX_VALUE and1 yield INVALID_INVENTORY_REQUEST/400 before repository/publisher access. |
+| Existing pending states/returns | Early confirm: stock7/reserved0/sold3. Early release: no product access/events. Deferred return processed after confirm: stock9/reserved0/sold1; repeat confirm leaves values unchanged. Excess return: INVALID_RETURN_QUANTITY/409 without writes. |
+| Real validator rejection | Fourteen datasets: null payload; null/empty/blank order; null/empty items; null/empty/blank product or variant; zero/negative quantity. INVALID_INVENTORY_REQUEST/400. |
+| Real validator acceptance | Quantity1 and Integer.MAX_VALUE are individually valid. Valid duplicate items are accepted for service normalization; the service checks aggregate overflow. |
+| Existing Cart operations | Existing update/remove/clear tests are rerun rather than duplicated in TV01. |
+
+Real Mongo rollback/concurrent reservations and broker acknowledgement have existing infrastructure tests. Real Redis expiry, distributed concurrency and broker ordering/duplicate delivery are outside this unit-review run.

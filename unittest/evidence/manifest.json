@@ -5,7 +5,7 @@
   "source_plan_sha256": "240dae057b1268fbf830d85230b3de2dfc319b8460cf25662bb3394dae1c7b04",
   "input_data": {
     "path": "input-data.md",
-    "sha256": "750dda243b7ff65ba1bc56903283c77a175f2051f89d766c075672a7650a0c92"
+    "sha256": "e0dc6655e33141fa27b034ecae3667efc68f7a8268695c7817986607c932b3a0"
   },
   "environment": {
     "jdk": "17.0.12",
@@ -557,8 +557,131 @@
   ],
   "publication": {
     "result_format": "JUnit XML with all system-properties blocks removed",
-    "preserved": "Suite counters, testcase identities, assertion outcomes and captured fixture output",
+    "preserved": "Historical suite counters, testcase identities, assertion outcomes and captured fixture output; supplemental identities, timings and outcomes",
     "hash_policy": "sha256 identifies the sanitized published file; original_sha256 identifies the original local result",
     "audit": "audit.json"
+  },
+  "review_regression": {
+    "review_comments": [
+      "https://github.com/maousekai/VMarket/pull/52#issuecomment-6716304242",
+      "https://github.com/maousekai/VMarket/pull/52#issuecomment-6716306369"
+    ],
+    "base_source_sha": "e0c7b115c4be14e50e4d049cb07222afb9cab71c",
+    "scope": "Supplemental unit coverage; original 25 logical cases and three historical rounds unchanged",
+    "commands": [
+      {
+        "cwd": "services",
+        "command": [
+          "mvnw.cmd",
+          "-B",
+          "-ntp",
+          "-pl",
+          "cart-service",
+          "-am",
+          "test",
+          "-Dtest=CartServiceTest,TV01CartSheetTest,TV01CheckoutSheetTest",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-DforkCount=1",
+          "-DreuseForks=true",
+          "-Djunit.jupiter.execution.parallel.enabled=false"
+        ],
+        "exit_code": 0
+      },
+      {
+        "cwd": "services",
+        "command": [
+          "mvnw.cmd",
+          "-B",
+          "-ntp",
+          "-pl",
+          "product-service",
+          "-am",
+          "test",
+          "-Dtest=InventoryServiceTest,InventoryInputValidatorTest,TV01InventorySheetTest",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-DforkCount=1",
+          "-DreuseForks=true",
+          "-Djunit.jupiter.execution.parallel.enabled=false"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "suites": [
+      {
+        "class": "com.vmarket.cart.service.CartServiceTest",
+        "source": "services/cart-service/src/test/java/com/vmarket/cart/service/CartServiceTest.java",
+        "source_sha256": "0dff1f585d5051f233622bd812d9253cc6b7987467426cdbf36396505eb6c7b1",
+        "original_result_sha256": "792b56ff9b32b06ca5182cf9550fa14feaa0caf0ced86333864c234dc86a15bf",
+        "tests": 18,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:57:22+07:00"
+      },
+      {
+        "class": "com.vmarket.cart.service.TV01CartSheetTest",
+        "source": "services/cart-service/src/test/java/com/vmarket/cart/service/TV01CartSheetTest.java",
+        "source_sha256": "9e41eee7437ebbf87c829a4261a3920a1b6b948121dc64f1c93e027331bfa74b",
+        "original_result_sha256": "8e9b0bcd75702a41c16752dfc5afb2c0e842ecf9ffe6a08afb67e52712c5a678",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:57:22+07:00"
+      },
+      {
+        "class": "com.vmarket.cart.service.TV01CheckoutSheetTest",
+        "source": "services/cart-service/src/test/java/com/vmarket/cart/service/TV01CheckoutSheetTest.java",
+        "source_sha256": "6c86c9940a4d31d4abe527bd8a99439001116211fefdb2b97103f3d07e72bce1",
+        "original_result_sha256": "f329788ea2086f8dfadf83b27c27890b01b13413e355c8fc644039197ff66593",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:57:22+07:00"
+      },
+      {
+        "class": "com.vmarket.product.InventoryInputValidatorTest",
+        "source": "services/product-service/src/test/java/com/vmarket/product/InventoryInputValidatorTest.java",
+        "source_sha256": "069320522c9b3d5196b1b276eaed440ef3c761416ec4f54f24f683a4fa1b2e84",
+        "original_result_sha256": "a8bc6a10f18bc8bae15b61ac180fb013192c1428414c6959d44948bfde4b5431",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:58:18+07:00"
+      },
+      {
+        "class": "com.vmarket.product.InventoryServiceTest",
+        "source": "services/product-service/src/test/java/com/vmarket/product/InventoryServiceTest.java",
+        "source_sha256": "826d886ef118054c4c5e933df5ed9ddbfcd54d681a21df7563bf7438c894a307",
+        "original_result_sha256": "d9311a30ff4e340b66789511639af95a7a46f16f8e3bca1e26c02ef5f8281286",
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:58:20+07:00"
+      },
+      {
+        "class": "com.vmarket.product.TV01InventorySheetTest",
+        "source": "services/product-service/src/test/java/com/vmarket/product/TV01InventorySheetTest.java",
+        "source_sha256": "1be9452842d0a14b89216784952fd2a00605c0293b06896d0e7de6fceee0bdbc",
+        "original_result_sha256": "4a7a0e0ba73ec2aac604efa1936a5f9c020fd84b2c30ca0284d63a3bd69b35fb",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:58:20+07:00"
+      }
+    ],
+    "tests": 86,
+    "original_tv01_invocations": 30,
+    "other_unit_invocations": 56,
+    "result": {
+      "path": "review/TEST-review-regression.xml",
+      "sha256": "b18bf1a60e6d1661519eb216795e347a8232a0ccb477a4a4ad33de5a2a2e5bc1"
+    },
+    "publication": "System properties and console logs omitted; testcase identities, timings and outcomes preserved",
+    "integration": "No integration tests/services run. Existing ProductInfrastructureIntegrationTest is referenced, not claimed as executed"
   }
 }

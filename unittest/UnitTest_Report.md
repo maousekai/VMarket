@@ -52,11 +52,32 @@ All three recorded rounds passed the same 25 logical cases, with 30 JUnit invoca
 
 ## Verification and limits
 
-- Published XMLs have all JVM system properties removed. Suite counters, testcase identities and fixture outputs are unchanged; [publication audit](evidence/audit.json) records the metadata checks and sanitized hashes.
+- Historical XMLs have all JVM system properties removed. Suite counters, testcase identities and fixture outputs are unchanged; [publication audit](evidence/audit.json) records the metadata checks and sanitized hashes.
 
 - Every retained XML maps to the exact class, method and required dataset. All 90 invocations across three rounds passed; these represent 25 distinct logical cases.
 - XML files include observed fixture/results output; expected exceptions and no-write/idempotency checks are defined in the Java tests.
 - Round1 Function1 attempt1 executed zero tests because sandbox permissions blocked Mockito attachment. Its successful attempt2 is retained; the interruption is recorded in the manifest.
-- Published Java hashes match the sources used in all three rounds. Publication checks validate mapping, links and hashes; no new test round was run while packaging.
-- Unit mocks do not prove real Redis TTL, Mongo transactions, RabbitMQ delivery, HTTP contracts, concurrency, or full SRS acceptance. InventoryInputValidator is mocked.
+- The three TV01 Java hashes match the sources used in all three historical rounds. Publication checks validate mapping, links and hashes; the supplemental review run below is recorded separately from those rounds.
+- Unit mocks do not prove real Redis TTL, Mongo transactions, RabbitMQ delivery, HTTP contracts, concurrency, or full SRS acceptance. InventoryInputValidator is mocked in the historical TV01 fixture; the supplemental suite below exercises the real Bean Validation implementation.
 - TV04 review of all P0s and at least one negative and boundary case per function remains outstanding.
+
+## Scoped review follow-up — 9 November 2026
+
+Confirmed gaps were addressed in three existing unit-test classes. Application code, dependencies and the original 25-case matrix are unchanged. [Supplemental JUnit results](evidence/review/TEST-review-regression.xml) and the manifest record a fresh **86/86 passing invocations**, zero failures/errors/skips, on the PR base plus the recorded test-source changes.
+
+| Suite | Invocations | Purpose |
+| --- | ---: | --- |
+| CartServiceTest | 18 | Existing update/remove/clear plus Redis read/write/delete failure, malformed JSON recovery and same-instance concurrent adds |
+| InventoryServiceTest | 21 | Conflicting retry items, multi-product validation, duplicate merge/overflow; stronger existing pending-state/return assertions |
+| InventoryInputValidatorTest | 17 | Real validator:14 invalid datasets, two positive quantity boundaries and valid duplicate input |
+| TV01CartSheetTest | 9 | Original Cart regression |
+| TV01CheckoutSheetTest | 11 | Original Checkout regression |
+| TV01InventorySheetTest | 10 | Original Inventory regression |
+
+The 30 TV01 invocations still represent the original 25 logical cases. The other 56 include existing regressions and review additions; they do not change historical round totals. Valid duplicate items are accepted by validation, then merged with checked addition in InventoryService.
+
+Existing early confirm/release, deferred return, over-return and Cart update/remove/clear tests were reused and strengthened where needed. No duplicate TV01 scenarios were introduced.
+
+**Infrastructure scope:** ProductInfrastructureIntegrationTest already contains `mongoTransactionRollsBackDomainAndOutboxTogether`, `concurrentReservationNeverDoubleReservesStock`, `competingOrdersCannotOversellOrLeaveAnOrphanReservation` and `outboxMarksPublishedOnlyAfterRabbitBrokerAckAndRouting`. These were not executed in this unit-only follow-up. Real Redis expiry, multi-instance concurrency and broker ordering/duplicate delivery remain integration limits, not claims of this PR.
+
+Supplemental result publication omits system properties and console logs while preserving testcase identities, timings and outcomes. The original nine published XMLs and their recorded fixture outputs are unchanged.

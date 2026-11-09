@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-11-08T09:12:37+07:00",
+  "checked_at": "2026-11-09T12:01:41+07:00",
   "review_comment": "https://github.com/maousekai/VMarket/pull/52#issuecomment-6715916612",
   "scope": "Published package only; full local raw archives are excluded from Git",
   "policy": {
@@ -19,23 +19,27 @@
     "absolute_path_patterns": [
       "(?<![A-Za-z0-9])[A-Za-z]:[\\\\/]",
       "/(?:Users|home|tmp|private/var)/"
-    ]
+    ],
+    "review_result_console_logs": "Omitted from supplemental XML; case identities/outcomes retained"
   },
   "summary": {
-    "result_files_checked": 9,
-    "system_properties_removed": 534,
+    "result_files_checked": 10,
+    "system_properties_removed": 891,
     "system_properties_remaining": 0,
     "machine_attributes_remaining": 0,
     "absolute_paths_remaining": 0,
-    "testcase_payloads_unchanged": true,
     "source_hashes_match": true,
     "logical_cases_per_round": 25,
-    "total_recorded_invocations": 90,
+    "total_recorded_invocations": 176,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
     "report_placeholders": 0,
-    "generated_coverage_files_in_publication": 0
+    "generated_coverage_files_in_publication": 0,
+    "historical_testcase_payloads_unchanged": true,
+    "case_identities_and_outcomes_preserved": true,
+    "historical_invocations": 90,
+    "review_regression_invocations": 86
   },
   "results": [
     {
@@ -145,6 +149,17 @@
       "testcase_payloads_sha256": "35c6d90aac95244baf5b431ee8dc5ef7f206c4ddaae812d179768bc4ef5d00fd",
       "original_sha256": "e8c01953bec758a26eca3a2f574f729e00498b5a57a0d4cb975c1cc5ad457f4e",
       "published_sha256": "c378f29c5dfb1d503a88bda9a5019e7d68f8033e0603fb6db3652caa1749134c"
+    },
+    {
+      "path": "review/TEST-review-regression.xml",
+      "properties_removed": 357,
+      "properties_remaining": 0,
+      "captured_logs_removed": 38,
+      "machine_attributes_remaining": 0,
+      "absolute_paths_remaining": 0,
+      "testcases": 86,
+      "case_identities_and_outcomes_preserved": true,
+      "published_sha256": "b18bf1a60e6d1661519eb216795e347a8232a0ccb477a4a4ad33de5a2a2e5bc1"
     }
   ]
 }
