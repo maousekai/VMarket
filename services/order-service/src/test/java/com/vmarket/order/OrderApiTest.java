@@ -236,6 +236,44 @@ class OrderApiTest {
     }
 
     @Test
+    void placeOrderKeepsCatalogIdsLongerThanUlids() throws Exception {
+        // Product Catalog cấp ObjectId (24 ký tự) cho sản phẩm và UUID (36 ký tự) cho biến
+        // thể; cột VARCHAR(26) cũ làm mọi đơn có biến thể thật lỗi 500 (PBL6-30).
+        String productId = "6aeda9255cb56e8b256e2463";
+        String variantId = "136dd277-76d9-4038-91b5-ab8c18f894a4";
+        CartServiceClient.CartItemView item =
+                new CartServiceClient.CartItemView(
+                        productId,
+                        variantId,
+                        "01JBQ9SHOP0000000000TEST01",
+                        1,
+                        new BigDecimal("150000.00"),
+                        new BigDecimal("150000.00"));
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartView(
+                                ALICE,
+                                List.of(
+                                        new CartServiceClient.CartGroupView(
+                                                "01JBQ9SHOP0000000000TEST01",
+                                                List.of(item),
+                                                new BigDecimal("150000.00"))),
+                                1,
+                                new BigDecimal("150000.00")));
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.items[0].productId").value(productId))
+                .andExpect(jsonPath("$.items[0].variantId").value(variantId));
+    }
+
+    @Test
     void payosDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
         when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
         when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());

@@ -30,6 +30,12 @@ public abstract class BaseEntity {
 	/** Độ dài ULID chuỗi (Crockford base32) — dùng chung cho mọi cột id / FK. */
 	public static final int ID_LENGTH = 26;
 
+	/**
+	 * Id do Product Catalog cấp (sản phẩm: ObjectId 24 ký tự, biến thể: UUID 36 ký tự) —
+	 * không phải ULID nên không dùng {@link #ID_LENGTH}.
+	 */
+	public static final int CATALOG_ID_LENGTH = 64;
+
 	@Id
 	@Column(length = ID_LENGTH, updatable = false, nullable = false)
 	private String id;

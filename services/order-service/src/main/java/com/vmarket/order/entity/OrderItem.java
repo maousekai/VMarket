@@ -33,11 +33,11 @@ public class OrderItem extends BaseEntity {
 	@JoinColumn(name = "order_id", nullable = false)
 	private Order order;
 
-	@Column(name = "product_id", nullable = false, length = ID_LENGTH)
+	@Column(name = "product_id", nullable = false, length = CATALOG_ID_LENGTH)
 	private String productId;
 
 	/** Biến thể (màu/size...). Sản phẩm không có biến thể thì null. */
-	@Column(name = "variant_id", length = ID_LENGTH)
+	@Column(name = "variant_id", length = CATALOG_ID_LENGTH)
 	private String variantId;
 
 	/** Gian hàng bán item này — client dùng để nhóm hiển thị (FR-CART-02). */
