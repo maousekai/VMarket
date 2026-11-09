@@ -123,6 +123,50 @@ export function validateChangePassword({ currentPassword, newPassword, confirmPa
   })
 }
 
+const httpUrl = /^https?:\/\/\S+$/i
+
+function optionalUrl(value, label) {
+  const text = value?.trim() || ''
+  if (!text) return undefined
+  if (text.length > 500) return `${label} tối đa 500 ký tự.`
+  if (!httpUrl.test(text)) return `${label} phải bắt đầu bằng http:// hoặc https://.`
+}
+
+export function validateShop(values) {
+  const name = values.name?.trim() || ''
+  return compact({
+    name: !name
+      ? 'Vui lòng nhập tên gian hàng.'
+      : name.length < 3 || name.length > 100
+        ? 'Tên gian hàng từ 3 đến 100 ký tự.'
+        : undefined,
+    description: values.description?.trim().length > 2000 ? 'Mô tả tối đa 2000 ký tự.' : undefined,
+    logoUrl: optionalUrl(values.logoUrl, 'URL logo'),
+    coverUrl: optionalUrl(values.coverUrl, 'URL ảnh bìa'),
+    policies: values.policies?.trim().length > 5000 ? 'Chính sách tối đa 5000 ký tự.' : undefined,
+    contactEmail:
+      values.contactEmail?.trim().length > 255
+        ? 'Email liên hệ tối đa 255 ký tự.'
+        : emailError(values.contactEmail),
+    contactPhone: !values.contactPhone?.trim()
+      ? 'Vui lòng nhập số điện thoại liên hệ.'
+      : phonePattern.test(values.contactPhone.trim())
+        ? undefined
+        : 'Số điện thoại phải là số di động Việt Nam hợp lệ.',
+    province: !values.province?.trim()
+      ? 'Vui lòng chọn tỉnh/thành phố.'
+      : values.province.trim().length > 100
+        ? 'Tỉnh/thành phố tối đa 100 ký tự.'
+        : undefined,
+    ward: !values.ward?.trim()
+      ? 'Vui lòng chọn phường/xã.'
+      : values.ward.trim().length > 100
+        ? 'Phường/xã tối đa 100 ký tự.'
+        : undefined,
+    streetAddress: required(values.streetAddress, 'địa chỉ chi tiết', 255),
+  })
+}
+
 export const validateUserSearch = ({ q }) =>
   compact({ q: q?.trim().length > 100 ? 'Từ khoá tối đa 100 ký tự.' : undefined })
 

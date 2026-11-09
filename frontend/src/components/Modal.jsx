@@ -56,6 +56,8 @@ export default function Modal({ title, description, onClose, variant = 'dialog',
       return
     }
     if (event.key !== 'Tab') return
+    // Keep the trap local when a dialog is opened from inside another one.
+    event.stopPropagation()
     const items = focusableItems(dialog.current)
     if (!items.length) {
       event.preventDefault()

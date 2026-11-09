@@ -1,11 +1,14 @@
 package com.vmarket.shop.service;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.vmarket.media.MediaStorage;
 import com.vmarket.shop.dto.PublicShopResponse;
 import com.vmarket.shop.dto.ShopRequest;
 import com.vmarket.shop.dto.ShopResponse;
@@ -46,6 +49,7 @@ public class ShopService {
 	private final ShopStatusHistoryRepository historyRepository;
 	private final ShopStatusTransitioner transitioner;
 	private final ShopProfileAuditor profileAuditor;
+	private final MediaStorage mediaStorage;
 
 	/** FR-SHOP-01 — nộp hồ sơ mở gian hàng. Mỗi tài khoản một gian hàng. */
 	@Transactional
@@ -96,11 +100,14 @@ public class ShopService {
 		ensureNameAvailable(request.name(), shop.getId());
 
 		Map<String, String> before = ShopProfileAuditor.snapshot(shop);
+		String oldLogoUrl = shop.getLogoUrl();
+		String oldCoverUrl = shop.getCoverUrl();
 		apply(shop, request);
 		profileAuditor.record(shop, before, ShopProfileAuditor.snapshot(shop), ownerId);
 		// saveAndFlush: đụng @Version / UNIQUE thì lỗi bung ra ở đây (được dịch thành 409),
 		// và updatedAt trong response là giá trị thật đã ghi xuống.
 		Shop saved = shopRepository.saveAndFlush(shop);
+		cleanupReplacedImages(ownerId, oldLogoUrl, oldCoverUrl, saved);
 		log.info("Cập nhật gian hàng id={} ownerId={}", saved.getId(), ownerId);
 		return ShopResponse.from(saved);
 	}
@@ -168,5 +175,29 @@ public class ShopService {
 	/** "" và "chưa khai" không được trở thành hai trạng thái khác nhau trong CSDL. */
 	private static String blankToNull(String value) {
 		return value == null || value.isBlank() ? null : value.trim();
+	}
+
+	/**
+	 * Ảnh cũ chỉ bị xoá sau khi transaction commit và chỉ khi không còn được logo
+	 * hoặc ảnh bìa của hồ sơ sau cập nhật tham chiếu. Một URL có thể được chuyển
+	 * từ logo sang ảnh bìa (hoặc ngược lại), nên phải kiểm tra cả hai trường trước
+	 * khi dọn. URL ngoài MinIO (ảnh legacy) hoặc ảnh không đổi được bỏ qua an toàn.
+	 */
+	private void cleanupReplacedImages(String ownerId, String oldLogoUrl, String oldCoverUrl, Shop saved) {
+		String newLogoUrl = saved.getLogoUrl();
+		String newCoverUrl = saved.getCoverUrl();
+		Set<String> replaced = new LinkedHashSet<>();
+		collectIfUnreferenced(replaced, oldLogoUrl, newLogoUrl, newCoverUrl);
+		collectIfUnreferenced(replaced, oldCoverUrl, newLogoUrl, newCoverUrl);
+		String keyPrefix = ShopMediaService.mediaPrefix(ownerId);
+		replaced.forEach(url ->
+				MediaStorage.afterCommit(() -> mediaStorage.deleteQuietly(url, keyPrefix)));
+	}
+
+	private static void collectIfUnreferenced(Set<String> replaced, String oldUrl,
+			String newLogoUrl, String newCoverUrl) {
+		if (oldUrl != null && !oldUrl.equals(newLogoUrl) && !oldUrl.equals(newCoverUrl)) {
+			replaced.add(oldUrl);
+		}
 	}
 }

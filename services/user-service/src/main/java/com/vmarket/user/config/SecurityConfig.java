@@ -39,6 +39,9 @@ public class SecurityConfig {
 			// cả hai đều chưa có token. Đây là endpoint DUY NHẤT dưới /api/users mở
 			// công khai — nó không trả dữ liệu của ai cả.
 			"/api/users/health",
+			// API nội bộ giữa service (không qua gateway) — controller tự kiểm
+			// tra X-Internal-Api-Key, nên không cần JWT ở tầng Security.
+			"/internal/**",
 			// Spring Security lọc cả dispatch ERROR -> nếu không mở /error thì lỗi
 			// trong handler bị biến thành 403 rỗng thay vì trả đúng body lỗi.
 			"/error",

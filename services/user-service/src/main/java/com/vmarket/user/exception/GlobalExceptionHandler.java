@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.vmarket.user.dto.ErrorResponse;
@@ -105,6 +107,24 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
 		return ResponseEntity.badRequest()
 				.body(ErrorResponse.of("VALIDATION_ERROR", "Tham số '" + ex.getName() + "' sai kiểu dữ liệu"));
+	}
+
+	/**
+	 * Multipart thiếu part {@code file}. Spring ném lỗi này TRƯỚC khi vào controller nên
+	 * service không có cơ hội trả MEDIA_FILE_REQUIRED; bắt ở đây để client nhận 400
+	 * thay vì 500.
+	 */
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	public ResponseEntity<ErrorResponse> handleMissingPart(MissingServletRequestPartException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("MEDIA_FILE_REQUIRED", "Vui lòng chọn file ảnh"));
+	}
+
+	/** File vượt giới hạn multipart của service (6 MB) — thường là ảnh bìa quá lớn. */
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("MEDIA_FILE_TOO_LARGE", "File ảnh vượt quá dung lượng cho phép"));
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)

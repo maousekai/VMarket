@@ -356,13 +356,6 @@ export default function AddressBookPage() {
           <section className="account-card account-state">
             <h2>Chưa có địa chỉ giao hàng</h2>
             <p>Thêm địa chỉ để đặt hàng nhanh hơn.</p>
-            <button
-              className="account-button"
-              type="button"
-              onClick={() => setDialog({ type: 'form' })}
-            >
-              Thêm địa chỉ đầu tiên
-            </button>
           </section>
         )}
         {status === 'ready' && addresses.length > 0 && (
