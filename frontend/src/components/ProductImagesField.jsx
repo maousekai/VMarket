@@ -13,7 +13,7 @@ function validate(file) {
 }
 
 /**
- * Up to 9 product images. Files upload as soon as they are picked so the form only keeps
+ * Up to `max` images (9 for products, 5 for return evidence). Files upload as soon as they are picked so the form only keeps
  * URLs; `onUploaded` reports new URLs so the page can clean them up if the product is
  * never saved. The first image is the cover shown on product cards.
  */
@@ -24,20 +24,24 @@ export default function ProductImagesField({
   error,
   disabled = false,
   upload = uploadProductImage,
+  max = PRODUCT_LIMITS.images,
+  label = 'Ảnh sản phẩm',
+  required = true,
+  showCover = true,
 }) {
   const inputId = useId()
   const errorId = useId()
   const inputRef = useRef(null)
   const [uploading, setUploading] = useState(0)
   const [problems, setProblems] = useState([])
-  const remaining = PRODUCT_LIMITS.images - value.length - uploading
+  const remaining = max - value.length - uploading
 
   async function onFiles(fileList) {
     const files = [...fileList]
     if (inputRef.current) inputRef.current.value = ''
     const messages = []
     if (files.length > remaining) {
-      messages.push(`Chỉ thêm được ${Math.max(remaining, 0)} ảnh nữa (tối đa 9 ảnh).`)
+      messages.push(`Chỉ thêm được ${Math.max(remaining, 0)} ảnh nữa (tối đa ${max} ảnh).`)
     }
     const accepted = files.slice(0, Math.max(remaining, 0)).filter((file) => {
       const problem = validate(file)
@@ -58,7 +62,7 @@ export default function ProductImagesField({
     if (failures.length) setProblems((current) => [...current, ...failures])
     if (urls.length) {
       onUploaded?.(urls)
-      onChange((current) => [...current, ...urls].slice(0, PRODUCT_LIMITS.images))
+      onChange((current) => [...current, ...urls].slice(0, max))
     }
   }
 
@@ -74,17 +78,17 @@ export default function ProductImagesField({
     <div className="product-images" aria-describedby={error ? errorId : undefined}>
       <div className="product-images__head">
         <span id={`${inputId}-label`}>
-          Ảnh sản phẩm <span aria-hidden="true">*</span>
+          {label} {required && <span aria-hidden="true">*</span>}
         </span>
         <span className="product-images__count">
-          {value.length}/{PRODUCT_LIMITS.images} ảnh · ảnh đầu tiên là ảnh bìa
+          {value.length}/{max} ảnh{showCover ? ' · ảnh đầu tiên là ảnh bìa' : ''}
         </span>
       </div>
       <ul className="product-images__grid" aria-labelledby={`${inputId}-label`}>
         {value.map((url, index) => (
           <li key={url} className="product-images__item">
             <img src={url} alt={`Ảnh ${index + 1}`} />
-            {index === 0 && <span className="product-images__cover">Ảnh bìa</span>}
+            {showCover && index === 0 && <span className="product-images__cover">Ảnh bìa</span>}
             <div className="product-images__actions">
               <button
                 type="button"

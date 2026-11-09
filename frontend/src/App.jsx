@@ -4,6 +4,8 @@ import { CartProvider } from './cart/CartProvider'
 import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import OrderResultPage from './pages/OrderResultPage'
+import OrdersPage from './pages/OrdersPage'
+import OrderDetailPage from './pages/OrderDetailPage'
 import AppHeader from './components/AppHeader'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
@@ -98,6 +100,8 @@ export default function App() {
               <Route path="/payment/return" element={<OrderResultPage mode="return" />} />
               <Route path="/payment/cancel" element={<OrderResultPage mode="cancel" />} />
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/profile/orders" element={<OrdersPage />} />
+              <Route path="/profile/orders/:orderId" element={<OrderDetailPage />} />
               <Route path="/profile/addresses" element={<AddressBookPage />} />
               <Route path="/profile/password" element={<ChangePasswordPage />} />
               <Route path="/seller/register" element={<SellerRegisterPage />} />
