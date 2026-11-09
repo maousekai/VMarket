@@ -2,6 +2,8 @@ import { Navigate, Routes, Route, Outlet } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
 import { CartProvider } from './cart/CartProvider'
 import CartPage from './pages/CartPage'
+import CheckoutPage from './pages/CheckoutPage'
+import OrderResultPage from './pages/OrderResultPage'
 import AppHeader from './components/AppHeader'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
@@ -88,6 +90,13 @@ export default function App() {
             <Route path="/about" element={<AboutPage />} />
             <Route element={<RouteGuard />}>
               <Route path="/cart" element={<CartPage />} />
+              <Route path="/checkout" element={<CheckoutPage />} />
+              <Route
+                path="/checkout/success/:orderId"
+                element={<OrderResultPage mode="success" />}
+              />
+              <Route path="/payment/return" element={<OrderResultPage mode="return" />} />
+              <Route path="/payment/cancel" element={<OrderResultPage mode="cancel" />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/addresses" element={<AddressBookPage />} />
               <Route path="/profile/password" element={<ChangePasswordPage />} />

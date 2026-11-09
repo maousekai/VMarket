@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Modal from '../components/Modal'
 import { lineKey } from '../cart/cartMath'
 import { useCart } from '../cart/useCart'
@@ -129,6 +129,7 @@ function CartLine({ item, product, issue, selected, onSelect, onFix, busy }) {
 export default function CartPage() {
   const cart = useCart()
   const navigate = useNavigate()
+  const location = useLocation()
   const [selected, setSelected] = useState(() => new Set())
   const [validation, setValidation] = useState(null)
   const [checking, setChecking] = useState(false)
@@ -246,6 +247,11 @@ export default function CartPage() {
         </h1>
         <Link to="/">‹ Tiếp tục mua sắm</Link>
       </div>
+      {location.state?.message && !validation && (
+        <p className="account-notice account-notice--warning" role="status">
+          {location.state.message}
+        </p>
+      )}
       {pageError && (
         <p className="account-notice account-notice--warning" role="alert">
           {pageError}
