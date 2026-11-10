@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -16,10 +17,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.vmarket.notification.dto.DeviceTokenDeleteRequest;
 import com.vmarket.notification.dto.DeviceTokenRequest;
+import com.vmarket.notification.dto.NotificationPreferencesDto;
 import com.vmarket.notification.dto.NotificationResponse;
 import com.vmarket.notification.dto.PageResponse;
 import com.vmarket.notification.security.CurrentUser;
 import com.vmarket.notification.service.NotificationCenterService;
+import com.vmarket.notification.service.NotificationPreferenceService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -35,11 +38,26 @@ import jakarta.validation.constraints.Min;
 public class NotificationController {
 
 	private final NotificationCenterService service;
+	private final NotificationPreferenceService preferences;
 	private final CurrentUser currentUser;
 
-	public NotificationController(NotificationCenterService service, CurrentUser currentUser) {
+	public NotificationController(NotificationCenterService service, NotificationPreferenceService preferences,
+			CurrentUser currentUser) {
 		this.service = service;
+		this.preferences = preferences;
 		this.currentUser = currentUser;
+	}
+
+	/** Tuỳ chọn nhận email / push theo nhóm thông báo (mặc định bật hết). */
+	@GetMapping("/preferences")
+	public NotificationPreferencesDto.Response preferences() {
+		return preferences.get(currentUser.id());
+	}
+
+	@PutMapping("/preferences")
+	public NotificationPreferencesDto.Response updatePreferences(
+			@Valid @RequestBody NotificationPreferencesDto.Update request) {
+		return preferences.update(currentUser.id(), request);
 	}
 
 	@GetMapping
