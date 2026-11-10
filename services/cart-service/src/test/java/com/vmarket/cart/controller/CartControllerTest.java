@@ -31,6 +31,8 @@ import com.vmarket.cart.config.InternalApiProperties;
 import com.vmarket.cart.dto.CartGroupDto;
 import com.vmarket.cart.dto.CartItemDto;
 import com.vmarket.cart.dto.CartResponse;
+import com.vmarket.cart.dto.CheckoutCheckResponse;
+import com.vmarket.cart.dto.CheckoutItemDto;
 import com.vmarket.cart.exception.ApiException;
 import com.vmarket.cart.service.CartService;
 import com.vmarket.cart.service.CheckoutService;
@@ -229,5 +231,36 @@ class CartControllerTest {
 		mockMvc.perform(get("/api/cart").header(HttpHeaders.AUTHORIZATION, tokenFor("user-1")))
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.error.code").value("CART_STORAGE_UNAVAILABLE"));
+	}
+
+	/**
+	 * Redis chết giữa chừng: Lettuce ném QueryTimeoutException (không phải
+	 * CartStorageException). Lưới an toàn ở GlobalExceptionHandler vẫn phải trả 503 chứ không
+	 * phải 500 INTERNAL_ERROR.
+	 */
+	@Test
+	void redisQueryTimeout_tra503_khongPhai500() throws Exception {
+		when(cartService.getCart("user-1"))
+				.thenThrow(new org.springframework.dao.QueryTimeoutException("Redis command timed out"));
+
+		mockMvc.perform(get("/api/cart").header(HttpHeaders.AUTHORIZATION, tokenFor("user-1")))
+				.andExpect(status().isServiceUnavailable())
+				.andExpect(jsonPath("$.error.code").value("CART_STORAGE_UNAVAILABLE"));
+	}
+
+	@Test
+	void validate_traKemItemsTrongBody() throws Exception {
+		when(checkoutService.validate("user-1")).thenReturn(CheckoutCheckResponse.withIssues(
+				List.of(), List.of(new CheckoutItemDto("p1", "red", "shop-1", 2, new BigDecimal("100000")))));
+
+		mockMvc.perform(post("/api/cart/validate").header(HttpHeaders.AUTHORIZATION, tokenFor("user-1")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.ok").value(true))
+				.andExpect(jsonPath("$.items.length()").value(1))
+				.andExpect(jsonPath("$.items[0].productId").value("p1"))
+				.andExpect(jsonPath("$.items[0].variantId").value("red"))
+				.andExpect(jsonPath("$.items[0].shopId").value("shop-1"))
+				.andExpect(jsonPath("$.items[0].quantity").value(2))
+				.andExpect(jsonPath("$.items[0].unitPrice").value(100000));
 	}
 }

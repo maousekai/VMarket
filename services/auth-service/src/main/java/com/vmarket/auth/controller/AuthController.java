@@ -84,15 +84,18 @@ public class AuthController {
 	public TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest,
 			HttpServletResponse httpResponse) {
 		TokenIssuer.IssuedTokens issued = authenticationService.login(request, deviceMetaResolver.resolve(httpRequest));
-		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
-		return issued.body();
+		refreshCookieService.attach(httpRequest, httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
+		return refreshCookieService.decorate(httpRequest, issued.body(), issued.rawRefreshToken(),
+				jwtProps.getRefreshTtl());
 	}
 
 	@Operation(summary = "Làm mới access token (FR-AUTH-02)",
 			description = "Dùng refresh token trong cookie HttpOnly `refresh_token` để lấy access token "
 					+ "mới (xoay vòng — cookie được ghi đè bằng refresh token mới). Refresh token cũ bị "
-					+ "thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi. Lỗi do token "
-					+ "thật sự chết (hết hạn/reused/tài khoản bị Admin khoá) đều xoá luôn cookie hiện tại — trình "
+					+ "thu hồi. Dùng lại token đã xoay vòng (quá ân hạn) → REFRESH_TOKEN_REUSED, toàn bộ phiên "
+						+ "của user bị thu hồi; token bị thu hồi chủ động (đăng xuất, thu hồi phiên) chỉ bị từ chối "
+						+ "với REFRESH_TOKEN_REVOKED, không ảnh hưởng phiên khác. Lỗi do token "
+					+ "thật sự chết (hết hạn/reused/revoked/tài khoản bị Admin khoá) đều xoá luôn cookie hiện tại — trình "
 					+ "duyệt không tiếp tục gửi lại một token không còn dùng được. Riêng "
 					+ "REFRESH_TOKEN_ROTATION_CONFLICT (thua một request /refresh khác chạy song song "
 					+ "cùng token cũ) KHÔNG xoá cookie — request thắng cuộc có thể đã ghi cookie mới hợp "
@@ -103,7 +106,7 @@ public class AuthController {
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
 			@ApiResponse(responseCode = "401",
 					description = "REFRESH_TOKEN_MISSING / INVALID_REFRESH_TOKEN / REFRESH_TOKEN_EXPIRED / "
-							+ "REFRESH_TOKEN_REUSED / REFRESH_TOKEN_ROTATION_CONFLICT",
+							+ "REFRESH_TOKEN_REUSED / REFRESH_TOKEN_REVOKED / REFRESH_TOKEN_ROTATION_CONFLICT",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "423", description = "Tài khoản bị Admin khoá (ACCOUNT_SUSPENDED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -127,7 +130,8 @@ public class AuthController {
 			}
 			throw ex;
 		}
-		refreshCookieService.attach(httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
-		return issued.body();
+		refreshCookieService.attach(httpRequest, httpResponse, issued.rawRefreshToken(), jwtProps.getRefreshTtl());
+		return refreshCookieService.decorate(httpRequest, issued.body(), issued.rawRefreshToken(),
+				jwtProps.getRefreshTtl());
 	}
 }

@@ -113,6 +113,20 @@ class OrderReturnApiTest {
 	}
 
 	@Test
+	void orderResponseExposesItemIdAndDeliveredAt() throws Exception {
+		Order order = createDeliveredOrder();
+		order.setDeliveredAt(Instant.parse("2026-11-05T08:00:00Z"));
+		order = orderRepository.save(order);
+		String itemId = order.getItems().get(0).getId();
+
+		mockMvc.perform(get("/api/orders/" + order.getId())
+				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.items[0].id").value(itemId))
+				.andExpect(jsonPath("$.deliveredAt").value("2026-11-05T08:00:00Z"));
+	}
+
+	@Test
 	void buyerCreatesReturn_deliveredOrderWithin7Days_success() throws Exception {
 		Order order = createDeliveredOrder();
 		String orderItemId = order.getItems().get(0).getId();
@@ -143,6 +157,44 @@ class OrderReturnApiTest {
 
 		assertThat(returnRepository.count()).isEqualTo(1);
 		assertThat(outboxRepository.count()).isEqualTo(1);
+	}
+
+	@Test
+	void orderAndReturnSupport36CharUuidVariantId() throws Exception {
+		// product-service variant ids are UUIDs (36 chars), longer than our 26-char ULIDs.
+		String variantId = "3f2b8c1e-5a47-4d0b-9c1e-0a1b2c3d4e5f";
+		Order order = createDeliveredOrder();
+		order.getItems().get(0).setVariantId(variantId);
+		order = orderRepository.saveAndFlush(order);
+		String orderItemId = order.getItems().get(0).getId();
+
+		mockMvc.perform(get("/api/orders/" + order.getId())
+				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.items[0].variantId").value(variantId));
+
+		String body = """
+				{
+				  "reason": "Sản phẩm bị lỗi đường may",
+				  "items": [
+				    {
+				      "orderItemId": "%s",
+				      "productId": "01JBQ9PROD0000000000000001",
+				      "variantId": "%s",
+				      "quantity": 1
+				    }
+				  ]
+				}
+				""".formatted(orderItemId, variantId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.items[0].variantId").value(variantId));
+
+		assertThat(returnRepository.count()).isEqualTo(1);
 	}
 
 	@Test

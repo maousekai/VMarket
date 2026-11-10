@@ -37,7 +37,7 @@ public class OrderItem extends BaseEntity {
 	private String productId;
 
 	/** Biến thể (màu/size...). Sản phẩm không có biến thể thì null. */
-	@Column(name = "variant_id", length = ID_LENGTH)
+	@Column(name = "variant_id", length = VARIANT_ID_LENGTH)
 	private String variantId;
 
 	/** Gian hàng bán item này — client dùng để nhóm hiển thị (FR-CART-02). */

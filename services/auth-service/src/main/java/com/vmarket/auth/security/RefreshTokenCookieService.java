@@ -8,6 +8,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 import com.vmarket.auth.config.AuthRefreshCookieProperties;
+import com.vmarket.auth.dto.TokenResponse;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,12 +26,23 @@ import lombok.RequiredArgsConstructor;
 public class RefreshTokenCookieService {
 
 	public static final String COOKIE_NAME = "refresh_token";
+	public static final String CLIENT_TYPE_HEADER = "X-Client-Type";
+	public static final String REFRESH_HEADER = "X-Refresh-Token";
+	private static final String MOBILE_CLIENT = "mobile";
 	private static final String PATH = "/api/auth";
 
 	private final AuthRefreshCookieProperties props;
 
-	/** Gắn cookie chứa refresh token gốc, sống bằng đúng TTL của token trong DB. */
-	public void attach(HttpServletResponse response, String rawToken, Duration ttl) {
+	/**
+	 * Gắn cookie chứa refresh token gốc, sống bằng đúng TTL của token trong DB.
+	 * Client native KHÔNG nhận cookie: token của họ đi theo body/header
+	 * ({@link #decorate}, {@link #REFRESH_HEADER}); cookie jar của RN vẫn lưu Set-Cookie nên
+	 * nếu ghi thêm cookie thì hai nguồn token có thể lệch nhau sau mỗi lần xoay vòng.
+	 */
+	public void attach(HttpServletRequest request, HttpServletResponse response, String rawToken, Duration ttl) {
+		if (isNativeMobileRequest(request)) {
+			return;
+		}
 		response.addHeader(HttpHeaders.SET_COOKIE, build(rawToken, ttl).toString());
 	}
 
@@ -39,18 +51,43 @@ public class RefreshTokenCookieService {
 		response.addHeader(HttpHeaders.SET_COOKIE, build("", Duration.ZERO).toString());
 	}
 
-	/** Đọc raw refresh token từ cookie của request, nếu có. */
+	/**
+	 * Đọc raw refresh token của request. Client native (xem {@link #isNativeMobileRequest}) ưu
+	 * tiên header {@code X-Refresh-Token} — nguồn duy nhất họ ghi — rồi mới tới cookie (có thể
+	 * là bản cũ trong cookie jar). Web chỉ đọc cookie HttpOnly.
+	 */
 	public Optional<String> read(HttpServletRequest request) {
-		Cookie[] cookies = request.getCookies();
-		if (cookies == null) {
-			return Optional.empty();
+		if (isNativeMobileRequest(request)) {
+			String header = request.getHeader(REFRESH_HEADER);
+			if (header != null && !header.isBlank()) {
+				return Optional.of(header.trim());
+			}
 		}
-		for (Cookie cookie : cookies) {
-			if (COOKIE_NAME.equals(cookie.getName()) && !cookie.getValue().isBlank()) {
-				return Optional.of(cookie.getValue());
+		Cookie[] cookies = request.getCookies();
+		if (cookies != null) {
+			for (Cookie cookie : cookies) {
+				if (COOKIE_NAME.equals(cookie.getName()) && !cookie.getValue().isBlank()) {
+					return Optional.of(cookie.getValue());
+				}
 			}
 		}
 		return Optional.empty();
+	}
+
+	/**
+	 * Client native opt-in: {@code X-Client-Type: mobile} và KHÔNG có {@code Origin} lẫn
+	 * {@code Referer}. Trình duyệt luôn gửi Origin trên POST fetch, nên payload XSS không
+	 * thể tự opt-in để lấy refresh token ra body (giữ nguyên bảo vệ PBL6-46 cho web).
+	 */
+	public boolean isNativeMobileRequest(HttpServletRequest request) {
+		return MOBILE_CLIENT.equalsIgnoreCase(request.getHeader(CLIENT_TYPE_HEADER))
+				&& request.getHeader("Origin") == null
+				&& request.getHeader("Referer") == null;
+	}
+
+	/** Gắn refresh token vào body nếu request là client native; ngược lại giữ nguyên body. */
+	public TokenResponse decorate(HttpServletRequest request, TokenResponse body, String rawToken, Duration ttl) {
+		return isNativeMobileRequest(request) ? body.withRefreshToken(rawToken, ttl.toSeconds()) : body;
 	}
 
 	private ResponseCookie build(String value, Duration maxAge) {

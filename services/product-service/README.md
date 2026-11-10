@@ -152,7 +152,7 @@ queue versioned `ai-search.events.v2`.
 | `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | `guest` / `guest` | Tài khoản RabbitMQ dev |
 | `AUTH_JWT_SECRET` | Không có (bắt buộc ở mọi profile); giá trị dev trong `.env.example` | Khóa HS256 dùng chung với auth-service để verify token |
 | `INTERNAL_API_KEY` | Không có (bắt buộc ở mọi profile); giá trị dev trong `.env.example` | Khóa gọi API nội bộ |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://localhost:3000` | Các origin frontend được phép |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006` | Các origin frontend được phép |
 | `EVENTS_LISTEN` | `true` | Bật consumer RabbitMQ |
 | `EVENTS_QUEUE` | `product.events.v2` | Queue nhận sự kiện |
 | `OUTBOX_ENABLED` | `true` | Bật dispatcher transactional outbox |

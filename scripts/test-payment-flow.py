@@ -116,7 +116,13 @@ class Dependencies(BaseHTTPRequestHandler):
         self.reply(None, 204)
 
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path == "/api/cart/validate":
+            # Order builds its orders from the validated lines, so the stub must return the same item as GET /api/cart.
+            item = dict(productId=PRODUCT, variantId=VARIANT, shopId=SHOP, quantity=1, unitPrice=3000)
+            self.reply(dict(ok=True, issues=[], items=[item]))
+            return
+        body = json.loads(raw) if raw else {}
         if self.path.endswith("/cancel"):
             code = int(self.path.split("/")[-2])
             if self.links[code]["status"] != "PAID":
@@ -238,8 +244,10 @@ class Suite:
                            reservedStock=0, soldCount=0, deleted=False)])) + ")")
 
     def create(self, method="PAYOS"):
-        order = http("POST", self.order + "/api/orders", dict(addressId=ADDRESS, paymentMethod=method), self.token, 201)
-        oid = order["id"]
+        # POST /api/orders returns {checkoutId, totalAmount, orders:[...]}; the fixture cart has one shop.
+        placed = http("POST", self.order + "/api/orders", dict(addressId=ADDRESS, paymentMethod=method), self.token, 201)
+        assert len(placed["orders"]) == 1, placed
+        oid = placed["orders"][0]["id"]
         wait_for("stock reserved", lambda: http("GET", self.order + "/api/orders/" + oid, token=self.token)["stockReserved"])
         with concurrent.futures.ThreadPoolExecutor(8) as pool:
             results = list(pool.map(lambda _: http("POST", self.payment + "/api/payments", dict(orderId=oid), self.token), range(8)))

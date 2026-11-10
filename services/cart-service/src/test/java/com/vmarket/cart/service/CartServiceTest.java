@@ -29,7 +29,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -211,6 +213,59 @@ class CartServiceTest {
 
 		assertThat(store).doesNotContainKey("cart:user-1");
 		assertThat(cartService.getCart("user-1").groups()).isEmpty();
+	}
+
+	// ------------------------------------------------------------ Redis chết giữa chừng
+
+	/**
+	 * Redis chết lúc đang chạy: Lettuce xếp lệnh vào hàng đợi chờ timeout rồi ném
+	 * {@code QueryTimeoutException}/{@code RedisSystemException} (không phải
+	 * {@code RedisConnectionFailureException}). Mọi đường đọc/ghi phải quy về
+	 * {@link CartStorageException} (→ 503), không để lọt ra thành 500.
+	 */
+	@Test
+	void redisDocBiQueryTimeout_getCartVaAddItemDeuNemCartStorageException() {
+		doThrow(new QueryTimeoutException("Redis command timed out"))
+				.when(ops).get(anyString());
+
+		assertThatThrownBy(() -> cartService.getCart("user-1"))
+				.isInstanceOf(CartStorageException.class);
+		assertThatThrownBy(() -> cartService.addItem("user-1", add("p1", null, "shop-1", 1, "1000")))
+				.isInstanceOf(CartStorageException.class);
+		verify(ops, never()).set(anyString(), anyString(), any(Duration.class));
+	}
+
+	@Test
+	void redisDocBiRedisSystemException_getCartVaAddItemDeuNemCartStorageException() {
+		doThrow(new RedisSystemException("Redis exception", new RuntimeException("io")))
+				.when(ops).get(anyString());
+
+		assertThatThrownBy(() -> cartService.getCart("user-1"))
+				.isInstanceOf(CartStorageException.class);
+		assertThatThrownBy(() -> cartService.addItem("user-1", add("p1", null, "shop-1", 1, "1000")))
+				.isInstanceOf(CartStorageException.class);
+	}
+
+	@Test
+	void redisGhiBiQueryTimeout_addItemNemCartStorageException() {
+		doThrow(new QueryTimeoutException("Redis command timed out"))
+				.when(ops).set(anyString(), anyString(), any(Duration.class));
+
+		assertThatThrownBy(() -> cartService.addItem("user-1", add("p1", null, "shop-1", 1, "1000")))
+				.isInstanceOf(CartStorageException.class);
+	}
+
+	@Test
+	void redisXoaLoi_clearCartNemCartStorageException() {
+		doThrow(new QueryTimeoutException("Redis command timed out"))
+				.when(redis).delete(anyString());
+		assertThatThrownBy(() -> cartService.clearCart("user-1"))
+				.isInstanceOf(CartStorageException.class);
+
+		doThrow(new RedisSystemException("Redis exception", new RuntimeException("io")))
+				.when(redis).delete(anyString());
+		assertThatThrownBy(() -> cartService.clearCart("user-1"))
+				.isInstanceOf(CartStorageException.class);
 	}
 
 	@Test

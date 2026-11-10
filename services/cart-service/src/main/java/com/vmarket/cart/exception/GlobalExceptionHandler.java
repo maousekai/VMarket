@@ -2,6 +2,7 @@ package com.vmarket.cart.exception;
 
 import java.util.List;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -69,6 +70,21 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(CartStorageException.class)
 	public ResponseEntity<ErrorResponse> handleStorage(CartStorageException ex) {
 		log.error("Cart storage (Redis) unavailable", ex);
+		return storageUnavailable();
+	}
+
+	/**
+	 * Lưới an toàn: lỗi truy cập dữ liệu lọt ra ngoài {@code CartService} (vd
+	 * {@code QueryTimeoutException}, {@code RedisSystemException} khi Redis chết giữa chừng)
+	 * cũng là lỗi hạ tầng tạm thời → cùng body 503, không rơi vào 500 INTERNAL_ERROR.
+	 */
+	@ExceptionHandler(DataAccessException.class)
+	public ResponseEntity<ErrorResponse> handleDataAccess(DataAccessException ex) {
+		log.error("Cart storage (Redis) data access error", ex);
+		return storageUnavailable();
+	}
+
+	private static ResponseEntity<ErrorResponse> storageUnavailable() {
 		return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
 				.body(ErrorResponse.of("CART_STORAGE_UNAVAILABLE",
 						"Dịch vụ giỏ hàng tạm thời không khả dụng, vui lòng thử lại"));

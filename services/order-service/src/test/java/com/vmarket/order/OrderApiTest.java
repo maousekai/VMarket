@@ -67,6 +67,27 @@ class OrderApiTest {
     @org.junit.jupiter.api.BeforeEach
     void paymentClock() {
         when(paymentClock.instant()).thenReturn(java.time.Instant.parse("2026-10-19T12:00:00Z"));
+        // Mặc định validate ok kèm đúng các item của cartWithItems(): đơn được dựng từ items của
+        // validate chứ không phải từ GET /api/cart.
+        when(cartServiceClient.validateCart(anyString())).thenReturn(okValidation(cartWithItems()));
+    }
+
+    private static CartServiceClient.CartValidationView okValidation(
+            CartServiceClient.CartView cart) {
+        return new CartServiceClient.CartValidationView(
+                true,
+                List.of(),
+                cart.groups().stream()
+                        .flatMap(group -> group.items().stream())
+                        .map(
+                                i ->
+                                        new CartServiceClient.ValidatedItemView(
+                                                i.productId(),
+                                                i.variantId(),
+                                                i.shopId(),
+                                                i.quantity(),
+                                                i.unitPrice()))
+                        .toList());
     }
 
     /**
@@ -182,10 +203,10 @@ class OrderApiTest {
                                                 + ADDRESS_ID
                                                 + "\",\"note\":\"Giao giờ hành chính\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"))
-                .andExpect(jsonPath("$.recipientName").value("Nguyễn Văn An"))
-                .andExpect(jsonPath("$.totalAmount").value(750000.00))
-                .andExpect(jsonPath("$.items.length()").value(2));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.orders[0].recipientName").value("Nguyễn Văn An"))
+                .andExpect(jsonPath("$.orders[0].totalAmount").value(750000.00))
+                .andExpect(jsonPath("$.orders[0].items.length()").value(2));
 
         // Tổng tiền được tính lại ở tầng service từ unitPrice * quantity, KHÔNG tin
         // cart-service; verify bằng dữ liệu thật trong DB chứ không chỉ response.
@@ -229,7 +250,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.district").value(nullValue()));
+                .andExpect(jsonPath("$.orders[0].district").value(nullValue()));
 
         Order saved = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0);
         assertThat(saved.getDistrict()).isNull();
@@ -249,8 +270,8 @@ class OrderApiTest {
                                                 + ADDRESS_ID
                                                 + "\",\"paymentMethod\":\"PAYOS\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("WAITING_PAYMENT"))
-                .andExpect(jsonPath("$.paymentExpiresAt").value("2026-10-19T12:10:00Z"));
+                .andExpect(jsonPath("$.orders[0].status").value("WAITING_PAYMENT"))
+                .andExpect(jsonPath("$.orders[0].paymentExpiresAt").value("2026-10-19T12:10:00Z"));
     }
 
     @Test
@@ -363,7 +384,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"));
 
         // Gửi lại cùng key -> vẫn trả 201 kèm dữ liệu đơn cũ, không tạo thêm đơn mới
         mockMvc.perform(
@@ -373,7 +394,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"));
 
         // Chỉ có đúng 1 đơn được lưu trong database
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
@@ -453,7 +474,7 @@ class OrderApiTest {
         for (org.springframework.test.web.servlet.MvcResult result : results) {
             assertThat(result.getResponse().getStatus()).isEqualTo(201);
             String content = result.getResponse().getContentAsString();
-            String orderId = com.jayway.jsonpath.JsonPath.read(content, "$.id");
+            String orderId = com.jayway.jsonpath.JsonPath.read(content, "$.orders[0].id");
             assertThat(orderId).isNotBlank();
             if (firstOrderId == null) {
                 firstOrderId = orderId;
@@ -526,9 +547,9 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"))
                 .andReturn();
-        String orderIdB = com.jayway.jsonpath.JsonPath.read(resB.getResponse().getContentAsString(), "$.id");
+        String orderIdB = com.jayway.jsonpath.JsonPath.read(resB.getResponse().getContentAsString(), "$.orders[0].id");
 
         // Báo hiệu Request B đã commit xong
         bCommitted.countDown();
@@ -536,13 +557,147 @@ class OrderApiTest {
         // Request A hoàn tất: nhận giỏ rỗng nhưng phát hiện đơn B đã tạo -> trả về 201 Created cùng ID
         org.springframework.test.web.servlet.MvcResult resA = futureA.get(5, java.util.concurrent.TimeUnit.SECONDS);
         assertThat(resA.getResponse().getStatus()).isEqualTo(201);
-        String orderIdA = com.jayway.jsonpath.JsonPath.read(resA.getResponse().getContentAsString(), "$.id");
+        String orderIdA = com.jayway.jsonpath.JsonPath.read(resA.getResponse().getContentAsString(), "$.orders[0].id");
         assertThat(orderIdA).isEqualTo(orderIdB);
 
         // Database chỉ lưu duy nhất 1 đơn
         var orders = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE);
         assertThat(orders).hasSize(1);
         assertThat(orders.get(0).getId()).isEqualTo(orderIdB);
+    }
+
+    /**
+     * Retry đồng thời cùng Idempotency-Key: request B đã tạo đơn và xoá giỏ trước khi request A
+     * gọi validate, nên validate của A thấy CART_EMPTY. A phải trả lại đơn của B (201) thay vì 409
+     * CART_CHANGED dù đơn đã tạo xong.
+     */
+    @Test
+    void placeOrderConcurrentRetryWhenValidateSeesEmptiedCartReturnsExistingOrder()
+            throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        String key = "retry-validate-empty-" + System.currentTimeMillis();
+
+        java.util.concurrent.CountDownLatch aAtValidate = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch bCommitted = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean aFirstCall =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+
+        // Request A (lần gọi validate đầu) bị giữ lại tới khi B commit xong; khi tiếp tục, giỏ đã
+        // bị B xoá nên validate báo CART_EMPTY. Request B (lần gọi sau) thấy giỏ đầy đủ → ok.
+        when(cartServiceClient.validateCart(eq(ALICE)))
+                .thenAnswer(
+                        inv -> {
+                            if (aFirstCall.compareAndSet(true, false)) {
+                                aAtValidate.countDown();
+                                try {
+                                    bCommitted.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                                } catch (Exception e) {
+                                    throw new RuntimeException("Timeout waiting for Request B", e);
+                                }
+                                return new CartServiceClient.CartValidationView(
+                                        false,
+                                        List.of(
+                                                new CartServiceClient.CartIssueView(
+                                                        null,
+                                                        null,
+                                                        "CART_EMPTY",
+                                                        "Giỏ hàng trống, không thể thanh toán",
+                                                        null,
+                                                        null,
+                                                        null,
+                                                        null)),
+                                        List.of());
+                            }
+                            return okValidation(cartWithItems());
+                        });
+
+        java.util.concurrent.CompletableFuture<org.springframework.test.web.servlet.MvcResult>
+                futureA =
+                        java.util.concurrent.CompletableFuture.supplyAsync(
+                                () -> {
+                                    try {
+                                        return mockMvc.perform(
+                                                        post("/api/orders")
+                                                                .header(
+                                                                        HttpHeaders.AUTHORIZATION,
+                                                                        aliceToken())
+                                                                .header("Idempotency-Key", key)
+                                                                .contentType(
+                                                                        MediaType.APPLICATION_JSON)
+                                                                .content(
+                                                                        "{\"addressId\":\""
+                                                                                + ADDRESS_ID
+                                                                                + "\"}"))
+                                                .andReturn();
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                });
+
+        assertThat(aAtValidate.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        var resB =
+                mockMvc.perform(
+                                post("/api/orders")
+                                        .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                        .header("Idempotency-Key", key)
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                        .andExpect(status().isCreated())
+                        .andReturn();
+        String orderIdB =
+                com.jayway.jsonpath.JsonPath.read(
+                        resB.getResponse().getContentAsString(), "$.orders[0].id");
+        bCommitted.countDown();
+
+        org.springframework.test.web.servlet.MvcResult resA =
+                futureA.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(resA.getResponse().getStatus()).isEqualTo(201);
+        String orderIdA =
+                com.jayway.jsonpath.JsonPath.read(
+                        resA.getResponse().getContentAsString(), "$.orders[0].id");
+        assertThat(orderIdA).isEqualTo(orderIdB);
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+        // Chỉ B xoá giỏ (2 item); A trả đơn cũ nên không xoá thêm gì.
+        verify(cartServiceClient, times(2)).removeCartItem(eq(ALICE), anyString(), any());
+    }
+
+    /** Có Idempotency-Key nhưng chưa có đơn nào: validate CART_EMPTY vẫn là 409 CART_CHANGED. */
+    @Test
+    void placeOrderWithKeyAndEmptiedCartButNoExistingOrderStillReturns409() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.validateCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartValidationView(
+                                false,
+                                List.of(
+                                        new CartServiceClient.CartIssueView(
+                                                null,
+                                                null,
+                                                "CART_EMPTY",
+                                                "Giỏ hàng trống, không thể thanh toán",
+                                                null,
+                                                null,
+                                                null,
+                                                null)),
+                                List.of()));
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "no-order-yet-key")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CART_CHANGED"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+        verify(cartServiceClient, never()).removeCartItem(anyString(), anyString(), any());
     }
 
     @Test
@@ -560,7 +715,7 @@ class OrderApiTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"));
+                .andExpect(jsonPath("$.orders[0].status").value("PENDING"));
 
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
     }

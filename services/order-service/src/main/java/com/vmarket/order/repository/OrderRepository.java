@@ -42,7 +42,7 @@ public interface OrderRepository extends JpaRepository<Order, String> {
 	 * Tra cứu đơn đã tạo bởi idempotency key: nếu tồn tại → trả lại đơn cũ
 	 * thay vì tạo đơn mới (chống retry / gửi đồng thời — P1 review PR #25).
 	 */
-	Optional<Order> findByUserIdAndIdempotencyKey(String userId, String idempotencyKey);
+	List<Order> findAllByUserIdAndIdempotencyKey(String userId, String idempotencyKey);
 
 	/** Dòng item của một gian hàng trong khoảng thời gian — nguồn cho thống kê seller. */
 	@Query("""

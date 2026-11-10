@@ -42,3 +42,4 @@ docker-compose.override.yml
 # Local ticket copies and implementation plans
 /tickets/
 /plans/
+.logs/

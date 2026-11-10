@@ -7,6 +7,10 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Timeout ngắn để Redis chết giữa chừng trả 503 CART_STORAGE_UNAVAILABLE nhanh, thay vì
+      # Lettuce xếp lệnh vào hàng đợi chờ ~60s. Hardcode có chủ đích (không thêm biến env).
+      timeout: 2s
+      connect-timeout: 1s
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -24,7 +28,7 @@ management:
 
 app:
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
   cart:
     # TTL của giỏ trong Redis (ngày) - refresh mỗi lần ghi
     ttl-days: ${CART_TTL_DAYS:30}

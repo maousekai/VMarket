@@ -98,21 +98,22 @@ async function retry(
 }
 
 function otpFromAuthLogs(email) {
-  const logs = execFileSync(
-    "docker",
-    ["compose", "logs", "--since", "15m", "auth-service"],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      maxBuffer: 32 * 1024 * 1024,
-    },
-  );
+  // SEED_AUTH_LOG_FILE: read the log of an auth-service started with `spring-boot:run`
+  // (e.g. .logs/auth-service.log) instead of the docker compose container logs.
+  const logs = process.env.SEED_AUTH_LOG_FILE
+    ? readFileSync(process.env.SEED_AUTH_LOG_FILE, "utf8")
+    : execFileSync("docker", ["compose", "logs", "--since", "15m", "auth-service"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        maxBuffer: 32 * 1024 * 1024,
+      });
   const entries = logs
     .split(`[DEV EMAIL] to=${email} | subject=`)
     .slice(1)
     .reverse();
   for (const entry of entries) {
-    const match = entry.match(/Mã xác thực email của bạn là:\s*(\d{6})/);
+    // Encoding-agnostic: the first standalone 6-digit number right after the header line.
+    const match = entry.slice(0, 400).match(/\b(\d{6})\b/);
     if (match) return match[1];
   }
   throw new NotYet("OTP not in log yet");

@@ -41,7 +41,7 @@ import lombok.Setter;
 		uniqueConstraints = {
 			@UniqueConstraint(
 					name = "idx_orders_user_idempotency",
-					columnNames = {"user_id", "idempotency_key"})
+					columnNames = {"user_id", "idempotency_key", "shop_id"})
 		})
 @Getter
 @Setter
@@ -50,6 +50,14 @@ public class Order extends BaseEntity {
 
 	@Column(name = "user_id", nullable = false, length = ID_LENGTH)
 	private String userId;
+
+	/** Shop sở hữu đơn (mỗi shop trong giỏ -> một đơn). {@code null} với đơn cũ nhiều shop. */
+	@Column(name = "shop_id", length = ID_LENGTH)
+	private String shopId;
+
+	/** Mã chung của các đơn sinh ra từ cùng một lần checkout. {@code null} với đơn cũ. */
+	@Column(name = "checkout_id", length = ID_LENGTH)
+	private String checkoutId;
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 20)

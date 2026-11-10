@@ -32,7 +32,7 @@ public class OrderReturnItem extends BaseEntity {
 	@Column(name = "product_id", nullable = false, length = ID_LENGTH)
 	private String productId;
 
-	@Column(name = "variant_id", length = ID_LENGTH)
+	@Column(name = "variant_id", length = VARIANT_ID_LENGTH)
 	private String variantId;
 
 	@Column(nullable = false)

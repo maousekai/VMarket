@@ -280,7 +280,7 @@ services:
       <<: *common-environment
       DB_NAME: vmarket_auth
       # Origin FE duoc phep (trung voi CORS_ALLOWED_ORIGINS trong .env)
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # JWT (PBL6-41). Secret va INTERNAL_API_KEY KHONG co mac dinh (PBL6-51): lay
       # nguyen tu .env / shell. Thieu thi container nhan chuoi rong va service
       # dung lai luc khoi dong (bat buoc >= 32 ky tu) thay vi chay bang secret cong
@@ -341,7 +341,7 @@ services:
     environment:
       <<: *common-environment
       DB_NAME: vmarket_user
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # user-service chi VERIFY token do auth-service ky. HS256 la thuat toan doi
       # xung nen hai service PHAI dung chung mot chuoi bi mat - dat lech nhau se
       # dan toi canh dang nhap thanh cong nhung moi API ho so deu tra 401.
@@ -389,7 +389,7 @@ services:
     environment:
       <<: *common-environment
       DB_NAME: vmarket_shop
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # shop-service chi VERIFY token do auth-service ky (HS256 doi xung) - PHAI
       # trung AUTH_JWT_SECRET cua block auth-service, lech la moi API tra 401.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
@@ -438,7 +438,7 @@ services:
     environment:
       <<: *common-environment
       DB_NAME: vmarket_order
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # PHAI TRUNG AUTH_JWT_SECRET cua auth-service de verify access token.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # shop-service goi /internal/orders/** bang cung khoa nay; cart-service
@@ -476,7 +476,7 @@ services:
     environment:
       <<: *common-environment
       DB_NAME: vmarket_product
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # PHAI TRUNG AUTH_JWT_SECRET cua auth-service de verify access token.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # order-service / shop-service goi /internal/** bang cung khoa nay.
@@ -518,7 +518,7 @@ services:
       DB_NAME: vmarket_chatbot
       # Chatbot tu verify token do auth-service ky - PHAI trung AUTH_JWT_SECRET.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # order-service / product-service cung chay trong compose -> goi qua ten service.
       ORDER_SERVICE_URL: http://order-service:8086
       PRODUCT_SERVICE_URL: http://product-service:8084
@@ -567,7 +567,7 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # Origin FE duoc phep goi API qua gateway (phai trung voi FRONTEND_PORT).
       # Spring relaxed binding: APP_CORS_ALLOWED_ORIGINS -> app.cors.allowed-origins
-      APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      APP_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8081,http://localhost:19006}
       # Rate limit theo IP (mac dinh bat). Chi tat tren moi truong test khi chay
       # kiem thu hieu nang tu mot may (perf/README.md).
       APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}

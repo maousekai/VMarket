@@ -30,6 +30,9 @@ public abstract class BaseEntity {
 	/** Độ dài ULID chuỗi (Crockford base32) — dùng chung cho mọi cột id / FK. */
 	public static final int ID_LENGTH = 26;
 
+	/** Variant ids come from product-service as UUIDs (36 chars), unlike the 26-char ULIDs we generate. */
+	public static final int VARIANT_ID_LENGTH = 64;
+
 	@Id
 	@Column(length = ID_LENGTH, updatable = false, nullable = false)
 	private String id;

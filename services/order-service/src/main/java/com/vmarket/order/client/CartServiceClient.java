@@ -99,6 +99,46 @@ public class CartServiceClient {
 	}
 
 	/**
+	 * Kiểm tra lại giỏ với product-service qua {@code POST /api/cart/validate} (giá, shop, tồn kho)
+	 * để chặn giá/shop do client tự đặt.
+	 *
+	 * @return kết quả kiểm tra; {@code ok=false} kèm danh sách vấn đề
+	 * @throws ApiException 503 {@code CART_VALIDATION_UNAVAILABLE} khi cart-service không trả lời
+	 *         hoặc lỗi hạ tầng; 4xx nghiệp vụ được chuyển tiếp
+	 */
+	public CartValidationView validateCart(String userId) {
+		try {
+			CartValidationView result = restClient.post()
+					.uri("/api/cart/validate")
+					.header(HEADER_USER_ID, userId)
+					.retrieve()
+					.body(CartValidationView.class);
+			if (result == null) {
+				log.error("cart-service trả body rỗng cho POST /api/cart/validate");
+				throw validationUnavailable();
+			}
+			return result;
+		} catch (RestClientResponseException ex) {
+			if (ex.getStatusCode().is5xxServerError()) {
+				log.error("cart-service trả HTTP {} khi validate giỏ", ex.getStatusCode().value());
+				throw validationUnavailable();
+			}
+			throw translate(ex);
+		} catch (ResourceAccessException ex) {
+			log.error("Không validate được giỏ với cart-service: {}", ex.getMessage());
+			throw validationUnavailable();
+		} catch (RestClientException ex) {
+			log.error("Response validate không hợp lệ từ cart-service: {}", ex.getMessage());
+			throw validationUnavailable();
+		}
+	}
+
+	private static ApiException validationUnavailable() {
+		return new ApiException("CART_VALIDATION_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE,
+				"Chưa kiểm tra được giỏ hàng, vui lòng thử lại sau");
+	}
+
+	/**
 	 * Xoá toàn bộ giỏ sau khi tạo đơn thành công (FR-ORDER-01).
 	 *
 	 * <p><b>Chạy SAU khi đơn đã commit.</b> Xoá hỏng không được phép làm hỏng đơn:
@@ -227,6 +267,46 @@ public class CartServiceClient {
 	}
 
 	record ErrorDetail(String code, String message) {
+	}
+
+	/**
+	 * Response {@code POST /api/cart/validate}: {@code {ok, issues[], items[]}}.
+	 *
+	 * <p>{@code items} là ĐÚNG danh sách dòng hàng mà cart-service đã kiểm tra giá/shop/tồn kho
+	 * trong lần gọi này (luôn có, kể cả khi {@code ok=false}). Order-service dựng đơn từ chính
+	 * danh sách này thay vì từ snapshot {@code GET /api/cart} đọc trước đó, để sửa giỏ xen giữa
+	 * hai lần đọc không làm đơn lệch với thứ đã được kiểm tra.
+	 */
+	public record CartValidationView(
+			boolean ok, List<CartIssueView> issues, List<ValidatedItemView> items) {
+		public List<CartIssueView> issues() {
+			return issues == null ? List.of() : issues;
+		}
+
+		public List<ValidatedItemView> items() {
+			return items == null ? List.of() : items;
+		}
+	}
+
+	/** Một dòng hàng đã được cart-service kiểm tra trong {@code POST /api/cart/validate}. */
+	public record ValidatedItemView(
+			String productId,
+			String variantId,
+			String shopId,
+			int quantity,
+			BigDecimal unitPrice) {
+	}
+
+	/** Một vấn đề của giỏ: type = PRICE_CHANGED | SHOP_CHANGED | OUT_OF_STOCK | NOT_FOUND | ... */
+	public record CartIssueView(
+			String productId,
+			String variantId,
+			String type,
+			String message,
+			BigDecimal cartPrice,
+			BigDecimal currentPrice,
+			Integer requestedQuantity,
+			Integer availableStock) {
 	}
 
 	/** Hình dạng response {@code GET /api/cart} của cart-service — nhóm theo shop. */

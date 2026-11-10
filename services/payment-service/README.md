@@ -38,8 +38,10 @@ small real payment. No real transaction was performed for this PR.
 
 All APIs require an auth-service bearer JWT except health, docs and the signed webhook.
 
-1. `POST /api/orders` with `addressId`, optional `note`, `paymentMethod: "PAYOS"`.
-   Omitting the method preserves COD behavior. PayOS orders wait in `WAITING_PAYMENT`.
+
+   Omitting the method preserves COD behavior. The cart is split into one order per shop and the
+   response is `{checkoutId, totalAmount, orders[]}`; every PayOS order waits in `WAITING_PAYMENT`
+   with its own deadline and is paid separately (one payment link per order id).
 2. Order emits `OrderPlaced` via its SQL outbox. Product holds inventory and returns
    `StockReserved`; stock failure cancels the order. Payment is blocked before reservation.
    This step is asynchronous. Frontend polls `GET /api/orders/{id}` until `stockReserved=true`

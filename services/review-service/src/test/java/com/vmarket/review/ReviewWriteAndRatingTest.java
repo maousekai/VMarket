@@ -42,6 +42,18 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 	PlatformTransactionManager transactionManager;
 
 	@Test
+	void buyerReviewsProductOfCompletedOrder() throws Exception {
+		givenOrder("order-completed", "COMPLETED", PRODUCT);
+
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-completed", PRODUCT, 4, List.of())))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.rating").value(4));
+	}
+
+	@Test
 	void buyerReviewsDeliveredProductWithImages() throws Exception {
 		givenOrder("order-1", "DELIVERED", PRODUCT);
 		List<String> images = List.of("https://cdn.vmarket.vn/r/1.jpg", "https://cdn.vmarket.vn/r/2.jpg");

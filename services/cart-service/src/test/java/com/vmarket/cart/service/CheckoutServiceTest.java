@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import com.vmarket.cart.dto.CheckoutCheckResponse;
 import com.vmarket.cart.dto.CheckoutIssueDto;
+import com.vmarket.cart.dto.CheckoutItemDto;
 import com.vmarket.cart.dto.ProductSnapshot;
 
 /**
@@ -184,6 +185,90 @@ class CheckoutServiceTest {
 		assertThat(response.ok()).isFalse();
 		assertThat(response.issues()).hasSize(1);
 		assertThat(response.issues().get(0).type()).isEqualTo(CheckoutService.TYPE_PRODUCT_DATA_INVALID);
+	}
+
+	/**
+	 * Sản phẩm có nhiều biến thể mà item không chọn phân loại (variantId == null) từng được
+	 * chấp nhận với giá thấp nhất/tổng tồn của sản phẩm. Nay phải bị từ chối.
+	 */
+	@Test
+	void sanPhamNhieuBienThe_itemKhongCoVariant_traVeIssueNotFound() {
+		when(cartService.items("user-1")).thenReturn(List.of(item("p1", null, 1, "90000")));
+		when(catalog.findProduct("p1")).thenReturn(Optional.of(new ProductSnapshot(
+				"p1", "shop-1", new BigDecimal("90000"), 5,
+				List.of(new ProductSnapshot.VariantSnapshot("red", new BigDecimal("100000"), 2),
+						new ProductSnapshot.VariantSnapshot("blue", new BigDecimal("90000"), 3)))));
+
+		CheckoutCheckResponse response = checkoutService.validate("user-1");
+
+		assertThat(response.ok()).isFalse();
+		assertThat(response.issues()).hasSize(1);
+		assertThat(response.issues().get(0).type()).isEqualTo(CheckoutService.TYPE_NOT_FOUND);
+		assertThat(response.issues().get(0).message()).isEqualTo("Vui lòng chọn phân loại sản phẩm");
+	}
+
+	/** Sản phẩm có danh sách biến thể RỖNG vẫn là sản phẩm đơn: item không variant hợp lệ. */
+	@Test
+	void sanPhamKhongCoBienThe_danhSachRong_itemKhongVariantVanHopLe() {
+		when(cartService.items("user-1")).thenReturn(List.of(item("p1", null, 1, "100000")));
+		when(catalog.findProduct("p1")).thenReturn(Optional.of(
+				new ProductSnapshot("p1", "shop-1", new BigDecimal("100000"), 10, List.of())));
+
+		assertThat(checkoutService.validate("user-1").ok()).isTrue();
+	}
+
+	// ------------------------------------------------------------ items trả kèm
+
+	@Test
+	void ok_traKemItemsDungThuDaKiemTra() {
+		when(cartService.items("user-1")).thenReturn(List.of(
+				item("p1", null, 2, "100000"), item("p2", "red", 1, "50000")));
+		when(catalog.findProduct("p1")).thenReturn(Optional.of(
+				new ProductSnapshot("p1", "shop-1", new BigDecimal("100000"), 10, null)));
+		when(catalog.findProduct("p2")).thenReturn(Optional.of(new ProductSnapshot(
+				"p2", "shop-1", new BigDecimal("50000"), 3,
+				List.of(new ProductSnapshot.VariantSnapshot("red", new BigDecimal("50000"), 3)))));
+
+		CheckoutCheckResponse response = checkoutService.validate("user-1");
+
+		assertThat(response.ok()).isTrue();
+		assertThat(response.items()).containsExactly(
+				new CheckoutItemDto("p1", null, "shop-1", 2, new BigDecimal("100000")),
+				new CheckoutItemDto("p2", "red", "shop-1", 1, new BigDecimal("50000")));
+	}
+
+	@Test
+	void coIssue_vanTraKemItems() {
+		when(cartService.items("user-1")).thenReturn(List.of(item("p1", null, 2, "100000")));
+		when(catalog.findProduct("p1")).thenReturn(Optional.of(
+				new ProductSnapshot("p1", "shop-1", new BigDecimal("89000"), 10, null)));
+
+		CheckoutCheckResponse response = checkoutService.validate("user-1");
+
+		assertThat(response.ok()).isFalse();
+		assertThat(response.items()).containsExactly(
+				new CheckoutItemDto("p1", null, "shop-1", 2, new BigDecimal("100000")));
+	}
+
+	@Test
+	void serviceUnavailable_vanTraKemTatCaItems() {
+		when(cartService.items("user-1"))
+				.thenReturn(List.of(item("p1", null, 1, "100000"), item("p2", null, 1, "100000")));
+		when(catalog.findProduct("p1"))
+				.thenThrow(new com.vmarket.cart.exception.ProductCatalogUnavailableException(
+						"không kết nối được", null));
+
+		CheckoutCheckResponse response = checkoutService.validate("user-1");
+
+		assertThat(response.ok()).isFalse();
+		assertThat(response.items()).extracting(CheckoutItemDto::productId).containsExactly("p1", "p2");
+	}
+
+	@Test
+	void gioRong_traItemsRongKhongPhaiNull() {
+		when(cartService.items("user-1")).thenReturn(List.of());
+
+		assertThat(checkoutService.validate("user-1").items()).isNotNull().isEmpty();
 	}
 
 	/** Biến thể thiếu giá cũng rơi vào cùng nhánh dữ liệu không hợp lệ. */
