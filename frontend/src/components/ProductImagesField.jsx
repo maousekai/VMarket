@@ -62,7 +62,15 @@ export default function ProductImagesField({
     if (failures.length) setProblems((current) => [...current, ...failures])
     if (urls.length) {
       onUploaded?.(urls)
-      onChange((current) => [...current, ...urls].slice(0, max))
+      // Cung mot file luon cho cung URL (kho anh dat ten theo noi dung): bo anh trung de thu tu
+      // va thao tac doi cho / xoa khong bi lech.
+      const known = new Set(value)
+      const fresh = [...new Set(urls)].filter((url) => !known.has(url))
+      const duplicates = urls.length - fresh.length
+      onChange((current) =>
+        [...current, ...fresh.filter((url) => !current.includes(url))].slice(0, max),
+      )
+      if (duplicates) setProblems((current) => [...current, 'Ảnh này đã có trong danh sách.'])
     }
   }
 

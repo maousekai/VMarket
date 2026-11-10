@@ -21,7 +21,8 @@ export const PRODUCT_STATUS = Object.freeze({
 // Gioi han cua ProductRequest phia backend (product-service).
 export const PRODUCT_LIMITS = Object.freeze({
   name: 200,
-  description: 10000,
+  // Backend nhan toi 10.000; giao dien gioi han ngan hon de mo ta gon, de doc.
+  description: 3000,
   images: 9,
   sku: 100,
   maxPageSize: 100,

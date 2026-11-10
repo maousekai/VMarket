@@ -247,7 +247,17 @@ export default function SellerProductsPage() {
                           <span className="seller-product-cell__placeholder" aria-hidden="true" />
                         )}
                         <div>
-                          <strong>{product.name}</strong>
+                          <strong>
+                            <Link
+                              to={
+                                product.status === 'ACTIVE' && !product.moderationRemoved
+                                  ? `/products/${encodeURIComponent(product.id)}`
+                                  : `/seller/products/${encodeURIComponent(product.id)}/edit`
+                              }
+                            >
+                              {product.name}
+                            </Link>
+                          </strong>
                           <small>SKU: {product.variants?.[0]?.sku}</small>
                         </div>
                       </div>

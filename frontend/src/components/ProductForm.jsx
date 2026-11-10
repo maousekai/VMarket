@@ -188,6 +188,9 @@ export default function ProductForm({ form, setForm, errors, categories, disable
             aria-invalid={Boolean(errors.description)}
             onChange={(event) => set({ description: event.target.value })}
           />
+          <small className="product-field__hint">
+            {form.description.length}/{PRODUCT_LIMITS.description} ký tự
+          </small>
           <FieldError message={errors.description} />
         </label>
       </section>

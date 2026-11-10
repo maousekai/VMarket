@@ -220,6 +220,18 @@ describe('ProductImagesField', () => {
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(1))
   })
 
+  it('ignores an image that is already in the list', async () => {
+    const upload = vi.fn().mockResolvedValue({ url: 'https://cdn/1.jpg' })
+    const onChange = vi.fn()
+    render(<ProductImagesField value={['https://cdn/1.jpg']} onChange={onChange} upload={upload} />)
+    fireEvent.change(screen.getByLabelText(/Thêm ảnh/), {
+      target: { files: [new File(['a'], 'a.png', { type: 'image/png' })] },
+    })
+    expect(await screen.findByText('Ảnh này đã có trong danh sách.')).toBeInTheDocument()
+    const updater = onChange.mock.calls[0][0]
+    expect(updater(['https://cdn/1.jpg'])).toEqual(['https://cdn/1.jpg'])
+  })
+
   it('rejects a GIF before uploading', async () => {
     const upload = vi.fn()
     render(<ProductImagesField value={[]} onChange={vi.fn()} upload={upload} />)
