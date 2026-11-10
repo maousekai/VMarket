@@ -3,7 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { getApiError } from '../services/api/apiClient'
 import { syncPayment } from '../services/api/paymentApi'
-import { clearPayosCheckout, findNextUnpaid, preparePayosPayment } from '../order/payos'
+import CheckoutOrderList from '../components/CheckoutOrderList'
+import {
+  clearPayosCheckout,
+  findNextUnpaid,
+  loadCheckoutOrders,
+  preparePayosPayment,
+} from '../order/payos'
 import { formatMoney } from '../utils/formatMoney'
 import { shortOrderId } from '../utils/order'
 import {
@@ -56,6 +62,7 @@ export default function PaymentPage() {
   const navigate = useNavigate()
   const [state, setState] = useState({ status: 'preparing', payment: null, error: '' })
   const [next, setNext] = useState(null)
+  const [batch, setBatch] = useState([])
   const payment = state.payment
   const remaining = useCountdown(isAwaitingPayment(payment) ? paymentDeadline(payment) : null)
   const expired = remaining != null && remaining <= 0
@@ -64,6 +71,7 @@ export default function PaymentPage() {
     let current = true
     setState({ status: 'preparing', payment: null, error: '' })
     setNext(null)
+    setBatch([])
     preparePayosPayment(orderId)
       .then((created) => current && setState({ status: 'ready', payment: created, error: '' }))
       .catch((failure) => {
@@ -103,10 +111,15 @@ export default function PaymentPage() {
   useEffect(() => {
     if (!paid) return undefined
     let current = true
-    findNextUnpaid(orderId).then((following) => {
+    findNextUnpaid(orderId).then(async (following) => {
       if (!current) return
       setNext(following)
-      if (!following) clearPayosCheckout()
+      if (following) return
+      // Da thanh toan het: liet ke moi don cua lan dat roi moi xoa hang doi.
+      const orders = await loadCheckoutOrders()
+      if (!current) return
+      setBatch(orders)
+      clearPayosCheckout()
     })
     return () => {
       current = false
@@ -144,6 +157,12 @@ export default function PaymentPage() {
           VMarket đã nhận {formatMoney(payment.amount)} cho đơn {shortOrderId(orderId)}. Đơn đang
           chờ gian hàng xác nhận.
         </p>
+        {!next && batch.length > 1 && (
+          <>
+            <p>Bạn đã thanh toán xong cả {batch.length} đơn của lần đặt hàng này.</p>
+            <CheckoutOrderList orders={batch} />
+          </>
+        )}
         {next && (
           <div className="order-result__next">
             <p>

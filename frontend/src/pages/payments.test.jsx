@@ -145,6 +145,28 @@ describe('PaymentPage', () => {
     )
   })
 
+  it('lists every order of the checkout once the last one is paid', async () => {
+    sessionStorage.setItem(
+      'vmarket.payosCheckout',
+      JSON.stringify({ queue: ['o1', ORDER], payments: {} }),
+    )
+    getOrder.mockImplementation(async (id) =>
+      id === ORDER
+        ? { ...waitingOrder, totalAmount: 249000 }
+        : { id: 'o1', status: 'PENDING', totalAmount: 120000 },
+    )
+    createPayment.mockResolvedValue(paid)
+    renderAt(`/payment/${ORDER}`)
+    const list = await screen.findByRole('list', { name: 'Các đơn vừa đặt' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getByText(/120\.000/)).toBeInTheDocument()
+    expect(
+      screen.getByText('Bạn đã thanh toán xong cả 2 đơn của lần đặt hàng này.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Thanh toán đơn tiếp theo' })).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('vmarket.payosCheckout')).toBeNull()
+  })
+
   it('explains an expired code', async () => {
     createPayment.mockResolvedValue({ ...pending, linkExpiresAt: minutes(-1) })
     renderAt(`/payment/${ORDER}`)

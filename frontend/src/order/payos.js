@@ -92,6 +92,17 @@ export async function findNextUnpaid(currentOrderId) {
   return null
 }
 
+/**
+ * Cac don cua lan dat hien tai khi lan dat co nhieu don (de man ket qua liet ke du), [] neu chi
+ * co mot don. Don khong doc duoc thi bo qua.
+ */
+export async function loadCheckoutOrders() {
+  const { queue } = readPayosCheckout()
+  if (queue.length < 2) return []
+  const orders = await Promise.all(queue.map((id) => getOrder(id).catch(() => null)))
+  return orders.filter(Boolean)
+}
+
 /** Bat dau thanh toan lan luot cac don vua dat: mo man QR cua don dau tien. */
 export function startPayosQueue(orderIds, navigate) {
   writePayosCheckout({ queue: [...orderIds], payments: {} })

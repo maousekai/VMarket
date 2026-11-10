@@ -3,9 +3,11 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getApiError } from '../services/api/apiClient'
 import { getOrder } from '../services/api/orderApi'
 import { syncPayment } from '../services/api/paymentApi'
+import CheckoutOrderList from '../components/CheckoutOrderList'
 import {
   clearPayosCheckout,
   findNextUnpaid,
+  loadCheckoutOrders,
   PENDING_PAYMENT_KEY,
   readPayosCheckout,
 } from '../order/payos'
@@ -115,18 +117,7 @@ function CheckoutSuccess({ ids }) {
               ? `Đã tạo ${state.orders.length} đơn theo từng gian hàng. ${COPY.success.text}`
               : COPY.success.text}
           </p>
-          <ul className="order-result__list">
-            {state.orders.map((order) => (
-              <li key={order.id}>
-                <span>
-                  <strong>Đơn {shortOrderId(order.id)}</strong>
-                  <small>{ORDER_STATUS_LABELS[order.status] || order.status}</small>
-                </span>
-                <strong>{formatMoney(order.totalAmount)}</strong>
-                <Link to={`/profile/orders/${encodeURIComponent(order.id)}`}>Xem đơn</Link>
-              </li>
-            ))}
-          </ul>
+          <CheckoutOrderList orders={state.orders} />
           <div className="account-actions">
             <Link className="button button--primary" to="/profile/orders">
               Xem đơn mua
@@ -146,6 +137,7 @@ function PaymentResult({ mode }) {
   const [orderId] = useState(readPendingOrder)
   const [state, setState] = useState({ status: orderId ? 'loading' : 'missing', order: null })
   const [next, setNext] = useState(null)
+  const [batch, setBatch] = useState([])
 
   useEffect(() => {
     if (!orderId) return undefined
@@ -168,8 +160,13 @@ function PaymentResult({ mode }) {
         const following = await findNextUnpaid(orderId)
         if (!current) return
         setNext(following)
-        // Het don cho thanh toan thi xoa hang doi; F5 trang nay se dua ve Don mua.
-        if (!following && order.status !== 'WAITING_PAYMENT') clearPayosCheckout()
+        // Het don cho thanh toan thi liet ke du cac don roi xoa hang doi; F5 se dua ve Don mua.
+        if (!following && order.status !== 'WAITING_PAYMENT') {
+          const orders = await loadCheckoutOrders()
+          if (!current) return
+          setBatch(orders)
+          clearPayosCheckout()
+        }
       } catch (failure) {
         if (current) setState({ status: 'error', order: null, error: getApiError(failure).message })
       }
@@ -214,7 +211,11 @@ function PaymentResult({ mode }) {
               Đang chờ PayOS xác nhận…
             </p>
           )}
-          <OrderFacts order={order} />
+          {batch.length > 1 ? (
+            <CheckoutOrderList orders={batch} label="Các đơn của lần đặt hàng này" />
+          ) : (
+            <OrderFacts order={order} />
+          )}
           {next && (
             <div className="order-result__next">
               <p>
