@@ -4,6 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Loại {@link UserDetailsServiceAutoConfiguration}: shop-service không có form login
@@ -13,6 +14,7 @@ import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoCon
  */
 @SpringBootApplication(exclude = { UserDetailsServiceAutoConfiguration.class })
 @ConfigurationPropertiesScan
+@EnableScheduling
 public class ShopServiceApplication {
 
 	public static void main(String[] args) {

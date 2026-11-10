@@ -19,6 +19,9 @@ spring:
     enabled: false
 
 app:
+  # Test khong goi product-service that; ShopCatalogAccessReconcilerTest dung mock.
+  catalog-sync:
+    enabled: false
   cors:
     allowed-origins: http://localhost:5173
   internal-api-key: test-internal-key-0123456789
