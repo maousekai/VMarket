@@ -19,6 +19,7 @@ function SellerIcon({ name }) {
     home: 'm12 3 9 8h-3v9h-5v-6h-2v6H6v-9H3l9-8Z',
     orders: 'M7 3h10l1 4H6l1-4Zm-2 6h14v12H5V9Zm4 3v2h6v-2H9Z',
     returns: 'M12 4V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-9Z',
+    bank: 'M12 2 2 7v2h20V7L12 2ZM4 11v7h3v-7H4Zm6.5 0v7h3v-7h-3ZM17 11v7h3v-7h-3ZM2 20v2h20v-2H2Z',
     box: 'M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.2 6.3 3.1L12 10.4 5.7 7.3 12 4.2ZM5 9l6 3v7.6l-6-3V9Zm8 10.6V12l6-3v7.6l-6 3Z',
   }
   return (
@@ -206,6 +207,14 @@ export default function SellerLayout() {
             <span>Trả hàng</span>
             <NavBadge count={alerts.returns} label="yêu cầu trả hàng chờ phản hồi" />
           </Link>
+          <NavLink
+            to="/seller/payment"
+            className={({ isActive }) => `seller-nav__link${isActive ? ' is-active' : ''}`}
+            onClick={() => setOpen(false)}
+          >
+            <SellerIcon name="bank" />
+            <span>Thông tin thanh toán</span>
+          </NavLink>
           <NavLink
             to="/seller/settings"
             className={({ isActive }) => `seller-nav__link${isActive ? ' is-active' : ''}`}

@@ -78,6 +78,7 @@ export default function SellerRegisterPage() {
           </p>
         </header>
         <ShopForm
+          withBank
           onSubmit={onSubmit}
           submitLabel="Gửi hồ sơ xét duyệt"
           busyLabel="Đang gửi hồ sơ…"

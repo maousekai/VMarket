@@ -33,6 +33,7 @@ import { adminSections } from './pages/adminSections'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import SellerPage from './pages/SellerPage'
 import SellerRegisterPage from './pages/SellerRegisterPage'
+import SellerPaymentInfoPage from './pages/SellerPaymentInfoPage'
 import SellerSettingsPage from './pages/SellerSettingsPage'
 import SellerDashboardPage from './pages/SellerDashboardPage'
 import SellerProductsPage from './pages/SellerProductsPage'
@@ -96,6 +97,7 @@ export default function App() {
               <Route path="products/:productId/edit" element={<SellerProductFormPage />} />
               <Route path="orders" element={<SellerOrdersPage />} />
               <Route path="orders/:orderId" element={<Navigate to="/seller/orders" replace />} />
+              <Route path="payment" element={<SellerPaymentInfoPage />} />
               <Route path="settings" element={<SellerSettingsPage />} />
             </Route>
           </Route>

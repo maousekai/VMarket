@@ -475,6 +475,42 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
+.seller-payment {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+.seller-payment h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.seller-payment__current {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+.seller-payment__current div {
+  padding: 14px 16px;
+  background: var(--color-surface-muted);
+  border-radius: var(--radius-md);
+}
+.seller-payment__current dt {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.seller-payment__current dd {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+}
+.seller-payment__current small {
+  color: var(--color-muted);
+}
+.seller-payment__number {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
 .shop-form__images {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -924,7 +960,8 @@
   }
   .seller-status-card__facts,
   .shop-form__row,
-  .shop-form__images {
+  .shop-form__images,
+  .seller-payment__current {
     grid-template-columns: 1fr;
   }
   .seller-register .shop-form {
