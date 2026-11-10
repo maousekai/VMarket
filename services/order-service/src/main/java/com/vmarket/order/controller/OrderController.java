@@ -21,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.vmarket.media.MediaUploadResponse;
 
+import com.vmarket.order.dto.CheckoutRequest;
 import com.vmarket.order.dto.CreateReturnRequest;
 import com.vmarket.order.dto.DisputeReturnRequest;
 import com.vmarket.order.dto.ErrorResponse;
@@ -84,6 +85,19 @@ public class OrderController {
 			@Valid @RequestBody PlaceOrderRequest request) {
 		return ResponseEntity.status(HttpStatus.CREATED)
 				.body(orderService.placeOrder(userId, bearerToken, idempotencyKey, request));
+	}
+
+	@Operation(summary = "Đặt các dòng đã chọn trong giỏ, tách một đơn cho mỗi gian hàng",
+			description = "items rỗng = toàn bộ giỏ. Mỗi đơn có trạng thái, huỷ và trả hàng riêng. "
+					+ "Gửi lại cùng Idempotency-Key trả về các đơn đã tạo.")
+	@PostMapping("/checkout")
+	public ResponseEntity<List<OrderResponse>> checkout(
+			@AuthenticationPrincipal String userId,
+			@RequestHeader(name = "Authorization", required = false) String bearerToken,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+			@Valid @RequestBody CheckoutRequest request) {
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(orderService.checkout(userId, bearerToken, idempotencyKey, request));
 	}
 
 	@Operation(summary = "Danh sách đơn của tôi (FR-ORDER-02)",

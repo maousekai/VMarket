@@ -612,4 +612,84 @@ class OrderApiTest {
 
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
     }
+
+    private CartServiceClient.CartItemView line(String product, String shop, int qty, String price) {
+        BigDecimal unit = new BigDecimal(price);
+        return new CartServiceClient.CartItemView(
+                product, null, shop, qty, unit, unit.multiply(BigDecimal.valueOf(qty)));
+    }
+
+    @Test
+    void checkoutSplitsSelectedItemsIntoOneOrderPerShop() throws Exception {
+        String shopA = "01JBQ9SHOP0000000000SHOPAA";
+        String shopB = "01JBQ9SHOP0000000000SHOPBB";
+        var a1 = line("01JBQ9PROD0000000000PRODA1", shopA, 1, "100000.00");
+        var a2 = line("01JBQ9PROD0000000000PRODA2", shopA, 2, "50000.00");
+        var b1 = line("01JBQ9PROD0000000000PRODB1", shopB, 1, "70000.00");
+        var notChosen = line("01JBQ9PROD0000000000PRODB2", shopB, 1, "10000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartView(
+                                ALICE,
+                                List.of(
+                                        new CartServiceClient.CartGroupView(
+                                                shopA, List.of(a1, a2), new BigDecimal("200000.00")),
+                                        new CartServiceClient.CartGroupView(
+                                                shopB, List.of(b1, notChosen), new BigDecimal("80000.00"))),
+                                5,
+                                new BigDecimal("280000.00")));
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        String body =
+                "{\"addressId\":\""
+                        + ADDRESS_ID
+                        + "\",\"items\":["
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA1\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA2\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODB1\"}]}";
+
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].items.length()").value(2))
+                .andExpect(jsonPath("$[0].totalAmount").value(200000.00))
+                .andExpect(jsonPath("$[1].items.length()").value(1))
+                .andExpect(jsonPath("$[1].totalAmount").value(70000.00));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+        verify(cartServiceClient, never()).removeCartItem(ALICE, "01JBQ9PROD0000000000PRODB2", null);
+        verify(cartServiceClient).removeCartItem(ALICE, "01JBQ9PROD0000000000PRODB1", null);
+
+        // Gửi lại cùng khoá: không tạo thêm đơn.
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    @Test
+    void checkoutWithNothingSelectedInCartIsRejected() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"addressId\":\""
+                                                + ADDRESS_ID
+                                                + "\",\"items\":[{\"productId\":\"not-in-cart\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("CART_EMPTY"));
+    }
 }

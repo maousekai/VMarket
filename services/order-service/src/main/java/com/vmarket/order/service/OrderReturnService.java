@@ -67,9 +67,10 @@ public class OrderReturnService {
 				.filter(o -> userId.equals(o.getUserId()))
 				.orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
 
-		if (order.getStatus() != OrderStatus.DELIVERED) {
+		// Đơn đã hoàn tất (người mua bấm "Đã nhận hàng") vẫn trả được trong hạn 7 ngày từ khi giao.
+		if (order.getStatus() != OrderStatus.DELIVERED && order.getStatus() != OrderStatus.COMPLETED) {
 			throw ApiException.conflict("ORDER_NOT_RETURNABLE",
-					"Chỉ có thể yêu cầu trả hàng khi đơn đã được giao thành công (DELIVERED). Trạng thái hiện tại: "
+					"Chỉ có thể yêu cầu trả hàng khi đơn đã được giao thành công. Trạng thái hiện tại: "
 							+ order.getStatus());
 		}
 
@@ -209,11 +210,6 @@ public class OrderReturnService {
 
 		Order order = orderRepository.lock(r.getOrderId())
 				.orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng"));
-
-		if (order.getStatus() == OrderStatus.COMPLETED) {
-			throw ApiException.conflict("ORDER_ALREADY_COMPLETED",
-					"Không thể khiếu nại yêu cầu trả hàng của đơn đã hoàn tất.");
-		}
 
 		r = returnRepository.lock(returnId).orElseThrow();
 

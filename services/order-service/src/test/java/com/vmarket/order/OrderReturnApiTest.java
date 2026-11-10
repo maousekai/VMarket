@@ -496,7 +496,7 @@ class OrderReturnApiTest {
 	}
 
 	@Test
-	void orderComplete_thenBuyerDisputes_returnsConflict() throws Exception {
+	void orderComplete_thenBuyerCanStillDispute() throws Exception {
 		Order order = createDeliveredOrder();
 		String orderItemId = order.getItems().get(0).getId();
 
@@ -529,13 +529,32 @@ class OrderReturnApiTest {
 				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
 				.andExpect(status().isOk());
 
-		// 4. Buyer cố khiếu nại Return sau khi đơn đã COMPLETED -> bị chặn 409 ORDER_ALREADY_COMPLETED
+		// 4. Đơn đã COMPLETED vẫn khiếu nại được yêu cầu bị từ chối
 		mockMvc.perform(post("/api/orders/returns/" + returnId + "/dispute")
 				.header(HttpHeaders.AUTHORIZATION, buyerToken())
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"reason\":\"Vẫn muốn khiếu nại\"}"))
-				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.error.code").value("ORDER_ALREADY_COMPLETED"));
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("DISPUTED"));
+	}
+
+	@Test
+	void completedOrderCanStillBeReturnedWithinSevenDays() throws Exception {
+		Order order = createDeliveredOrder();
+		order.setStatus(OrderStatus.COMPLETED);
+		orderRepository.save(order);
+		String body = """
+				{
+				  "reason": "Hàng lỗi sau khi dùng thử",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(order.getItems().get(0).getId());
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isCreated());
 	}
 
 	@Test

@@ -7,6 +7,7 @@ import com.vmarket.order.client.CartServiceClient.CartItemView;
 import com.vmarket.order.client.CartServiceClient.CartView;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.client.UserServiceClient.AddressView;
+import com.vmarket.order.dto.CheckoutRequest;
 import com.vmarket.order.dto.OrderResponse;
 import com.vmarket.order.dto.PlaceOrderRequest;
 import com.vmarket.order.entity.Order;
@@ -23,7 +24,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.Optional;
 
 /**
@@ -134,6 +141,89 @@ public class OrderService {
         removeCheckoutItemsFromCart(userId, response.id(), cartItems);
 
         return response;
+    }
+
+    /**
+     * Đặt hàng các dòng đã chọn trong giỏ, mỗi gian hàng một đơn (PBL6-29/30).
+     *
+     * <p>Mỗi đơn tạo trong transaction riêng ({@link OrderCreator}) với khoá chống trùng suy ra
+     * từ {@code Idempotency-Key} + {@code shopId}: gửi lại cùng khoá thì đơn đã tạo được trả lại,
+     * đơn còn thiếu (vd lần trước hỏng giữa chừng) mới được tạo. Dòng của đơn nào tạo xong thì
+     * xoá khỏi giỏ ngay sau đó.
+     */
+    public List<OrderResponse> checkout(
+            String userId, String bearerToken, String idempotencyKey, CheckoutRequest request) {
+        String baseKey =
+                (idempotencyKey != null && !idempotencyKey.isBlank()) ? idempotencyKey.trim() : null;
+        AddressView address = userServiceClient.getAddress(bearerToken, request.addressId());
+        CartView cart = cartServiceClient.getCart(userId);
+        List<CartItemView> cartItems =
+                cart.groups().stream().flatMap(group -> group.items().stream()).toList();
+
+        List<CartItemView> chosen = cartItems;
+        if (request.items() != null && !request.items().isEmpty()) {
+            Set<String> wanted =
+                    request.items().stream()
+                            .map(item -> lineKey(item.productId(), item.variantId()))
+                            .collect(Collectors.toSet());
+            chosen =
+                    cartItems.stream()
+                            .filter(item -> wanted.contains(lineKey(item.productId(), item.variantId())))
+                            .toList();
+        }
+
+        Map<String, List<CartItemView>> byShop = new LinkedHashMap<>();
+        for (CartItemView item : chosen) {
+            byShop.computeIfAbsent(item.shopId(), ignored -> new ArrayList<>()).add(item);
+        }
+        List<OrderResponse> orders = new ArrayList<>();
+        if (byShop.isEmpty() && baseKey != null) {
+            // Giỏ đã bị request song song cùng khoá xoá: trả lại các đơn đã tạo bằng khoá đó.
+            orders.addAll(
+                    orderRepository.findByUserIdAndIdempotencyKeyStartingWith(userId, baseKey + ":")
+                            .stream()
+                            .map(OrderResponse::from)
+                            .toList());
+        }
+        if (byShop.isEmpty() && orders.isEmpty()) {
+            throw ApiException.badRequest(
+                    "CART_EMPTY", "Không có sản phẩm nào được chọn trong giỏ để đặt hàng");
+        }
+
+        for (Map.Entry<String, List<CartItemView>> group : byShop.entrySet()) {
+            String key = shopKey(baseKey, group.getKey());
+            Optional<Order> existing =
+                    key == null ? Optional.empty() : orderRepository.findByUserIdAndIdempotencyKey(userId, key);
+            OrderResponse response;
+            if (existing.isPresent()) {
+                response = OrderResponse.from(existing.get());
+            } else {
+                try {
+                    response =
+                            orderCreator.createOrderInTransaction(
+                                    userId, address, group.getValue(), key, request.toPlaceOrder());
+                } catch (DataIntegrityViolationException ex) {
+                    response = recoverIdempotentOrderOrThrow(userId, key, ex);
+                }
+            }
+            removeCheckoutItemsFromCart(userId, response.id(), group.getValue());
+            orders.add(response);
+        }
+        return orders;
+    }
+
+    private static String lineKey(String productId, String variantId) {
+        return productId + "::" + Objects.toString(variantId, "");
+    }
+
+    /** Khoá chống trùng của đơn thuộc {@code shopId}; vừa cột VARCHAR(64). */
+    static String shopKey(String baseKey, String shopId) {
+        if (baseKey == null) return null;
+        String suffix = ":" + shopId;
+        String prefix = baseKey.length() + suffix.length() > 64
+                ? baseKey.substring(0, 64 - suffix.length())
+                : baseKey;
+        return prefix + suffix;
     }
 
     private OrderResponse recoverIdempotentOrderOrThrow(
