@@ -333,6 +333,8 @@ async function seedShop(shop, adminToken) {
         district: shop.district,
         ward: shop.ward,
         streetAddress: shop.street,
+        bankCode: "VCB",
+        bankAccountNumber: "0123456789",
       },
     });
     summary.shops++;

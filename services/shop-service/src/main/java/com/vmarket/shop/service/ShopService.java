@@ -2,6 +2,7 @@ package com.vmarket.shop.service;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.vmarket.media.MediaStorage;
+import com.vmarket.shop.dto.BankAccountRequest;
 import com.vmarket.shop.dto.PublicShopResponse;
 import com.vmarket.shop.dto.ShopRequest;
 import com.vmarket.shop.dto.ShopResponse;
@@ -57,11 +59,16 @@ public class ShopService {
 		if (shopRepository.existsByOwnerId(ownerId)) {
 			throw ApiException.conflict("SHOP_ALREADY_EXISTS", "Bạn đã đăng ký một gian hàng");
 		}
+		if (blankToNull(request.bankCode()) == null || blankToNull(request.bankAccountNumber()) == null) {
+			throw ApiException.badRequest("BANK_ACCOUNT_REQUIRED",
+					"Vui lòng cung cấp ngân hàng và số tài khoản nhận tiền");
+		}
 		ensureNameAvailable(request.name(), null);
 
 		Shop shop = new Shop();
 		shop.setOwnerId(ownerId);
 		apply(shop, request);
+		applyBankAccount(shop, request.bankCode(), request.bankAccountNumber());
 		shop.setStatus(ShopStatus.PENDING);
 
 		// saveAndFlush: cần id cho dòng lịch sử, và để ràng buộc UNIQUE lên tiếng ngay
@@ -109,6 +116,21 @@ public class ShopService {
 		Shop saved = shopRepository.saveAndFlush(shop);
 		cleanupReplacedImages(ownerId, oldLogoUrl, oldCoverUrl, saved);
 		log.info("Cập nhật gian hàng id={} ownerId={}", saved.getId(), ownerId);
+		return ShopResponse.from(saved);
+	}
+
+	/**
+	 * Đổi tài khoản ngân hàng nhận tiền. Không phải nội dung công khai nên được đổi ở mọi
+	 * trạng thái, kể cả khi bị đình chỉ; vẫn ghi vết như các trường hồ sơ khác.
+	 */
+	@Transactional
+	public ShopResponse updateBankAccount(String ownerId, BankAccountRequest request) {
+		Shop shop = mustFindMine(ownerId);
+		Map<String, String> before = ShopProfileAuditor.snapshot(shop);
+		applyBankAccount(shop, request.bankCode(), request.bankAccountNumber());
+		profileAuditor.record(shop, before, ShopProfileAuditor.snapshot(shop), ownerId);
+		Shop saved = shopRepository.saveAndFlush(shop);
+		log.info("Cập nhật tài khoản ngân hàng gian hàng id={} ownerId={}", saved.getId(), ownerId);
 		return ShopResponse.from(saved);
 	}
 
@@ -170,6 +192,11 @@ public class ShopService {
 		shop.setDistrict(blankToNull(request.district()));
 		shop.setWard(request.ward().trim());
 		shop.setStreetAddress(request.streetAddress().trim());
+	}
+
+	private static void applyBankAccount(Shop shop, String bankCode, String accountNumber) {
+		shop.setBankCode(bankCode.trim().toUpperCase(Locale.ROOT));
+		shop.setBankAccountNumber(accountNumber.trim());
 	}
 
 	/** "" và "chưa khai" không được trở thành hai trạng thái khác nhau trong CSDL. */

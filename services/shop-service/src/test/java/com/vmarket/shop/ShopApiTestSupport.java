@@ -84,6 +84,8 @@ abstract class ShopApiTestSupport {
 		body.put("district", "Hội An");
 		body.put("ward", "Thanh Hà");
 		body.put("streetAddress", "12 Phạm Phán");
+		body.put("bankCode", "VCB");
+		body.put("bankAccountNumber", "0123456789");
 		return body;
 	}
 

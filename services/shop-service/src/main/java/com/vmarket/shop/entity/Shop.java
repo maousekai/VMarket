@@ -94,6 +94,14 @@ public class Shop extends BaseEntity {
 	@Column(name = "street_address", nullable = false, length = 255)
 	private String streetAddress;
 
+	/** Mã ngân hàng nhận tiền theo danh sách VietQR (VCB, TCB, MB...); null với hồ sơ cũ. */
+	@Column(name = "bank_code", length = 20)
+	private String bankCode;
+
+	/** Số tài khoản nhận tiền; null với hồ sơ đăng ký trước khi có trường này. */
+	@Column(name = "bank_account_number", length = 30)
+	private String bankAccountNumber;
+
 	/**
 	 * Chỉ đổi qua {@code ShopStatusTransitioner} — nơi kiểm tra bước chuyển
 	 * ({@link ShopAction}), ghi lịch sử và phát sự kiện.
