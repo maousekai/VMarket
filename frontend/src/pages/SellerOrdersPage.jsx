@@ -27,6 +27,7 @@ import '../components/seller.css'
 import '../components/sellerProducts.css'
 import '../components/orders.css'
 import EvidenceGallery from '../components/EvidenceGallery'
+import { refreshSellerAlerts } from '../hooks/useSellerAlerts'
 
 const PAGE_SIZE = 10
 const SELLER_RESPONSE_HOURS = 48
@@ -400,6 +401,7 @@ export default function SellerOrdersPage() {
   const changed = (message) => {
     setNotice(message)
     setReload((value) => value + 1)
+    refreshSellerAlerts()
   }
   const result = state.result
 
