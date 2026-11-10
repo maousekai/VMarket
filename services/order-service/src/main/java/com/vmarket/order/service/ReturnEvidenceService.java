@@ -45,11 +45,51 @@ public class ReturnEvidenceService {
 			throw ApiException.badRequest("MEDIA_INVALID_IMAGE", "Không đọc được file ảnh");
 		}
 		try {
-			ProcessedImage image = imageProcessor.process(bytes, ImageKind.EVIDENCE);
-			StoredMedia stored = mediaStorage.upload(mediaPrefix(userId), image);
+			VideoType video = VideoType.detect(bytes);
+			ProcessedImage media;
+			if (video != null) {
+				// Video giữ nguyên byte (không chuyển mã); chỉ nhận đúng định dạng theo magic byte.
+				if (bytes.length > MAX_VIDEO_BYTES) {
+					throw ApiException.badRequest("MEDIA_TOO_LARGE", "Video minh chứng tối đa 30 MB");
+				}
+				media = new ProcessedImage(bytes, video.contentType, video.extension);
+			} else {
+				media = imageProcessor.process(bytes, ImageKind.EVIDENCE);
+			}
+			StoredMedia stored = mediaStorage.upload(mediaPrefix(userId), media);
 			return MediaUploadResponse.of(stored);
 		} catch (MediaException ex) {
 			throw translate(ex);
+		}
+	}
+
+	/** Video minh chứng: tối đa 30 MB, MP4 / MOV / WebM. */
+	public static final long MAX_VIDEO_BYTES = 30L * 1024 * 1024;
+
+	enum VideoType {
+		MP4("video/mp4", "mp4"),
+		MOV("video/quicktime", "mov"),
+		WEBM("video/webm", "webm");
+
+		final String contentType;
+		final String extension;
+
+		VideoType(String contentType, String extension) {
+			this.contentType = contentType;
+			this.extension = extension;
+		}
+
+		/** Nhận dạng theo nội dung (không tin Content-Type / tên file do client gửi). */
+		static VideoType detect(byte[] bytes) {
+			if (bytes.length >= 12 && bytes[4] == 'f' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p') {
+				String brand = new String(bytes, 8, 4, java.nio.charset.StandardCharsets.US_ASCII);
+				return brand.startsWith("qt") ? MOV : MP4;
+			}
+			if (bytes.length >= 4 && (bytes[0] & 0xFF) == 0x1A && (bytes[1] & 0xFF) == 0x45
+					&& (bytes[2] & 0xFF) == 0xDF && (bytes[3] & 0xFF) == 0xA3) {
+				return WEBM;
+			}
+			return null;
 		}
 	}
 

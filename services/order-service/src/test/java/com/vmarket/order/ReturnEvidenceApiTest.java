@@ -101,6 +101,40 @@ class ReturnEvidenceApiTest {
 		verify(mediaStorage, never()).deleteByUrl(anyString(), anyString());
 	}
 
+	private static byte[] mp4Bytes(int size) {
+		byte[] bytes = new byte[size];
+		byte[] header = {0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'};
+		System.arraycopy(header, 0, bytes, 0, header.length);
+		return bytes;
+	}
+
+	@Test
+	void videoEvidenceIsStoredAsIs() throws Exception {
+		org.mockito.ArgumentCaptor<ProcessedImage> stored = org.mockito.ArgumentCaptor.forClass(ProcessedImage.class);
+		when(mediaStorage.upload(eq("returns/" + BUYER), stored.capture()))
+				.thenReturn(new StoredMedia("returns/" + BUYER + "/v.mp4", URL.replace(".jpg", ".mp4")));
+
+		mockMvc.perform(multipart("/api/orders/returns/evidence")
+				.file(new MockMultipartFile("file", "clip.mp4", "video/mp4", mp4Bytes(2048)))
+				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
+				.andExpect(status().isOk());
+
+		org.assertj.core.api.Assertions.assertThat(stored.getValue().contentType()).isEqualTo("video/mp4");
+		org.assertj.core.api.Assertions.assertThat(stored.getValue().size()).isEqualTo(2048);
+	}
+
+	@Test
+	void videoOverThirtyMegabytesIsRejected() throws Exception {
+		mockMvc.perform(multipart("/api/orders/returns/evidence")
+				.file(new MockMultipartFile("file", "clip.mp4", "video/mp4",
+						mp4Bytes((int) (30L * 1024 * 1024) + 1)))
+				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("MEDIA_TOO_LARGE"));
+
+		verify(mediaStorage, never()).upload(anyString(), any());
+	}
+
 	private static MockMultipartFile jpegFile() throws Exception {
 		BufferedImage image = new BufferedImage(40, 30, BufferedImage.TYPE_INT_RGB);
 		Graphics2D graphics = image.createGraphics();

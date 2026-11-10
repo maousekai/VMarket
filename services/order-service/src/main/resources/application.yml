@@ -25,9 +25,9 @@ spring:
     baseline-version: 0
   servlet:
     multipart:
-      # Anh minh chung toi da 5 MB (ImageKind.EVIDENCE); du phong overhead multipart.
-      max-file-size: 6MB
-      max-request-size: 7MB
+      # Anh minh chung toi da 5 MB, video minh chung toi da 30 MB; du phong overhead multipart.
+      max-file-size: 31MB
+      max-request-size: 32MB
   rabbitmq:
     publisher-confirm-type: correlated
     publisher-returns: true
