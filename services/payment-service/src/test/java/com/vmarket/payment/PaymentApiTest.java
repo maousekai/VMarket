@@ -161,6 +161,42 @@ class PaymentApiTest {
     }
 
     @Test
+    void syncAfterReturnMarksPaidWithoutWebhookAndOnlyOnce() throws Exception {
+        Long id = create();
+        when(payos.info(id))
+                .thenReturn(
+                        new PayosClient.Info(
+                                PayosClient.Status.PAID, "test-link", 3000, "bank-" + id, now.toString()));
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(
+                            post("/api/payments/" + id + "/sync")
+                                    .header("Authorization", token("alice", "BUYER")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("SUCCEEDED"));
+        }
+        assertThat(events.findAll())
+                .extracting(OutboxEvent::getEventType)
+                .containsExactly("PaymentSucceeded");
+        // Webhook đến sau không phát thêm sự kiện.
+        var data = data(id);
+        webhook(data, signature.sign(data, properties.getChecksumKey()));
+        assertThat(events.count()).isEqualTo(1);
+    }
+
+    @Test
+    void syncLeavesPendingLinkAloneAndIsOwnerOnly() throws Exception {
+        Long id = create();
+        when(payos.info(id))
+                .thenReturn(new PayosClient.Info(PayosClient.Status.PENDING, "test-link", 3000, "", ""));
+        mvc.perform(post("/api/payments/" + id + "/sync").header("Authorization", token("bob", "BUYER")))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/payments/" + id + "/sync").header("Authorization", token("alice", "BUYER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+        assertThat(events.count()).isZero();
+    }
+
+    @Test
     void unsignedOuterSuccessCannotChangeSignedFailure() throws Exception {
         Long id = create();
         var data = data(id);

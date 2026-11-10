@@ -44,6 +44,12 @@ public class PaymentController {
         return store.own(buyer, id);
     }
 
+    /** Đồng bộ trạng thái PayOS khi người mua quay về /payment/return (không cần webhook). */
+    @PostMapping("/{id}/sync")
+    public PaymentResponse sync(@AuthenticationPrincipal String buyer, @PathVariable Long id) {
+        return service.sync(buyer, id);
+    }
+
     @PostMapping("/webhooks/payos")
     public void webhook(@Valid @RequestBody PaymentRequests.Webhook webhook) {
         service.webhook(webhook);

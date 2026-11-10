@@ -143,6 +143,33 @@ public class HttpPayosClient implements PayosClient {
                     "PayOS đã thu tiền; cần đối soát webhook trước khi hoàn tiền");
     }
 
+    @Override
+    public Info info(long code) {
+        JsonNode response = call("GET", "/v2/payment-requests/" + code, null);
+        if (!"00".equals(response.path("code").asString())) throw unavailable();
+        JsonNode data = response.path("data");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> values = mapper.convertValue(data, Map.class);
+        if (!signature.verify(
+                        values, response.path("signature").asString(), properties.getChecksumKey())
+                || data.path("orderCode").asLong() != code) throw unavailable();
+        Status status;
+        try {
+            status = Status.valueOf(data.path("status").asString(""));
+        } catch (IllegalArgumentException ex) {
+            throw unavailable();
+        }
+        String linkId = data.path("paymentLinkId").asString("");
+        if (linkId.isBlank()) linkId = data.path("id").asString("");
+        JsonNode transaction = data.path("transactions").path(0);
+        return new Info(
+                status,
+                linkId,
+                data.path("amount").asLong(),
+                transaction.path("reference").asString(""),
+                transaction.path("transactionDateTime").asString(""));
+    }
+
     private JsonNode call(String method, String path, Object body) {
         if (!properties.isEnabled())
             throw ApiException.unavailable("PAYOS_NOT_CONFIGURED", "PayOS chưa được cấu hình");
