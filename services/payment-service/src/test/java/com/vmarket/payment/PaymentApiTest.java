@@ -350,6 +350,30 @@ class PaymentApiTest {
     }
 
     @Test
+    void buyerSeesPaymentOfOrderAndItsRefunds() throws Exception {
+        Long id = create();
+        mvc.perform(get("/api/payments/orders/" + ORDER).header("Authorization", token("alice", "BUYER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+        mvc.perform(get("/api/payments/orders/" + ORDER).header("Authorization", token("bob", "BUYER")))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/payments/" + id + "/refunds").header("Authorization", token("alice", "BUYER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        var data = data(id);
+        webhook(data, signature.sign(data, properties.getChecksumKey()));
+        store.cancelled(ORDER);
+        mvc.perform(get("/api/payments/" + id + "/refunds").header("Authorization", token("alice", "BUYER")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].amount").value(3000))
+                .andExpect(jsonPath("$[0].status").value("PENDING"))
+                .andExpect(jsonPath("$[0].confirmedBy").doesNotExist());
+        mvc.perform(get("/api/payments/" + id + "/refunds").header("Authorization", token("bob", "BUYER")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void manualRefundIsAdminOnlyAndAudited() throws Exception {
         Long id = create();
         var data = data(id);

@@ -428,6 +428,27 @@ public class PaymentStore {
     }
 
     @Transactional(readOnly = true)
+    public PaymentResponse ownByOrder(String buyer, String orderId) {
+        var p =
+                payments.findByOrderId(orderId)
+                        .filter(x -> buyer.equals(x.getBuyerId()))
+                        .orElseThrow(
+                                () ->
+                                        ApiException.notFound(
+                                                "PAYMENT_NOT_FOUND", "Không tìm thấy giao dịch"));
+        return PaymentResponse.from(p);
+    }
+
+    @Transactional(readOnly = true)
+    public List<RefundResponse> ownRefunds(String buyer, Long id) {
+        own(buyer, id);
+        return refunds.findAllByPaymentId(id).stream()
+                .sorted(java.util.Comparator.comparing(RefundRequest::getRequestedAt))
+                .map(RefundResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<PaymentResponse> list(String buyer, int page, int size) {
         return payments
                 .findByBuyerIdOrderByCreatedAtDesc(buyer, PageRequest.of(page, size))

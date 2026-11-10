@@ -39,6 +39,20 @@ public class PaymentController {
         return store.list(buyer, page, size);
     }
 
+    /** Giao dịch của một đơn (trang chi tiết đơn / màn thanh toán). */
+    @GetMapping("/orders/{orderId}")
+    public PaymentResponse byOrder(
+            @AuthenticationPrincipal String buyer, @PathVariable String orderId) {
+        return store.ownByOrder(buyer, orderId);
+    }
+
+    /** Các khoản hoàn tiền của giao dịch (huỷ đơn đã trả tiền, trả hàng được chấp nhận). */
+    @GetMapping("/{id}/refunds")
+    public List<RefundResponse> refunds(
+            @AuthenticationPrincipal String buyer, @PathVariable Long id) {
+        return store.ownRefunds(buyer, id);
+    }
+
     @GetMapping("/{id}")
     public PaymentResponse own(@AuthenticationPrincipal String buyer, @PathVariable Long id) {
         return store.own(buyer, id);
