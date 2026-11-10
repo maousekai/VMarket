@@ -13,16 +13,11 @@ therefore work exactly as they do when real users act.
 
 ## Prerequisites
 
-1. The stack is running: `docker compose up -d`. You need postgres, mongo, redis,
-   rabbitmq, auth-service, user-service, shop-service and api-gateway.
-2. product-service is running. It isn't in compose yet, so start it on your machine:
-   ```
-   services/mvnw.cmd -f services/pom.xml -pl product-service spring-boot:run
-   ```
-   The gateway reaches it through `host.docker.internal:8084`.
-3. auth-service uses the email provider `log` (the default `AUTH_EMAIL_PROVIDER=log`).
+1. The stack is running: `docker compose up -d` (postgres, mongo, redis, rabbitmq, minio,
+   auth-, user-, shop-, product-service and api-gateway).
+2. auth-service uses the email provider `log` (the default `AUTH_EMAIL_PROVIDER=log`).
    The script reads OTP codes from `docker compose logs auth-service`.
-4. Node.js 18 or newer.
+3. Node.js 18 or newer.
 
 ## Run
 
@@ -39,7 +34,12 @@ DEV_ADMIN_PASSWORD=<dev admin password> SEED_PASSWORD=<seller password> node scr
 
 Options:
 - `--dry-run` prints the plan and validates the dataset without calling the network.
-- `--skip-image-check` skips resolving image URLs, which is faster.
+- `--refresh` updates data seeded earlier: products and shop covers that still use
+  placeholder images (loremflickr / picsum) get the real photo and a stock level that fits
+  their price. `DEV_ADMIN_PASSWORD` is optional in this mode.
+- `--reset-passwords` (local only, seed accounts `@seed.vmarket.test` only): if a seed seller
+  exists with another password, reset it to `SEED_PASSWORD` through the real forgot-password
+  flow (code read from the auth-service log).
 - `--allow-remote` allows a gateway other than localhost. It refuses by default, because the script creates seller accounts and approves shops.
 
 Re-running is safe. Categories, accounts, shops and products that already exist (matched
@@ -56,12 +56,24 @@ products in compact form `[name, price in VND, image keyword, variant set]`. `se
 expands each one into a full `ProductRequest`:
 - a description built from the shop
 - the SKU
-- stock between 20 and 200, generated deterministically
+- stock by price, generated deterministically: from 4–12 for items over 2 million VND up to
+  60–200 for everyday goods under 300,000 VND
 - variants by clothing size or shoe size
 
-Images come from loremflickr: Creative Commons photos from Flickr, chosen by keyword with a
-fixed `lock`. The script follows the redirect and stores the resolved image URL. If that
-fails, it falls back to picsum.photos. These images are for demos only and are not product
-photos from real sellers.
+### Images
+
+The third field of each product (and `cover` of each shop) is an English search query.
+`resolve-images.mjs` picks a freely licensed JPEG for it on Wikimedia Commons and records the
+choice in `images.lock.json` (file, thumbnail URL, author, licence). `seed.mjs` downloads the
+locked file and uploads it through the seller media API, so products point at VMarket's own
+MinIO, not at Commons.
+
+```
+node scripts/seed-demo-data/resolve-images.mjs                     # queries missing from the lock
+node scripts/seed-demo-data/resolve-images.mjs --pick "air fryer=3" # use another candidate
+```
+
+Authors and licences of every photo are listed in `images.lock.json`; keep that file with the
+data. The photos are illustrations, not product photos from real sellers.
 
 Shop and product names are fictional. Don't add names of real stores or brands.

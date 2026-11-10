@@ -4,6 +4,10 @@
 //
 //   node scripts/seed-demo-data/seed.mjs            # seed vao http://localhost:8080
 //   node scripts/seed-demo-data/seed.mjs --dry-run  # chi in ke hoach, khong goi mang
+//   node scripts/seed-demo-data/seed.mjs --refresh  # cap nhat anh/ton kho cho du lieu da seed
+//
+// Anh that lay theo images.lock.json (Wikimedia Commons, xem resolve-images.mjs), tai ve roi
+// upload len MinIO qua API seller nen URL anh la cua VMarket, khong hotlink.
 //
 // Xem README.md cung thu muc cho dieu kien tien quyet va bien moi truong.
 import { execFileSync } from "node:child_process";
@@ -17,7 +21,12 @@ const dataset = JSON.parse(readFileSync(resolve(here, "dataset.json"), "utf8"));
 
 const args = new Set(process.argv.slice(2));
 const DRY_RUN = args.has("--dry-run");
-const CHECK_IMAGES = !args.has("--skip-image-check");
+const REFRESH = args.has("--refresh");
+const RESET_PASSWORDS = args.has("--reset-passwords");
+const imageLock = JSON.parse(
+  readFileSync(resolve(here, "images.lock.json"), "utf8"),
+);
+const USER_AGENT = "VMarketDemoSeed/1.0 (local demo data for a student project)";
 const API = (process.env.SEED_API_URL || "http://localhost:8080").replace(
   /\/$/,
   "",
@@ -34,6 +43,7 @@ const summary = {
   shops: 0,
   approved: 0,
   products: 0,
+  refreshed: 0,
   skipped: 0,
 };
 
@@ -97,6 +107,43 @@ async function retry(
   }
 }
 
+function codeFromAuthLogs(email, pattern) {
+  const logs = execFileSync(
+    "docker",
+    ["compose", "logs", "--since", "15m", "auth-service"],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+  );
+  const entries = logs
+    .split(`[DEV EMAIL] to=${email} | subject=`)
+    .slice(1)
+    .reverse();
+  for (const entry of entries) {
+    const match = entry.match(pattern);
+    if (match) return match[1];
+  }
+  throw new NotYet("code not in log yet");
+}
+
+/**
+ * Chi cho tai khoan seed (@seed.vmarket.test) khi chay --reset-passwords: dat lai mat khau
+ * ve SEED_PASSWORD qua luong quen mat khau that (ma lay tu log auth-service, provider=log).
+ */
+async function resetSeedPassword(email) {
+  if (!email.endsWith("@seed.vmarket.test"))
+    throw new Error(`Không đặt lại mật khẩu cho ${email}`);
+  await api("POST", "/api/auth/password/forgot", { body: { email } });
+  const code = await retry(
+    "mã đặt lại mật khẩu trong log auth-service",
+    async () =>
+      codeFromAuthLogs(email, /Mã đặt lại mật khẩu của bạn là:\s*(\d{6})/),
+    { when: isNotYet },
+  );
+  await api("POST", "/api/auth/password/reset", {
+    body: { email, code, newPassword: SELLER_PASSWORD },
+  });
+  console.log(`  ~ đặt lại mật khẩu ${email}`);
+}
+
 function otpFromAuthLogs(email) {
   const logs = execFileSync(
     "docker",
@@ -121,28 +168,53 @@ const isNotYet = (error) => error instanceof NotYet;
 const isGatewayHiccup = (error) => error.status === 502 || error.status === 503;
 
 // ---------- images ----------
-const imageCache = new Map();
-async function imageUrl(keyword, seed) {
-  const lock = hash(seed) % 10000;
-  const source = `https://loremflickr.com/600/600/${encodeURIComponent(keyword)}?lock=${lock}`;
-  const fallback = `https://picsum.photos/seed/${hash(seed)}/600/600`;
-  if (!CHECK_IMAGES || DRY_RUN) return source;
-  if (imageCache.has(source)) return imageCache.get(source);
-  let url = fallback;
-  try {
-    const response = await fetch(source, { redirect: "follow" });
-    if (
-      response.ok &&
-      response.headers.get("content-type")?.startsWith("image/")
-    ) {
-      url = response.url; // the resolved CDN file, stable across runs
-    }
-  } catch {
-    // keep the fallback image
-  }
-  imageCache.set(source, url);
-  return url;
+// Anh tam (loremflickr / picsum) hoac thieu anh: --refresh se thay bang anh that.
+const isPlaceholderImage = (url) =>
+  !url || /loremflickr\.com|picsum\.photos|placeholder/i.test(url);
+
+const sourceCache = new Map();
+async function downloadLocked(query) {
+  const item = imageLock[query];
+  if (!item)
+    throw new Error(
+      `Thiếu ảnh cho "${query}" trong images.lock.json — chạy resolve-images.mjs trước.`,
+    );
+  if (sourceCache.has(item.url)) return sourceCache.get(item.url);
+  const bytes = await retry(
+    `ảnh ${item.file}`,
+    async () => {
+      const response = await fetch(item.url, {
+        headers: { "User-Agent": USER_AGENT },
+      });
+      if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), {
+        status: response.status,
+      });
+      return Buffer.from(await response.arrayBuffer());
+    },
+    { tries: 6, delay: 4000, when: (error) => error.status === 429 || !error.status },
+  );
+  sourceCache.set(item.url, bytes);
+  return bytes;
 }
+
+/** Tai anh da khoa cho `query` va upload len MinIO qua endpoint media cua seller. */
+async function uploadImage(query, token, endpoint) {
+  const bytes = await downloadLocked(query);
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: "image/jpeg" }), "image.jpg");
+  const response = await fetch(API + endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new ApiError(response.status, data, `POST ${endpoint}`);
+  return data.url;
+}
+
+const productImage = (query, token) =>
+  uploadImage(query, token, "/api/products/seller/media");
 
 // ---------- accounts ----------
 async function login(email, password) {
@@ -162,6 +234,11 @@ async function sellerSession(shop) {
         body: { email, username, password: SELLER_PASSWORD },
       });
     } catch (registerError) {
+      if (registerError.status === 409 && RESET_PASSWORDS) {
+        await resetSeedPassword(email);
+        session = await login(email, SELLER_PASSWORD);
+        return { email, ...session };
+      }
       if (registerError.status === 409) {
         throw new Error(
           `${email} đã tồn tại với mật khẩu khác SEED_PASSWORD hiện tại`,
@@ -243,7 +320,11 @@ async function seedShop(shop, adminToken) {
         name: shop.name,
         description: shop.description,
         logoUrl: "",
-        coverUrl: await imageUrl(shop.cover, `cover-${shop.key}`),
+        coverUrl: await uploadImage(
+          shop.cover,
+          seller.accessToken,
+          "/api/shops/me/cover",
+        ),
         policies:
           "Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.",
         contactEmail: seller.email,
@@ -257,7 +338,35 @@ async function seedShop(shop, adminToken) {
     summary.shops++;
     console.log(`+ gian hàng ${shop.name}`);
   }
+  if (isPlaceholderImage(mine.coverUrl) && mine.status === "ACTIVE") {
+    const coverUrl = await uploadImage(
+      shop.cover,
+      seller.accessToken,
+      "/api/shops/me/cover",
+    );
+    mine = await api("PUT", "/api/shops/me", {
+      token: seller.accessToken,
+      body: {
+        name: mine.name,
+        description: mine.description,
+        logoUrl: mine.logoUrl || "",
+        coverUrl,
+        policies: mine.policies,
+        contactEmail: mine.contactEmail,
+        contactPhone: mine.contactPhone,
+        province: mine.province,
+        district: mine.district,
+        ward: mine.ward,
+        streetAddress: mine.streetAddress,
+      },
+    });
+    console.log(`  ~ ảnh bìa ${shop.name}`);
+  }
   if (mine.status === "PENDING") {
+    if (!adminToken) {
+      console.warn(`! bỏ qua ${shop.name}: cần DEV_ADMIN_PASSWORD để duyệt`);
+      return null;
+    }
     mine = await api("POST", `/api/shops/admin/${mine.id}/approve`, {
       token: adminToken,
     });
@@ -270,8 +379,17 @@ async function seedShop(shop, adminToken) {
   return { shopId: mine.id, session: await sellerWithRole(seller.email) };
 }
 
+/** Ton kho theo muc gia: hang dat it hang, do an / tieu dung nhieu hang hon. */
+function stockFor(price, seed) {
+  const spread = hash(seed);
+  if (price >= 2_000_000) return 4 + (spread % 9); // 4-12
+  if (price >= 1_000_000) return 10 + (spread % 21); // 10-30
+  if (price >= 300_000) return 25 + (spread % 46); // 25-70
+  return 60 + (spread % 141); // 60-200
+}
+
 function variantsFor(shop, index, price, setKey) {
-  const stock = 20 + (hash(`${shop.key}-${index}`) % 180);
+  const stock = stockFor(price, `${shop.key}-${index}`);
   const set = setKey && dataset.variantSets[setKey];
   if (!set) {
     return [
@@ -287,26 +405,64 @@ function variantsFor(shop, index, price, setKey) {
     sku: `${shop.key}-${index}-${value}`.toUpperCase(),
     attributes: { [set.label]: value },
     price,
-    stock: Math.max(5, Math.round(stock / set.values.length)),
+    stock: Math.max(2, Math.round(stock / set.values.length)),
   }));
 }
 
+async function refreshProduct(product, shop, index, price, query, token) {
+  const stock = stockFor(price, `${shop.key}-${index}`);
+  const perVariant = Math.max(2, Math.round(stock / product.variants.length));
+  const imageUrls = product.imageUrls.some((url) => !isPlaceholderImage(url))
+    ? product.imageUrls.filter((url) => !isPlaceholderImage(url))
+    : [await productImage(query, token)];
+  await api("PUT", `/api/products/${product.id}`, {
+    token,
+    headers: { "Idempotency-Key": `seed-refresh-${product.id}-${hash(imageUrls[0])}` },
+    body: {
+      shopId: product.shopId,
+      name: product.name,
+      description: product.description,
+      imageUrls,
+      categoryId: product.categoryId,
+      brandId: product.brandId,
+      status: product.status,
+      currency: product.currency,
+      variants: product.variants.map((variant) => ({
+        id: variant.id,
+        sku: variant.sku,
+        attributes: variant.attributes,
+        price: variant.price,
+        // Khong ha ton kho duoi so dang giu cho don chua xong.
+        stock: Math.max(perVariant, variant.reservedStock ?? 0),
+      })),
+    },
+  });
+  summary.refreshed++;
+}
+
 async function seedProducts(shop, shopId, token, categoryId) {
-  const listed = await api("GET", `/api/products?shopId=${shopId}&size=100`);
-  const names = new Set(listed.content.map((product) => product.name));
+  const mine = await api("POST", "/api/products/seller/query", { token });
+  const byName = new Map(mine.map((product) => [product.name, product]));
   for (const [
     index,
     [name, price, keyword, variantSet],
   ] of shop.products.entries()) {
-    if (names.has(name)) {
-      summary.skipped++;
+    const existing = byName.get(name);
+    if (existing) {
+      const needsImage = existing.imageUrls.every(isPlaceholderImage);
+      if (REFRESH && needsImage) {
+        await refreshProduct(existing, shop, index, price, keyword, token);
+        console.log(`  ~ ${name}`);
+      } else {
+        summary.skipped++;
+      }
       continue;
     }
     const body = {
       shopId,
       name,
       description: `${name} từ ${shop.name} (${shop.district}, ${CITY}). ${shop.description}`,
-      imageUrls: [await imageUrl(keyword, `${shop.key}-${index}`)],
+      imageUrls: [await productImage(keyword, token)],
       categoryId,
       brandId: null,
       status: "ACTIVE",
@@ -365,7 +521,7 @@ async function main() {
       `Từ chối seed vào ${API}: chỉ dành cho môi trường local (thêm --allow-remote nếu chắc chắn).`,
     );
   }
-  if (!ADMIN_PASSWORD) {
+  if (!ADMIN_PASSWORD && !REFRESH) {
     throw new Error(
       "Thiếu DEV_ADMIN_PASSWORD (mật khẩu tài khoản ADMIN dev của auth-service).",
     );
@@ -375,13 +531,25 @@ async function main() {
       "Thiếu SEED_PASSWORD (mật khẩu cho các tài khoản người bán demo).",
     );
   }
-  const admin = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
-  if (!admin.roles?.includes("ADMIN"))
-    throw new Error(`${ADMIN_EMAIL} không có quyền ADMIN`);
-  const categoryIds = await seedCategories(admin.accessToken);
+  let adminToken = null;
+  let categoryIds;
+  if (ADMIN_PASSWORD) {
+    const admin = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
+    if (!admin.roles?.includes("ADMIN"))
+      throw new Error(`${ADMIN_EMAIL} không có quyền ADMIN`);
+    adminToken = admin.accessToken;
+    categoryIds = await seedCategories(adminToken);
+  } else {
+    // --refresh khong can admin: danh muc phai co san, doc tu API cong khai.
+    const existing = await api("GET", "/api/products/categories");
+    const byName = new Map(existing.map((category) => [category.name, category.id]));
+    categoryIds = Object.fromEntries(
+      dataset.categories.map((category) => [category.key, byName.get(category.name)]),
+    );
+  }
   for (const shop of dataset.shops) {
     console.log(`• ${shop.name}`);
-    const seeded = await seedShop(shop, admin.accessToken);
+    const seeded = await seedShop(shop, adminToken);
     if (seeded) {
       await seedProducts(
         shop,
