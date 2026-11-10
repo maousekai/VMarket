@@ -4,7 +4,12 @@ import Modal from '../components/Modal'
 import { OrderItemsList, OrderStatusBadge, ReturnStatusBadge } from '../components/OrderParts'
 import Pagination from '../components/Pagination'
 import { getApiError } from '../services/api/apiClient'
-import { DELIVERY_STATUS_LABELS, getDelivery, handoffOrder } from '../services/api/deliveryApi'
+import {
+  DELIVERY_STATUS_LABELS,
+  getDelivery,
+  handoffOrder,
+  simulateDelivery,
+} from '../services/api/deliveryApi'
 import {
   acceptReturn,
   confirmReturnReceipt,
@@ -41,6 +46,9 @@ const RETURN_TABS = [
   ['', 'Tất cả'],
 ]
 const HANDOFF_STATUSES = ['PENDING', 'PROCESSING']
+// TẠM THỜI (dev): chuyến giao còn có thể giả lập tới "Đã giao".
+const SIMULATABLE_DELIVERY = ['WAITING_ASSIGNMENT', 'ASSIGNED', 'PICKED_UP', 'IN_TRANSIT']
+const SIMULATION_SETTLE_MS = 1500
 
 /** Trang thai chuyen giao cua phan hang thuoc shop (Delivery Service, goc nhin seller). */
 function useDelivery(order, version) {
@@ -157,6 +165,28 @@ function SellerOrderCard({ order, onChanged }) {
             )}
           {handedOff && HANDOFF_STATUSES.includes(order.status) && (
             <span className="seller-order__hint">Đã bàn giao</span>
+          )}
+          {/* TẠM THỜI (dev): chưa có giao diện điều phối / shipper trên web. Xoá nút này và
+              simulateDelivery khi UI shipper hoàn thành. */}
+          {handedOff && SIMULATABLE_DELIVERY.includes(deliveryStatus) && (
+            <button
+              type="button"
+              className="account-button seller-order__simulate"
+              disabled={Boolean(busy)}
+              onClick={() =>
+                run(
+                  'simulate',
+                  async () => {
+                    await simulateDelivery(order.id)
+                    // Order Service cập nhật "Đã giao" qua sự kiện, chờ một nhịp rồi tải lại.
+                    await new Promise((resolve) => setTimeout(resolve, SIMULATION_SETTLE_MS))
+                  },
+                  `Đã giả lập giao thành công đơn ${shortOrderId(order.id)}.`,
+                )
+              }
+            >
+              {busy === 'simulate' ? 'Đang giả lập…' : 'Giả lập giao hàng'}
+            </button>
           )}
         </div>
       </footer>

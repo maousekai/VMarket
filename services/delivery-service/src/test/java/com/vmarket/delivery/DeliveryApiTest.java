@@ -1514,4 +1514,43 @@ class DeliveryApiTest {
         // Ưu tiên SHIPPER chuyên quận 'hai chau' dù shipper toàn tỉnh đang có 0 đơn
         assertThat(assignment2.getShipperId()).isEqualTo(SHIPPER);
     }
+
+    @Test
+    void devSimulationDeliversAHandedOffOrderOnlyWhenEnabled() throws Exception {
+        String id = handoff();
+        String path = "/api/delivery/seller/orders/{id}/simulate-delivery";
+        call(post(path, ORDER), SELLER, "SELLER", null).andExpect(status().isNotFound());
+
+        properties.setDevSimulation(true);
+        try {
+            call(post(path, ORDER), "other-seller", "SELLER", null).andExpect(status().isForbidden());
+            call(post(path, ORDER), SELLER, "SELLER", null)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("DELIVERED"));
+            assertThat(repo.find(id, false).getStatus().name()).isEqualTo("DELIVERED");
+            assertThat(
+                            jdbc.queryForList(
+                                    "select payload from delivery_outbox where"
+                                            + " event_type='DeliveryStatusChanged' order by created_at",
+                                    String.class))
+                    .extracting(payload -> json.readTree(payload).path("status").asString())
+                    .contains("PICKED_UP", "IN_TRANSIT", "DELIVERED");
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from delivery_outbox where"
+                                            + " event_type='CodCollected'",
+                                    Integer.class))
+                    .isEqualTo(1);
+            // Bấm lại không phát thêm sự kiện.
+            call(post(path, ORDER), SELLER, "SELLER", null).andExpect(status().isOk());
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from delivery_outbox where"
+                                            + " event_type='CodCollected'",
+                                    Integer.class))
+                    .isEqualTo(1);
+        } finally {
+            properties.setDevSimulation(false);
+        }
+    }
 }

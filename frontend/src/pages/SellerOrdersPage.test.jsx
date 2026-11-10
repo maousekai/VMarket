@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SellerOrdersPage from './SellerOrdersPage'
 import { resetCatalogLookup } from '../hooks/useCatalogLookup'
-import { getDelivery, handoffOrder } from '../services/api/deliveryApi'
+import { getDelivery, handoffOrder, simulateDelivery } from '../services/api/deliveryApi'
 import {
   acceptReturn,
   confirmReturnReceipt,
@@ -28,6 +28,7 @@ vi.mock('../services/api/deliveryApi', async (importOriginal) => ({
   ...(await importOriginal()),
   getDelivery: vi.fn(),
   handoffOrder: vi.fn(),
+  simulateDelivery: vi.fn(),
 }))
 vi.mock('../services/api/productApi', () => ({ getProduct: vi.fn() }))
 
@@ -112,6 +113,28 @@ describe('SellerOrdersPage', () => {
     renderAt('/seller/orders?status=PROCESSING')
     expect(await screen.findByText('Chờ phân công shipper')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Bàn giao vận chuyển' })).not.toBeInTheDocument()
+  })
+
+  it('simulates delivery of a handed-off order (temporary dev button)', async () => {
+    listSellerOrders.mockResolvedValue(page([order({ status: 'PROCESSING', shopConfirmed: true })]))
+    getDelivery.mockResolvedValue({
+      assignment: { status: 'WAITING_ASSIGNMENT' },
+      pickups: [{ shop_id: 's1' }],
+    })
+    simulateDelivery.mockResolvedValue({ status: 'DELIVERED' })
+    renderAt('/seller/orders?status=PROCESSING')
+    fireEvent.click(await screen.findByRole('button', { name: 'Giả lập giao hàng' }))
+    expect(
+      await screen.findByText(/Đã giả lập giao thành công/, {}, { timeout: 4000 }),
+    ).toBeInTheDocument()
+    expect(simulateDelivery).toHaveBeenCalledWith(order().id)
+  })
+
+  it('does not offer the simulation before handoff', async () => {
+    listSellerOrders.mockResolvedValue(page([order({ status: 'PROCESSING', shopConfirmed: true })]))
+    renderAt('/seller/orders?status=PROCESSING')
+    await screen.findByRole('button', { name: 'Bàn giao vận chuyển' })
+    expect(screen.queryByRole('button', { name: 'Giả lập giao hàng' })).not.toBeInTheDocument()
   })
 
   it('switches status tabs through the URL', async () => {

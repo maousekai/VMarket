@@ -3,6 +3,7 @@ package com.vmarket.delivery.controller;
 import com.vmarket.delivery.config.DeliveryProperties;
 import com.vmarket.delivery.domain.Assignment;
 import com.vmarket.delivery.dto.DeliveryRequests.*;
+import com.vmarket.delivery.exception.ApiException;
 import com.vmarket.delivery.repository.DeliveryRepository;
 import com.vmarket.delivery.service.DeliveryService;
 import com.vmarket.delivery.tracking.TrackingTickets;
@@ -56,6 +57,14 @@ public class DeliveryController {
             @RequestHeader("Authorization") String bearer,
             @PathVariable String order) {
         return service.sellerAssignment(service.handoff(auth.getName(), bearer, order));
+    }
+
+    /** TẠM THỜI (dev): xem DeliveryService#simulateDelivered. Tắt thì trả 404. */
+    @PostMapping("/seller/orders/{order}/simulate-delivery")
+    public Map<String, Object> simulateDelivery(Authentication auth, @PathVariable String order) {
+        if (!properties.isDevSimulation())
+            throw ApiException.notFound("NOT_FOUND", "Không tìm thấy tài nguyên");
+        return service.simulateDelivered(auth.getName(), order);
     }
 
     @GetMapping("/admin/assignments")

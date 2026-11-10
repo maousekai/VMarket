@@ -685,6 +685,55 @@ order by s.id limit ? offset ?
                 repo.history(a.getId()));
     }
 
+    private static final List<DeliveryStatus> SIMULATED_JOURNEY =
+            List.of(DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT, DeliveryStatus.DELIVERED);
+
+    /**
+     * TẠM THỜI (dev): đưa chuyến giao của đơn tới DELIVERED như một shipper thật đã lấy hàng
+     * và giao xong — cùng lịch sử, sự kiện DeliveryStatusChanged và CodCollected — để thử luồng
+     * trên web khi chưa có giao diện điều phối / shipper. Chỉ seller đã bàn giao đơn mới gọi được.
+     */
+    public Map<String, Object> simulateDelivered(String actor, String order) {
+        Assignment current = lookupOrder(order);
+        if (repo.handoffs(current.getId()).stream().noneMatch(h -> actor.equals(h.get("seller_id"))))
+            throw forbidden();
+        tx().executeWithoutResult(
+                ignored -> {
+                    Assignment a = repo.find(current.getId(), true);
+                    if (a.getStatus() == DeliveryStatus.DELIVERED) return;
+                    int from =
+                            switch (a.getStatus()) {
+                                case WAITING_ASSIGNMENT, ASSIGNED -> 0;
+                                case PICKED_UP -> 1;
+                                case IN_TRANSIT -> 2;
+                                default ->
+                                        throw ApiException.conflict(
+                                                "INVALID_TRANSITION",
+                                                "Chuyến giao chưa sẵn sàng để giả lập");
+                            };
+                    for (DeliveryStatus next : SIMULATED_JOURNEY.subList(from, SIMULATED_JOURNEY.size())) {
+                        a.setStatus(next);
+                        a.setVersion(a.getVersion() + 1);
+                        a.setTrackingSequence(a.getTrackingSequence() + 1);
+                        repo.save(a);
+                        repo.history(a, actor, "Giả lập giao hàng (dev)");
+                        event(
+                                a,
+                                EventType.DELIVERY_STATUS_CHANGED,
+                                new DeliveryStatusChanged(a.getOrderId(), next.name(), a.getVersion()));
+                    }
+                    if ("COD".equals(a.getPaymentMethod())) {
+                        event(
+                                a,
+                                EventType.COD_COLLECTED,
+                                new CodCollected(
+                                        a.getOrderId(), a.getBuyerId(), a.getCodAmount(), a.getId()));
+                    }
+                    tracking(a);
+                });
+        return sellerAssignment(repo.find(current.getId(), false));
+    }
+
     public Map<String, Object> sellerAssignment(Assignment a) {
         return Map.of(
                 "id",

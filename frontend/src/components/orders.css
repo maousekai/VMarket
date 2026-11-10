@@ -451,3 +451,10 @@
 .order-list.is-loading {
   opacity: 0.6;
 }
+
+/* TEMPORARY dev-only "Giả lập giao hàng" button */
+.seller-order__simulate.account-button {
+  border: 1px dashed var(--color-accent-strong);
+  background: #fff7ed;
+  color: var(--color-accent-strong);
+}
