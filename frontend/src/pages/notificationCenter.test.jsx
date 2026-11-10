@@ -89,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 describe('NotificationsPage', () => {
@@ -139,7 +140,19 @@ describe('NotificationsPage', () => {
 })
 
 describe('NotificationSettingsPage', () => {
-  it('saves email and push switches per category', async () => {
+  it('shows only email switches on a computer', async () => {
+    renderAt('/profile/notifications/settings')
+    expect(
+      await screen.findByRole('switch', { name: 'Email – Đơn hàng & giao hàng' }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole('switch')).toHaveLength(3)
+    expect(screen.queryByRole('switch', { name: /Thông báo đẩy/ })).not.toBeInTheDocument()
+  })
+
+  it('saves email and push switches per category on a phone', async () => {
+    vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36',
+    )
     updateNotificationPreferences.mockImplementation(async (categories) => ({ categories }))
     renderAt('/profile/notifications/settings')
     const save = await screen.findByRole('button', { name: 'Lưu cài đặt' })

@@ -6,6 +6,7 @@ import {
   getNotificationPreferences,
   updateNotificationPreferences,
 } from '../services/api/notificationApi'
+import { isMobileDevice } from '../utils/device'
 import '../components/orders.css'
 import '../components/notifications.css'
 
@@ -15,8 +16,13 @@ const DESCRIPTIONS = {
   SHOP: 'Duyệt, đình chỉ gian hàng và kiểm duyệt sản phẩm.',
 }
 
-/** Bat / tat email va push theo nhom; thong bao trong ung dung luon duoc giu. */
+/**
+ * Bat / tat email va push theo nhom; thong bao trong ung dung luon duoc giu. Push chi gui toi dien
+ * thoai nen cot "Thong bao day" chi hien khi mo tren dien thoai.
+ */
 export default function NotificationSettingsPage() {
+  const [mobile] = useState(isMobileDevice)
+  const channels = mobile ? ['email', 'push'] : ['email']
   const [state, setState] = useState({ status: 'loading', categories: [], error: '' })
   const [saved, setSaved] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -79,8 +85,10 @@ export default function NotificationSettingsPage() {
             </Link>
             <h1 id="notification-settings-title">Cài đặt thông báo</h1>
             <p className="account-subtitle">
-              Chọn nhận email và thông báo đẩy trên ứng dụng điện thoại cho từng nhóm. Thông báo
-              trong VMarket luôn được lưu để bạn xem lại.
+              {mobile
+                ? 'Chọn nhận email và thông báo đẩy trên điện thoại cho từng nhóm.'
+                : 'Chọn nhận email cho từng nhóm. Thông báo đẩy được cài đặt khi bạn mở VMarket trên điện thoại.'}{' '}
+              Thông báo trong VMarket luôn được lưu để bạn xem lại.
             </p>
           </div>
         </div>
@@ -109,7 +117,7 @@ export default function NotificationSettingsPage() {
                 <tr>
                   <th scope="col">Nhóm thông báo</th>
                   <th scope="col">Email</th>
-                  <th scope="col">Đẩy (điện thoại)</th>
+                  {mobile && <th scope="col">Thông báo đẩy</th>}
                 </tr>
               </thead>
               <tbody>
@@ -119,7 +127,7 @@ export default function NotificationSettingsPage() {
                       <strong>{item.label}</strong>
                       <small>{DESCRIPTIONS[item.key]}</small>
                     </th>
-                    {['email', 'push'].map((channel) => (
+                    {channels.map((channel) => (
                       <td key={channel}>
                         <label className="notification-switch">
                           <input
