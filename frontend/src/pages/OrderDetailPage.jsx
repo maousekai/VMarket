@@ -20,6 +20,7 @@ import {
   listOrderReturns,
 } from '../services/api/orderApi'
 import { getPaymentByOrder } from '../services/api/paymentApi'
+import { useReloadOnNotification } from '../notifications/events'
 import { formatDateTime } from '../utils/formatDate'
 import { paymentCode, PAYMENT_STATUS_LABELS } from '../utils/payment'
 import { formatMoney } from '../utils/formatMoney'
@@ -161,6 +162,9 @@ export default function OrderDetailPage() {
     ])
     setState({ status: 'ready', order, returns, payment, error: '' })
   }, [orderId])
+
+  // Co thong bao moi (vd shop xac nhan, da giao): tai lai trang thai don dang xem.
+  useReloadOnNotification(() => load().catch(() => {}))
 
   // Mo san hop thoai tra hang khi den tu trang chi tiet giao dich ("Yeu cau tra hang / hoan tien").
   const openedReturn = useRef(false)

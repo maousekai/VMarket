@@ -5,6 +5,7 @@ import { OrderItemsList, OrderStatusBadge } from '../components/OrderParts'
 import { useShopLookup } from '../hooks/useCatalogLookup'
 import { getApiError } from '../services/api/apiClient'
 import { listMyOrders } from '../services/api/orderApi'
+import { useReloadOnNotification } from '../notifications/events'
 import { formatDateTime } from '../utils/formatDate'
 import { formatMoney } from '../utils/formatMoney'
 import { groupItemsByShop, shortOrderId } from '../utils/order'
@@ -55,6 +56,7 @@ export default function OrdersPage() {
   const [reload, setReload] = useState(0)
   const [tab, setTab] = useState('')
   const [query, setQuery] = useState('')
+  useReloadOnNotification(() => setReload((value) => value + 1))
 
   useEffect(() => {
     let current = true

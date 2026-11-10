@@ -16,6 +16,17 @@ export const markNotificationRead = async (id) =>
 export const markAllNotificationsRead = async () =>
   (await apiClient.patch(`${baseUrl}/read-all`)).data
 
+/** Tuy chon email / push theo nhom: {categories: [{key, label, email, push}]}. */
+export const getNotificationPreferences = async () =>
+  (await apiClient.get(`${baseUrl}/preferences`)).data
+
+export const updateNotificationPreferences = async (categories) =>
+  (
+    await apiClient.put(`${baseUrl}/preferences`, {
+      categories: categories.map(({ key, email, push }) => ({ key, email, push })),
+    })
+  ).data
+
 /**
  * Link do Notification Service dung (dung chung cho email/push) -> route cua web.
  * Tra '' khi web chua co trang tuong ung.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { getApiError } from '../services/api/apiClient'
 import {
   getUnreadCount,
@@ -8,11 +8,12 @@ import {
   markNotificationRead,
   notificationRoute,
 } from '../services/api/notificationApi'
+import { announceNotificationArrived, NOTIFICATIONS_CHANGED_EVENT } from '../notifications/events'
 import { formatDateTime } from '../utils/formatDate'
 import './accountForms.css'
 import './notifications.css'
 
-const POLL_MS = 60_000
+const POLL_MS = 30_000
 const PAGE_SIZE = 10
 
 /** Chuong thong bao: so chua doc + danh sach moi nhat, bam de mo trang lien quan. */
@@ -24,22 +25,33 @@ export default function NotificationBell({ variant = 'header' }) {
   const [unread, setUnread] = useState(0)
   const [list, setList] = useState({ status: 'idle', items: [], error: '' })
 
+  const lastCount = useRef(null)
+
   const refreshCount = useCallback(
     () =>
       getUnreadCount()
-        .then(setUnread)
+        .then((count) => {
+          // So chua doc tang = co thong bao moi: bao cac trang dang mo tai lai du lieu.
+          if (lastCount.current != null && count > lastCount.current) announceNotificationArrived()
+          lastCount.current = count
+          setUnread(count)
+        })
         .catch(() => {}),
     [],
   )
 
   useEffect(() => {
     refreshCount()
-    const timer = setInterval(refreshCount, POLL_MS)
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') refreshCount()
+    }, POLL_MS)
     const onVisible = () => document.visibilityState === 'visible' && refreshCount()
     document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, refreshCount)
     return () => {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, refreshCount)
     }
   }, [refreshCount])
 
@@ -80,6 +92,7 @@ export default function NotificationBell({ variant = 'header' }) {
         ),
       }))
       setUnread((count) => Math.max(count - 1, 0))
+      lastCount.current = Math.max((lastCount.current ?? 1) - 1, 0)
       markNotificationRead(item.id).catch(() => refreshCount())
     }
     const route = notificationRoute(item.link)
@@ -95,6 +108,7 @@ export default function NotificationBell({ variant = 'header' }) {
       items: value.items.map((entry) => ({ ...entry, read: true })),
     }))
     setUnread(0)
+    lastCount.current = 0
     try {
       await markAllNotificationsRead()
     } catch {
@@ -172,6 +186,13 @@ export default function NotificationBell({ variant = 'header' }) {
               ))}
             </ul>
           )}
+          <Link
+            className="notification-bell__all"
+            to="/profile/notifications"
+            onClick={() => setOpen(false)}
+          >
+            Xem tất cả thông báo
+          </Link>
         </div>
       )}
     </div>

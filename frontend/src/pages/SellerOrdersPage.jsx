@@ -28,6 +28,7 @@ import '../components/sellerProducts.css'
 import '../components/orders.css'
 import EvidenceGallery from '../components/EvidenceGallery'
 import { refreshSellerAlerts } from '../hooks/useSellerAlerts'
+import { useReloadOnNotification } from '../notifications/events'
 
 const PAGE_SIZE = 10
 const SELLER_RESPONSE_HOURS = 48
@@ -358,6 +359,11 @@ export default function SellerOrdersPage() {
   const page = Math.max(Number.parseInt(params.get('page') || '0', 10) || 0, 0)
   const [state, setState] = useState({ status: 'loading', result: null, error: '' })
   const [reload, setReload] = useState(0)
+  // Don moi / buyer tra hang: tai lai danh sach va cham do ngay khi chuong bao co thong bao.
+  useReloadOnNotification(() => {
+    setReload((value) => value + 1)
+    refreshSellerAlerts()
+  })
   const [notice, setNotice] = useState('')
   const [rejecting, setRejecting] = useState(null)
 

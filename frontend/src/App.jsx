@@ -9,6 +9,8 @@ import OrderDetailPage from './pages/OrderDetailPage'
 import PaymentPage from './pages/PaymentPage'
 import PaymentHistoryPage from './pages/PaymentHistoryPage'
 import PaymentDetailPage from './pages/PaymentDetailPage'
+import NotificationsPage from './pages/NotificationsPage'
+import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import AppHeader from './components/AppHeader'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
@@ -115,6 +117,11 @@ export default function App() {
               <Route path="/payment/:orderId" element={<PaymentPage />} />
               <Route path="/profile/payments" element={<PaymentHistoryPage />} />
               <Route path="/profile/payments/:paymentId" element={<PaymentDetailPage />} />
+              <Route path="/profile/notifications" element={<NotificationsPage />} />
+              <Route
+                path="/profile/notifications/settings"
+                element={<NotificationSettingsPage />}
+              />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/orders" element={<OrdersPage />} />
               <Route path="/profile/orders/:orderId" element={<OrderDetailPage />} />
