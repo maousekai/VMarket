@@ -237,6 +237,41 @@
   margin: 0;
   font-weight: 600;
 }
+.order-result__list {
+  width: 100%;
+  display: grid;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.order-result__list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+}
+.order-result__list li + li {
+  border-top: 1px solid var(--color-border);
+}
+.order-result__list span {
+  display: grid;
+  gap: 2px;
+}
+.order-result__list small {
+  color: var(--color-muted);
+}
+.order-result__next {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--color-surface-muted, #f6f7f9);
+}
 @media (max-width: 640px) {
   .checkout-item {
     grid-template-columns: 48px minmax(0, 1fr) auto;

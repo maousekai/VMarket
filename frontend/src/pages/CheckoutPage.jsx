@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import AddressFormDialog from '../components/AddressFormDialog'
 import { useCart } from '../cart/useCart'
 import { lineKey } from '../cart/cartMath'
 import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
 import { getApiError } from '../services/api/apiClient'
 import { validateCart } from '../services/api/cartApi'
-import { PAYMENT_METHOD, placeOrder } from '../services/api/orderApi'
-import { startPayosPayment } from '../order/payos'
+import { checkoutOrders, PAYMENT_METHOD } from '../services/api/orderApi'
+import { startPayosQueue } from '../order/payos'
+import { clearCheckoutLines, lineToItem, loadCheckoutLines } from '../order/checkoutSelection'
 import { listMyAddresses, newIdempotencyKey } from '../services/api/userApi'
 import { formatMoney } from '../utils/formatMoney'
 import { PAYMENT_METHOD_LABELS } from '../utils/order'
 import { imageUrlOrEmpty } from '../utils/shop'
 import { describeVariant } from '../utils/variant'
 import '../components/account.css'
+import '../components/accountForms.css'
 import '../components/cart.css'
 import '../components/checkout.css'
 
 const NOTE_MAX = 255
 
-function AddressPicker({ state, selected, onSelect }) {
+function AddressPicker({ state, selected, onSelect, onAdd }) {
   if (state.status === 'loading')
     return (
       <p className="account-notice" role="status">
@@ -35,9 +38,9 @@ function AddressPicker({ state, selected, onSelect }) {
     return (
       <div className="checkout-empty-address">
         <p>Bạn chưa có địa chỉ nhận hàng.</p>
-        <Link className="account-button" to="/profile/addresses" state={{ returnTo: '/checkout' }}>
+        <button className="account-button" type="button" onClick={onAdd}>
           Thêm địa chỉ
-        </Link>
+        </button>
       </div>
     )
   return (
@@ -74,17 +77,28 @@ function AddressPicker({ state, selected, onSelect }) {
 export default function CheckoutPage() {
   const cart = useCart()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [lines] = useState(() => location.state?.lines || loadCheckoutLines())
+  const [addingAddress, setAddingAddress] = useState(false)
+  const [addressReload, setAddressReload] = useState(0)
   const [addresses, setAddresses] = useState({ status: 'loading', addresses: [], error: '' })
   const [addressId, setAddressId] = useState('')
   const [note, setNote] = useState('')
   const [method, setMethod] = useState(PAYMENT_METHOD.cod)
-  const [agreed, setAgreed] = useState(false)
   const [submitting, setSubmitting] = useState('')
   const [error, setError] = useState('')
   const idempotency = useRef({ key: newIdempotencyKey(), reuse: false })
 
-  const groups = cart.cart?.groups || []
+  // Chi nhung dong da chon o gio hang moi di qua thanh toan.
+  const groups = (cart.cart?.groups || [])
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => lines.includes(lineKey(item))),
+    }))
+    .filter((group) => group.items.length > 0)
   const items = groups.flatMap((group) => group.items)
+  const totalAmount = items.reduce((sum, item) => sum + Number(item.lineTotal), 0)
+  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0)
   const products = useProductLookup(items.map((item) => item.productId))
   const shops = useShopLookup(groups.map((group) => group.shopId))
 
@@ -94,7 +108,12 @@ export default function CheckoutPage() {
       .then((list) => {
         if (!current) return
         setAddresses({ status: 'ready', addresses: list, error: '' })
-        setAddressId((list.find((address) => address.isDefault) || list[0])?.id || '')
+        setAddressId(
+          (selected) =>
+            (list.some((address) => address.id === selected) && selected) ||
+            (list.find((address) => address.isDefault) || list[0])?.id ||
+            '',
+        )
       })
       .catch((failure) => {
         if (current)
@@ -103,19 +122,21 @@ export default function CheckoutPage() {
     return () => {
       current = false
     }
-  }, [])
+  }, [addressReload])
 
   async function submit(event) {
     event.preventDefault()
     if (submitting) return
     if (!addressId) return setError('Vui lòng chọn địa chỉ nhận hàng.')
-    if (!agreed) return setError('Vui lòng đồng ý với điều khoản mua sắm.')
     setError('')
     setSubmitting('validate')
     try {
       await cart.flush()
       const check = await validateCart()
-      if (!check.ok) {
+      const blocking = (check.issues || []).some(
+        (issue) => !issue.productId || lines.includes(lineKey(issue)),
+      )
+      if (blocking) {
         navigate('/cart', {
           replace: true,
           state: { message: 'Giỏ hàng vừa thay đổi giá hoặc tồn kho, vui lòng kiểm tra lại.' },
@@ -124,17 +145,20 @@ export default function CheckoutPage() {
       }
       if (!idempotency.current.reuse) idempotency.current.key = newIdempotencyKey()
       setSubmitting('order')
-      const order = await placeOrder(
-        { addressId, note, paymentMethod: method },
+      const orders = await checkoutOrders(
+        { addressId, note, paymentMethod: method, items: lines.map(lineToItem) },
         idempotency.current.key,
       )
+      clearCheckoutLines()
       cart.refresh().catch(() => {})
+      const ids = orders.map((order) => order.id)
       if (method === PAYMENT_METHOD.payos) {
         setSubmitting('payment')
         try {
-          await startPayosPayment(order.id)
+          // Moi gian hang mot don: thanh toan lan luot, trang ket qua mo don tiep theo.
+          await startPayosQueue(ids)
         } catch (failure) {
-          navigate(`/profile/orders/${encodeURIComponent(order.id)}`, {
+          navigate(`/profile/orders/${encodeURIComponent(ids[0])}`, {
             replace: true,
             state: {
               message: `Đã tạo đơn nhưng chưa mở được thanh toán PayOS: ${
@@ -145,7 +169,9 @@ export default function CheckoutPage() {
         }
         return
       }
-      navigate(`/checkout/success/${encodeURIComponent(order.id)}`, { replace: true })
+      navigate(`/checkout/success?orders=${ids.map(encodeURIComponent).join(',')}`, {
+        replace: true,
+      })
     } catch (failure) {
       const apiError = getApiError(failure)
       idempotency.current.reuse = apiError.retryable
@@ -167,7 +193,8 @@ export default function CheckoutPage() {
     return (
       <main className="cart-page">
         <div className="account-card cart-empty">
-          <h1>Chưa có sản phẩm để thanh toán</h1>
+          <h1>Chưa chọn sản phẩm để thanh toán</h1>
+          <p>Hãy chọn sản phẩm trong giỏ hàng rồi bấm “Tiến hành đặt hàng”.</p>
           <Link className="button button--primary" to="/cart">
             Về giỏ hàng
           </Link>
@@ -190,13 +217,26 @@ export default function CheckoutPage() {
           <section className="account-card checkout-section" aria-labelledby="checkout-address">
             <div className="checkout-section__head">
               <h2 id="checkout-address">Địa chỉ nhận hàng</h2>
-              <Link to="/profile/addresses">Quản lý sổ địa chỉ</Link>
+              <button type="button" className="link-button" onClick={() => setAddingAddress(true)}>
+                + Thêm địa chỉ mới
+              </button>
             </div>
-            <AddressPicker state={addresses} selected={addressId} onSelect={setAddressId} />
+            <AddressPicker
+              state={addresses}
+              selected={addressId}
+              onSelect={setAddressId}
+              onAdd={() => setAddingAddress(true)}
+            />
           </section>
 
           <section className="account-card checkout-section" aria-labelledby="checkout-items">
             <h2 id="checkout-items">Kiểm tra sản phẩm</h2>
+            {groups.length > 1 && (
+              <p className="cart-split-note">
+                Đơn sẽ được tách thành {groups.length} đơn theo gian hàng; mỗi đơn có tiến độ giao,
+                huỷ và trả hàng riêng.
+              </p>
+            )}
             {groups.map((group) => (
               <div className="checkout-shop" key={group.shopId}>
                 <h3>{shops[group.shopId]?.value?.name || 'Gian hàng'}</h3>
@@ -267,8 +307,8 @@ export default function CheckoutPage() {
           <h2>Tóm tắt thanh toán</h2>
           <dl>
             <div>
-              <dt>Tạm tính ({cart.totalQuantity} sản phẩm)</dt>
-              <dd>{formatMoney(cart.cart.totalAmount)}</dd>
+              <dt>Tạm tính ({totalQuantity} sản phẩm)</dt>
+              <dd>{formatMoney(totalAmount)}</dd>
             </div>
             <div>
               <dt>Phí giao hàng</dt>
@@ -277,16 +317,8 @@ export default function CheckoutPage() {
           </dl>
           <div className="cart-summary__total">
             <span>Tổng thanh toán</span>
-            <strong>{formatMoney(cart.cart.totalAmount)}</strong>
+            <strong>{formatMoney(totalAmount)}</strong>
           </div>
-          <label className="checkout-terms">
-            <input
-              type="checkbox"
-              checked={agreed}
-              onChange={(event) => setAgreed(event.target.checked)}
-            />
-            <span>Tôi đồng ý với điều khoản mua sắm và chính sách đổi trả 7 ngày của VMarket.</span>
-          </label>
           {error && (
             <p className="form-message form-message--error" role="alert">
               {error}
@@ -303,13 +335,26 @@ export default function CheckoutPage() {
                 ? 'Đang đặt hàng…'
                 : submitting === 'payment'
                   ? 'Đang mở PayOS…'
-                  : 'Đặt hàng'}
+                  : groups.length > 1
+                    ? `Đặt ${groups.length} đơn hàng`
+                    : 'Đặt hàng'}
           </button>
           <Link className="checkout-back" to="/cart">
             ‹ Quay lại giỏ hàng
           </Link>
         </aside>
       </form>
+      {addingAddress && (
+        <AddressFormDialog
+          isFirst={addresses.addresses.length === 0}
+          onCancel={() => setAddingAddress(false)}
+          onSaved={(_message, _warning, saved) => {
+            setAddingAddress(false)
+            if (saved?.id) setAddressId(saved.id)
+            setAddressReload((value) => value + 1)
+          }}
+        />
+      )}
     </main>
   )
 }

@@ -95,6 +95,7 @@ export default function App() {
             <Route element={<RouteGuard />}>
               <Route path="/cart" element={<CartPage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
+              <Route path="/checkout/success" element={<OrderResultPage mode="success" />} />
               <Route
                 path="/checkout/success/:orderId"
                 element={<OrderResultPage mode="success" />}

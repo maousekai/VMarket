@@ -6,10 +6,15 @@ import CheckoutPage from './CheckoutPage'
 import OrderResultPage from './OrderResultPage'
 import { CartContext } from '../cart/useCart'
 import { resetCatalogLookup } from '../hooks/useCatalogLookup'
-import { startPayosPayment, waitForReservation } from '../order/payos'
+import {
+  readPayosCheckout,
+  startPayosPayment,
+  startPayosQueue,
+  waitForReservation,
+} from '../order/payos'
 import { validateCart } from '../services/api/cartApi'
-import { getOrder, placeOrder } from '../services/api/orderApi'
-import { createPayment } from '../services/api/paymentApi'
+import { checkoutOrders, getOrder } from '../services/api/orderApi'
+import { createPayment, syncPayment } from '../services/api/paymentApi'
 import { getProduct } from '../services/api/productApi'
 import { getPublicShop } from '../services/api/shopApi'
 import { listMyAddresses } from '../services/api/userApi'
@@ -17,10 +22,10 @@ import { listMyAddresses } from '../services/api/userApi'
 vi.mock('../services/api/cartApi', () => ({ validateCart: vi.fn() }))
 vi.mock('../services/api/orderApi', async (importOriginal) => ({
   ...(await importOriginal()),
+  checkoutOrders: vi.fn(),
   getOrder: vi.fn(),
-  placeOrder: vi.fn(),
 }))
-vi.mock('../services/api/paymentApi', () => ({ createPayment: vi.fn() }))
+vi.mock('../services/api/paymentApi', () => ({ createPayment: vi.fn(), syncPayment: vi.fn() }))
 vi.mock('../services/api/productApi', () => ({ getProduct: vi.fn() }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
 vi.mock('../services/api/userApi', async (importOriginal) => ({
@@ -28,26 +33,23 @@ vi.mock('../services/api/userApi', async (importOriginal) => ({
   listMyAddresses: vi.fn(),
 }))
 
+const item = (productId, variantId, shopId, quantity, unitPrice) => ({
+  productId,
+  variantId,
+  shopId,
+  quantity,
+  unitPrice,
+  lineTotal: quantity * unitPrice,
+})
+
 const cart = {
   status: 'ready',
-  totalQuantity: 2,
+  totalQuantity: 3,
   cart: {
-    totalAmount: 498000,
+    totalAmount: 618000,
     groups: [
-      {
-        shopId: 's1',
-        subtotal: 498000,
-        items: [
-          {
-            productId: 'p1',
-            variantId: 'v1',
-            shopId: 's1',
-            quantity: 2,
-            unitPrice: 249000,
-            lineTotal: 498000,
-          },
-        ],
-      },
+      { shopId: 's1', subtotal: 498000, items: [item('p1', 'v1', 's1', 2, 249000)] },
+      { shopId: 's2', subtotal: 120000, items: [item('p2', 'v2', 's2', 1, 120000)] },
     ],
   },
   flush: vi.fn(async () => {}),
@@ -66,6 +68,9 @@ const order = {
   items: [],
 }
 
+const selectLines = (...keys) =>
+  sessionStorage.setItem('vmarket.checkoutLines', JSON.stringify(keys))
+
 const renderCheckout = (value = cart) =>
   render(
     <CartContext.Provider value={value}>
@@ -73,7 +78,7 @@ const renderCheckout = (value = cart) =>
         <Routes>
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/cart" element={<p>Trang giỏ hàng</p>} />
-          <Route path="/checkout/success/:orderId" element={<p>Đặt thành công</p>} />
+          <Route path="/checkout/success" element={<p>Đặt thành công</p>} />
           <Route path="/profile/orders/:orderId" element={<p>Chi tiết đơn</p>} />
         </Routes>
       </MemoryRouter>
@@ -83,6 +88,8 @@ const renderCheckout = (value = cart) =>
 beforeEach(() => {
   vi.clearAllMocks()
   resetCatalogLookup()
+  sessionStorage.clear()
+  selectLines('p1::v1')
   listMyAddresses.mockResolvedValue([
     {
       id: 'a1',
@@ -100,56 +107,81 @@ beforeEach(() => {
       isDefault: true,
     },
   ])
-  getProduct.mockResolvedValue({
-    product: { id: 'p1', name: 'Áo polo', imageUrls: [], variants: [] },
-  })
-  getPublicShop.mockResolvedValue({ id: 's1', name: 'Danang Apparel' })
+  getProduct.mockImplementation(async (id) => ({
+    product: { id, name: id === 'p1' ? 'Áo polo' : 'Ly gốm', imageUrls: [], variants: [] },
+  }))
+  getPublicShop.mockImplementation(async (id) => ({
+    id,
+    name: id === 's1' ? 'Danang Apparel' : 'Gốm Mộc',
+  }))
   validateCart.mockResolvedValue({ ok: true, issues: [] })
-  placeOrder.mockResolvedValue(order)
+  checkoutOrders.mockResolvedValue([order])
 })
 
 describe('CheckoutPage', () => {
-  it('preselects the default address and lists the items by shop', async () => {
+  it('preselects the default address and lists only the selected items', async () => {
     renderCheckout()
     expect(await screen.findByRole('radio', { name: /Bình/ })).toBeChecked()
     expect(await screen.findByText('Danang Apparel')).toBeInTheDocument()
     expect(await screen.findByText('Áo polo')).toBeInTheDocument()
+    expect(screen.queryByText('Ly gốm')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
-  it('requires accepting the terms before placing the order', async () => {
-    renderCheckout()
-    await screen.findByRole('radio', { name: /Bình/ })
-    fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('đồng ý với điều khoản')
-    expect(placeOrder).not.toHaveBeenCalled()
-  })
-
-  it('places a COD order with the chosen address and note', async () => {
+  it('places a COD order for the selected lines with the chosen address and note', async () => {
     renderCheckout()
     fireEvent.click(await screen.findByRole('radio', { name: /An ·/ }))
     fireEvent.change(screen.getByLabelText(/Ghi chú/), { target: { value: 'Gọi trước' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /Tôi đồng ý/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
     expect(await screen.findByText('Đặt thành công')).toBeInTheDocument()
-    expect(placeOrder).toHaveBeenCalledWith(
-      { addressId: 'a1', note: 'Gọi trước', paymentMethod: 'COD' },
+    expect(checkoutOrders).toHaveBeenCalledWith(
+      {
+        addressId: 'a1',
+        note: 'Gọi trước',
+        paymentMethod: 'COD',
+        items: [{ productId: 'p1', variantId: 'v1' }],
+      },
       expect.any(String),
     )
     expect(cart.refresh).toHaveBeenCalled()
+    expect(sessionStorage.getItem('vmarket.checkoutLines')).toBeNull()
   })
 
-  it('sends the buyer back to the cart when prices changed', async () => {
-    validateCart.mockResolvedValue({ ok: false, issues: [{ type: 'PRICE_CHANGED' }] })
+  it('announces one order per shop when several shops are selected', async () => {
+    selectLines('p1::v1', 'p2::v2')
     renderCheckout()
     await screen.findByRole('radio', { name: /Bình/ })
-    fireEvent.click(screen.getByRole('checkbox', { name: /Tôi đồng ý/ }))
+    expect(screen.getByText(/tách thành 2 đơn/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Đặt 2 đơn hàng' })).toBeEnabled()
+  })
+
+  it('ignores cart issues of lines that were not selected', async () => {
+    validateCart.mockResolvedValue({
+      ok: false,
+      issues: [{ productId: 'p2', variantId: 'v2', type: 'OUT_OF_STOCK' }],
+    })
+    renderCheckout()
+    await screen.findByRole('radio', { name: /Bình/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
+    expect(await screen.findByText('Đặt thành công')).toBeInTheDocument()
+  })
+
+  it('sends the buyer back to the cart when a selected price changed', async () => {
+    validateCart.mockResolvedValue({
+      ok: false,
+      issues: [{ productId: 'p1', variantId: 'v1', type: 'PRICE_CHANGED' }],
+    })
+    renderCheckout()
+    await screen.findByRole('radio', { name: /Bình/ })
     fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
     expect(await screen.findByText('Trang giỏ hàng')).toBeInTheDocument()
-    expect(placeOrder).not.toHaveBeenCalled()
+    expect(checkoutOrders).not.toHaveBeenCalled()
   })
 
   it('opens the order detail when PayOS cannot start', async () => {
-    placeOrder.mockResolvedValue({ ...order, status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' })
+    checkoutOrders.mockResolvedValue([
+      { ...order, status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' },
+    ])
     getOrder.mockResolvedValue({ ...order, status: 'WAITING_PAYMENT', stockReserved: true })
     createPayment.mockRejectedValue({
       response: {
@@ -160,23 +192,28 @@ describe('CheckoutPage', () => {
     renderCheckout()
     await screen.findByRole('radio', { name: /Bình/ })
     fireEvent.click(screen.getByRole('radio', { name: /PayOS/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /Tôi đồng ý/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
     expect(await screen.findByText('Chi tiết đơn')).toBeInTheDocument()
-    expect(placeOrder).toHaveBeenCalledWith(
+    expect(checkoutOrders).toHaveBeenCalledWith(
       expect.objectContaining({ paymentMethod: 'PAYOS' }),
       expect.any(String),
     )
   })
 
-  it('links to the address book when there is no address', async () => {
+  it('adds an address in a popup when the address book is empty', async () => {
     listMyAddresses.mockResolvedValue([])
     renderCheckout()
-    expect(await screen.findByRole('link', { name: 'Thêm địa chỉ' })).toHaveAttribute(
-      'href',
-      '/profile/addresses',
-    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Thêm địa chỉ' }))
+    expect(screen.getByRole('dialog', { name: 'Thêm địa chỉ nhận hàng' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Đặt hàng' })).toBeDisabled()
+  })
+
+  it('asks the buyer to pick items when nothing was selected', async () => {
+    sessionStorage.removeItem('vmarket.checkoutLines')
+    renderCheckout()
+    expect(
+      await screen.findByRole('heading', { name: 'Chưa chọn sản phẩm để thanh toán' }),
+    ).toBeInTheDocument()
   })
 })
 
@@ -200,6 +237,13 @@ describe('PayOS helpers', () => {
     expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBe('o1')
   })
 
+  it('remembers the payment id of every queued order', async () => {
+    getOrder.mockResolvedValue({ id: 'o1', status: 'WAITING_PAYMENT', stockReserved: true })
+    createPayment.mockResolvedValue({ id: 'pay1', checkoutUrl: 'https://pay.payos.vn/web/abc' })
+    await startPayosQueue(['o1', 'o2'], vi.fn())
+    expect(readPayosCheckout()).toEqual({ queue: ['o1', 'o2'], payments: { o1: 'pay1' } })
+  })
+
   it('refuses to pay for an order cancelled because stock ran out', async () => {
     getOrder.mockResolvedValue({ id: 'o1', status: 'CANCELLED', stockReserved: false })
     await expect(startPayosPayment('o1', vi.fn())).rejects.toThrow('hết hàng')
@@ -212,6 +256,7 @@ describe('OrderResultPage', () => {
     render(
       <MemoryRouter initialEntries={[path]}>
         <Routes>
+          <Route path="/checkout/success" element={element} />
           <Route path="/checkout/success/:orderId" element={element} />
           <Route path="/payment/:result" element={element} />
         </Routes>
@@ -222,17 +267,59 @@ describe('OrderResultPage', () => {
     getOrder.mockResolvedValue(order)
     renderResult(`/checkout/success/${order.id}`, <OrderResultPage mode="success" />)
     expect(await screen.findByRole('heading', { name: 'Đặt hàng thành công' })).toBeInTheDocument()
-    expect(screen.getByText('#0P4S6A2B')).toBeInTheDocument()
+    expect(screen.getByText('Đơn #0P4S6A2B')).toBeInTheDocument()
   })
 
-  it('reports a paid PayOS order on return', async () => {
+  it('lists every order created by a split checkout', async () => {
+    getOrder.mockImplementation(async (id) => ({ ...order, id }))
+    renderResult('/checkout/success?orders=o-AAAAAAAA,o-BBBBBBBB', <OrderResultPage />)
+    expect(await screen.findByText(/Đã tạo 2 đơn theo từng gian hàng/)).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Xem đơn' })).toHaveLength(2)
+  })
+
+  it('syncs PayOS on return and reports a paid order', async () => {
     sessionStorage.setItem('vmarket.pendingPaymentOrder', order.id)
+    sessionStorage.setItem(
+      'vmarket.payosCheckout',
+      JSON.stringify({ queue: [order.id], payments: { [order.id]: 'pay1' } }),
+    )
+    syncPayment.mockResolvedValue({ status: 'SUCCEEDED' })
     getOrder.mockResolvedValue({ ...order, paymentMethod: 'PAYOS' })
     renderResult('/payment/return', <OrderResultPage mode="return" />)
     expect(
       await screen.findByRole('heading', { name: 'Thanh toán thành công' }),
     ).toBeInTheDocument()
+    expect(syncPayment).toHaveBeenCalledWith('pay1')
     await waitFor(() => expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBeNull())
+  })
+
+  it('offers to pay the next unpaid order of the same checkout', async () => {
+    sessionStorage.setItem('vmarket.pendingPaymentOrder', 'o1')
+    sessionStorage.setItem(
+      'vmarket.payosCheckout',
+      JSON.stringify({ queue: ['o1', 'o2'], payments: { o1: 'pay1' } }),
+    )
+    syncPayment.mockResolvedValue({})
+    getOrder.mockImplementation(async (id) => ({
+      ...order,
+      id,
+      paymentMethod: 'PAYOS',
+      status: id === 'o1' ? 'PENDING' : 'WAITING_PAYMENT',
+      stockReserved: true,
+    }))
+    createPayment.mockResolvedValue({ id: 'pay2', checkoutUrl: 'https://pay.payos.vn/web/2' })
+    const assign = vi.fn()
+    const original = window.location
+    Object.defineProperty(window, 'location', { configurable: true, value: { assign } })
+    try {
+      renderResult('/payment/return', <OrderResultPage mode="return" />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Thanh toán đơn tiếp theo' }))
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('https://pay.payos.vn/web/2'))
+      expect(createPayment).toHaveBeenCalledWith('o2')
+      expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBe('o2')
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: original })
+    }
   })
 
   it('explains a cancelled payment', async () => {
@@ -242,5 +329,6 @@ describe('OrderResultPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Bạn đã huỷ thanh toán' }),
     ).toBeInTheDocument()
+    expect(syncPayment).not.toHaveBeenCalled()
   })
 })

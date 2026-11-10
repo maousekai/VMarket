@@ -39,6 +39,19 @@ export const placeOrder = async ({ addressId, note, paymentMethod }, idempotency
     )
   ).data
 
+/**
+ * Dat cac dong da chon trong gio, moi gian hang mot don (POST /api/orders/checkout).
+ * Tra ve danh sach don; gui lai cung Idempotency-Key tra lai cac don da tao.
+ */
+export const checkoutOrders = async ({ addressId, note, paymentMethod, items }, idempotencyKey) =>
+  (
+    await apiClient.post(
+      `${ordersUrl}/checkout`,
+      { addressId, note: note?.trim() || null, paymentMethod, items },
+      { headers: { 'Idempotency-Key': idempotencyKey || newIdempotencyKey() } },
+    )
+  ).data
+
 export const listMyOrders = async () => (await apiClient.get(ordersUrl)).data
 
 export const getOrder = async (orderId) => (await apiClient.get(orderUrl(orderId))).data
