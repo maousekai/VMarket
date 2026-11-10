@@ -23,6 +23,9 @@ public class ShopCatalogAccess {
 	private Instant updatedAt;
 	/** Lần projection được bootstrap/reconcile gần nhất. */
 	private Instant reconciledAt;
+	/** Tên gian hàng (từ ShopApproved / đối soát) để tìm sản phẩm theo tên shop. */
+	@Indexed
+	private String shopName;
 
 	public ShopCatalogAccess(String shopId, String sellerId, boolean active, Instant updatedAt) {
 		this(shopId, sellerId, active, updatedAt, Instant.now());

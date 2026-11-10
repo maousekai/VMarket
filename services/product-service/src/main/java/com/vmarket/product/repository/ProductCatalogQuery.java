@@ -1,5 +1,7 @@
 package com.vmarket.product.repository;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 
 import org.springframework.data.domain.Page;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Repository;
 
 import com.vmarket.product.model.Product;
 import com.vmarket.product.model.ProductStatus;
+import com.vmarket.product.model.ShopCatalogAccess;
 
 @Repository
 public class ProductCatalogQuery {
@@ -31,7 +34,16 @@ public class ProductCatalogQuery {
 			criteria.and("categoryPath").is(categoryId);
 		}
 		if (keyword != null && !keyword.isBlank()) {
-			criteria.and("name").regex(Pattern.compile(Pattern.quote(keyword.trim()), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE));
+			Pattern pattern = Pattern.compile(Pattern.quote(keyword.trim()),
+					Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+			// Khớp tên sản phẩm HOẶC tên gian hàng (gõ tên shop ra toàn bộ sản phẩm của shop đó).
+			List<String> matchingShops = mongoTemplate.find(
+					new Query(Criteria.where("shopName").regex(pattern)), ShopCatalogAccess.class)
+					.stream().map(ShopCatalogAccess::getShopId).toList();
+			List<Criteria> anyOf = new ArrayList<>();
+			anyOf.add(Criteria.where("name").regex(pattern));
+			if (!matchingShops.isEmpty()) anyOf.add(Criteria.where("shopId").in(matchingShops));
+			criteria.orOperator(anyOf.toArray(Criteria[]::new));
 		}
 		if (shopId != null && !shopId.isBlank()) {
 			criteria.and("shopId").is(shopId);

@@ -69,7 +69,8 @@ public class ShopCatalogAccessReconciler {
 					.filter(shop -> shop.getOwnerId() != null)
 					.map(shop -> new ShopAccessSnapshot(shop.getId(), shop.getOwnerId(),
 							shop.getStatus() == ShopStatus.ACTIVE,
-							shop.getUpdatedAt() != null ? shop.getUpdatedAt() : shop.getCreatedAt()))
+							shop.getUpdatedAt() != null ? shop.getUpdatedAt() : shop.getCreatedAt(),
+							shop.getName()))
 					.toList();
 			if (!snapshots.isEmpty()) {
 				if (!productServiceClient.reconcileShopAccess(snapshots)) {

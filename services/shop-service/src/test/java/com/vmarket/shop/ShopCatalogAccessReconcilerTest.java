@@ -35,6 +35,7 @@ class ShopCatalogAccessReconcilerTest {
 		shop.setOwnerId(owner);
 		shop.setStatus(status);
 		shop.setUpdatedAt(Instant.parse("2026-11-03T08:43:38Z"));
+		shop.setName("Shop " + id);
 		return shop;
 	}
 
@@ -50,8 +51,8 @@ class ShopCatalogAccessReconcilerTest {
 		ArgumentCaptor<List<ShopAccessSnapshot>> sent = ArgumentCaptor.forClass(List.class);
 		verify(client).reconcileShopAccess(sent.capture());
 		assertThat(sent.getValue()).containsExactly(
-				new ShopAccessSnapshot("S1", "U1", true, Instant.parse("2026-11-03T08:43:38Z")),
-				new ShopAccessSnapshot("S2", "U2", false, Instant.parse("2026-11-03T08:43:38Z")));
+				new ShopAccessSnapshot("S1", "U1", true, Instant.parse("2026-11-03T08:43:38Z"), "Shop S1"),
+				new ShopAccessSnapshot("S2", "U2", false, Instant.parse("2026-11-03T08:43:38Z"), "Shop S2"));
 	}
 
 	@Test

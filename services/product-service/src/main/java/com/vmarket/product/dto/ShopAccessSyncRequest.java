@@ -16,6 +16,7 @@ public record ShopAccessSyncRequest(
 			@NotBlank String shopId,
 			@NotBlank String sellerId,
 			boolean active,
-			@NotNull Instant updatedAt) {
+			@NotNull Instant updatedAt,
+			@Size(max = 200) String shopName) {
 	}
 }

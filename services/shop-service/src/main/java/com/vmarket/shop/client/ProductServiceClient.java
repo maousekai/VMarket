@@ -75,7 +75,8 @@ public class ProductServiceClient {
 		}
 	}
 
-	public record ShopAccessSnapshot(String shopId, String sellerId, boolean active, Instant updatedAt) {
+	public record ShopAccessSnapshot(String shopId, String sellerId, boolean active, Instant updatedAt,
+			String shopName) {
 	}
 
 	public record ShopAccessSyncRequest(List<ShopAccessSnapshot> shops) {
