@@ -6,6 +6,9 @@ import CheckoutPage from './pages/CheckoutPage'
 import OrderResultPage from './pages/OrderResultPage'
 import OrdersPage from './pages/OrdersPage'
 import OrderDetailPage from './pages/OrderDetailPage'
+import PaymentPage from './pages/PaymentPage'
+import PaymentHistoryPage from './pages/PaymentHistoryPage'
+import PaymentDetailPage from './pages/PaymentDetailPage'
 import AppHeader from './components/AppHeader'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
@@ -109,6 +112,9 @@ export default function App() {
               />
               <Route path="/payment/return" element={<OrderResultPage mode="return" />} />
               <Route path="/payment/cancel" element={<OrderResultPage mode="cancel" />} />
+              <Route path="/payment/:orderId" element={<PaymentPage />} />
+              <Route path="/profile/payments" element={<PaymentHistoryPage />} />
+              <Route path="/profile/payments/:paymentId" element={<PaymentDetailPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/orders" element={<OrdersPage />} />
               <Route path="/profile/orders/:orderId" element={<OrderDetailPage />} />

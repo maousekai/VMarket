@@ -7,8 +7,9 @@ import OrderResultPage from './OrderResultPage'
 import { CartContext } from '../cart/useCart'
 import { resetCatalogLookup } from '../hooks/useCatalogLookup'
 import {
+  findNextUnpaid,
+  preparePayosPayment,
   readPayosCheckout,
-  startPayosPayment,
   startPayosQueue,
   waitForReservation,
 } from '../order/payos'
@@ -80,6 +81,7 @@ const renderCheckout = (value = cart) =>
           <Route path="/cart" element={<p>Trang giỏ hàng</p>} />
           <Route path="/checkout/success" element={<p>Đặt thành công</p>} />
           <Route path="/profile/orders/:orderId" element={<p>Chi tiết đơn</p>} />
+          <Route path="/payment/:orderId" element={<p>Màn thanh toán QR</p>} />
         </Routes>
       </MemoryRouter>
     </CartContext.Provider>,
@@ -178,22 +180,18 @@ describe('CheckoutPage', () => {
     expect(checkoutOrders).not.toHaveBeenCalled()
   })
 
-  it('opens the order detail when PayOS cannot start', async () => {
+  it('opens the QR payment screen of the first order for PayOS', async () => {
+    selectLines('p1::v1', 'p2::v2')
     checkoutOrders.mockResolvedValue([
-      { ...order, status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' },
+      { ...order, id: 'o1', status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' },
+      { ...order, id: 'o2', status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' },
     ])
-    getOrder.mockResolvedValue({ ...order, status: 'WAITING_PAYMENT', stockReserved: true })
-    createPayment.mockRejectedValue({
-      response: {
-        status: 503,
-        data: { error: { code: 'PAYOS_DISABLED', message: 'PayOS đang tắt.' } },
-      },
-    })
     renderCheckout()
     await screen.findByRole('radio', { name: /Bình/ })
     fireEvent.click(screen.getByRole('radio', { name: /PayOS/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
-    expect(await screen.findByText('Chi tiết đơn')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Đặt 2 đơn hàng' }))
+    expect(await screen.findByText('Màn thanh toán QR')).toBeInTheDocument()
+    expect(readPayosCheckout().queue).toEqual(['o1', 'o2'])
     expect(checkoutOrders).toHaveBeenCalledWith(
       expect.objectContaining({ paymentMethod: 'PAYOS' }),
       expect.any(String),
@@ -228,26 +226,34 @@ describe('PayOS helpers', () => {
     expect(wait).toHaveBeenCalledTimes(1)
   })
 
-  it('redirects to the PayOS checkout URL and remembers the order', async () => {
+  it('creates the payment once stock is reserved and remembers it', async () => {
     getOrder.mockResolvedValue({ id: 'o1', status: 'WAITING_PAYMENT', stockReserved: true })
-    createPayment.mockResolvedValue({ checkoutUrl: 'https://pay.payos.vn/web/abc' })
-    const redirect = vi.fn()
-    await startPayosPayment('o1', redirect)
-    expect(redirect).toHaveBeenCalledWith('https://pay.payos.vn/web/abc')
+    createPayment.mockResolvedValue({ id: 7, qrCode: '000201...', checkoutUrl: 'https://pay' })
+    sessionStorage.setItem(
+      'vmarket.payosCheckout',
+      JSON.stringify({ queue: ['o1', 'o2'], payments: {} }),
+    )
+    const payment = await preparePayosPayment('o1')
+    expect(payment.id).toBe(7)
+    expect(readPayosCheckout()).toEqual({ queue: ['o1', 'o2'], payments: { o1: 7 } })
     expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBe('o1')
-  })
-
-  it('remembers the payment id of every queued order', async () => {
-    getOrder.mockResolvedValue({ id: 'o1', status: 'WAITING_PAYMENT', stockReserved: true })
-    createPayment.mockResolvedValue({ id: 'pay1', checkoutUrl: 'https://pay.payos.vn/web/abc' })
-    await startPayosQueue(['o1', 'o2'], vi.fn())
-    expect(readPayosCheckout()).toEqual({ queue: ['o1', 'o2'], payments: { o1: 'pay1' } })
   })
 
   it('refuses to pay for an order cancelled because stock ran out', async () => {
     getOrder.mockResolvedValue({ id: 'o1', status: 'CANCELLED', stockReserved: false })
-    await expect(startPayosPayment('o1', vi.fn())).rejects.toThrow('hết hàng')
+    await expect(preparePayosPayment('o1')).rejects.toThrow('hết hàng')
     expect(createPayment).not.toHaveBeenCalled()
+  })
+
+  it('starts a queue on the first order and finds the next unpaid one', async () => {
+    const navigate = vi.fn()
+    startPayosQueue(['o1', 'o2', 'o3'], navigate)
+    expect(navigate).toHaveBeenCalledWith('/payment/o1', { replace: true })
+    getOrder.mockImplementation(async (id) => ({
+      id,
+      status: id === 'o2' ? 'CANCELLED' : 'WAITING_PAYMENT',
+    }))
+    expect((await findNextUnpaid('o1')).id).toBe('o3')
   })
 })
 
@@ -305,21 +311,12 @@ describe('OrderResultPage', () => {
       id,
       paymentMethod: 'PAYOS',
       status: id === 'o1' ? 'PENDING' : 'WAITING_PAYMENT',
-      stockReserved: true,
     }))
-    createPayment.mockResolvedValue({ id: 'pay2', checkoutUrl: 'https://pay.payos.vn/web/2' })
-    const assign = vi.fn()
-    const original = window.location
-    Object.defineProperty(window, 'location', { configurable: true, value: { assign } })
-    try {
-      renderResult('/payment/return', <OrderResultPage mode="return" />)
-      fireEvent.click(await screen.findByRole('button', { name: 'Thanh toán đơn tiếp theo' }))
-      await waitFor(() => expect(assign).toHaveBeenCalledWith('https://pay.payos.vn/web/2'))
-      expect(createPayment).toHaveBeenCalledWith('o2')
-      expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBe('o2')
-    } finally {
-      Object.defineProperty(window, 'location', { configurable: true, value: original })
-    }
+    renderResult('/payment/return', <OrderResultPage mode="return" />)
+    expect(await screen.findByRole('link', { name: 'Thanh toán đơn tiếp theo' })).toHaveAttribute(
+      'href',
+      '/payment/o2',
+    )
   })
 
   it('explains a cancelled payment', async () => {

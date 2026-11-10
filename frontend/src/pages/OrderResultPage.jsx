@@ -5,9 +5,9 @@ import { getOrder } from '../services/api/orderApi'
 import { syncPayment } from '../services/api/paymentApi'
 import {
   clearPayosCheckout,
+  findNextUnpaid,
   PENDING_PAYMENT_KEY,
   readPayosCheckout,
-  startPayosPayment,
 } from '../order/payos'
 import { formatMoney } from '../utils/formatMoney'
 import {
@@ -146,8 +146,6 @@ function PaymentResult({ mode }) {
   const [orderId] = useState(readPendingOrder)
   const [state, setState] = useState({ status: orderId ? 'loading' : 'missing', order: null })
   const [next, setNext] = useState(null)
-  const [paying, setPaying] = useState(false)
-  const [payError, setPayError] = useState('')
 
   useEffect(() => {
     if (!orderId) return undefined
@@ -155,17 +153,6 @@ function PaymentResult({ mode }) {
     let timer
     const checkout = readPayosCheckout()
     const paymentId = checkout.payments[orderId]
-    const findNext = async () => {
-      for (const id of checkout.queue.filter((item) => item !== orderId)) {
-        try {
-          const order = await getOrder(id)
-          if (order.status === 'WAITING_PAYMENT') return order
-        } catch {
-          // Skip an order we cannot read; it stays in Đơn mua.
-        }
-      }
-      return null
-    }
     const poll = async (attempt) => {
       try {
         // Khong co webhook o moi truong local: hoi PayOS truc tiep truoc khi doc don.
@@ -178,7 +165,7 @@ function PaymentResult({ mode }) {
           return
         }
         setState({ status: 'ready', order })
-        const following = await findNext()
+        const following = await findNextUnpaid(orderId)
         if (!current) return
         setNext(following)
         // Het don cho thanh toan thi xoa hang doi; F5 trang nay se dua ve Don mua.
@@ -193,17 +180,6 @@ function PaymentResult({ mode }) {
       clearTimeout(timer)
     }
   }, [orderId, mode])
-
-  async function payNext() {
-    setPaying(true)
-    setPayError('')
-    try {
-      await startPayosPayment(next.id)
-    } catch (failure) {
-      setPayError(failure.response ? getApiError(failure).message : failure.message)
-      setPaying(false)
-    }
-  }
 
   if (state.status === 'missing') {
     return (
@@ -245,19 +221,13 @@ function PaymentResult({ mode }) {
                 Bạn còn đơn {shortOrderId(next.id)} ({formatMoney(next.totalAmount)}) của gian hàng
                 khác chưa thanh toán.
               </p>
-              <button
-                type="button"
+              <Link
                 className="button button--primary"
-                disabled={paying}
-                onClick={payNext}
+                to={`/payment/${encodeURIComponent(next.id)}`}
+                replace
               >
-                {paying ? 'Đang mở PayOS…' : 'Thanh toán đơn tiếp theo'}
-              </button>
-              {payError && (
-                <p className="form-message form-message--error" role="alert">
-                  {payError}
-                </p>
-              )}
+                Thanh toán đơn tiếp theo
+              </Link>
             </div>
           )}
           <div className="account-actions">

@@ -153,20 +153,8 @@ export default function CheckoutPage() {
       cart.refresh().catch(() => {})
       const ids = orders.map((order) => order.id)
       if (method === PAYMENT_METHOD.payos) {
-        setSubmitting('payment')
-        try {
-          // Moi gian hang mot don: thanh toan lan luot, trang ket qua mo don tiep theo.
-          await startPayosQueue(ids)
-        } catch (failure) {
-          navigate(`/profile/orders/${encodeURIComponent(ids[0])}`, {
-            replace: true,
-            state: {
-              message: `Đã tạo đơn nhưng chưa mở được thanh toán PayOS: ${
-                failure.response ? getApiError(failure).message : failure.message
-              } Bạn có thể thanh toán lại hoặc huỷ đơn.`,
-            },
-          })
-        }
+        // Moi gian hang mot don: quet QR lan luot, man thanh toan mo don tiep theo.
+        startPayosQueue(ids, navigate)
         return
       }
       navigate(`/checkout/success?orders=${ids.map(encodeURIComponent).join(',')}`, {
@@ -333,11 +321,9 @@ export default function CheckoutPage() {
               ? 'Đang kiểm tra giỏ hàng…'
               : submitting === 'order'
                 ? 'Đang đặt hàng…'
-                : submitting === 'payment'
-                  ? 'Đang mở PayOS…'
-                  : groups.length > 1
-                    ? `Đặt ${groups.length} đơn hàng`
-                    : 'Đặt hàng'}
+                : groups.length > 1
+                  ? `Đặt ${groups.length} đơn hàng`
+                  : 'Đặt hàng'}
           </button>
           <Link className="checkout-back" to="/cart">
             ‹ Quay lại giỏ hàng

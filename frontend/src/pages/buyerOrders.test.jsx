@@ -200,6 +200,14 @@ describe('OrderDetailPage', () => {
     })
   })
 
+  it('opens the return dialog when coming from the payment detail', async () => {
+    getOrder.mockResolvedValue(delivered)
+    renderAt({ pathname: `/profile/orders/${delivered.id}`, state: { openReturn: true } })
+    expect(
+      await screen.findByRole('dialog', { name: 'Yêu cầu trả hàng / hoàn tiền' }),
+    ).toBeInTheDocument()
+  })
+
   it('still offers a return for a completed order within 7 days', async () => {
     getOrder.mockResolvedValue({ ...delivered, status: 'COMPLETED' })
     renderAt(`/profile/orders/${delivered.id}`)

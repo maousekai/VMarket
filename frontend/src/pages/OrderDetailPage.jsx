@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import AccountLayout from '../components/AccountLayout'
 import Modal from '../components/Modal'
@@ -10,7 +10,6 @@ import {
 } from '../components/OrderParts'
 import ReturnRequestDialog from '../components/ReturnRequestDialog'
 import { useShopLookup } from '../hooks/useCatalogLookup'
-import { startPayosPayment } from '../order/payos'
 import { getApiError } from '../services/api/apiClient'
 import { DELIVERY_STATUS_LABELS, getDelivery } from '../services/api/deliveryApi'
 import {
@@ -20,7 +19,9 @@ import {
   getOrder,
   listOrderReturns,
 } from '../services/api/orderApi'
+import { getPaymentByOrder } from '../services/api/paymentApi'
 import { formatDateTime } from '../utils/formatDate'
+import { paymentCode, PAYMENT_STATUS_LABELS } from '../utils/payment'
 import { formatMoney } from '../utils/formatMoney'
 import {
   canCancelOrder,
@@ -140,23 +141,46 @@ function DisputeDialog({ item, onClose, onDone }) {
 export default function OrderDetailPage() {
   const { orderId } = useParams()
   const location = useLocation()
-  const [state, setState] = useState({ status: 'loading', order: null, returns: [], error: '' })
+  const [state, setState] = useState({
+    status: 'loading',
+    order: null,
+    returns: [],
+    payment: null,
+    error: '',
+  })
   const [notice, setNotice] = useState(location.state?.message || '')
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState('')
   const [dialog, setDialog] = useState(null)
 
   const load = useCallback(async () => {
-    const [order, returns] = await Promise.all([
+    const [order, returns, payment] = await Promise.all([
       getOrder(orderId),
       listOrderReturns(orderId).catch(() => []),
+      getPaymentByOrder(orderId).catch(() => null),
     ])
-    setState({ status: 'ready', order, returns, error: '' })
+    setState({ status: 'ready', order, returns, payment, error: '' })
   }, [orderId])
+
+  // Mo san hop thoai tra hang khi den tu trang chi tiet giao dich ("Yeu cau tra hang / hoan tien").
+  const openedReturn = useRef(false)
+  useEffect(() => {
+    if (openedReturn.current || !location.state?.openReturn || state.status !== 'ready') return
+    openedReturn.current = true
+    if (canRequestReturn(state.order, state.returns)) {
+      setDialog({ type: 'return', items: returnableItems(state.order, state.returns) })
+    }
+  }, [location.state, state])
 
   useEffect(() => {
     load().catch((failure) =>
-      setState({ status: 'error', order: null, returns: [], error: getApiError(failure).message }),
+      setState({
+        status: 'error',
+        order: null,
+        returns: [],
+        payment: null,
+        error: getApiError(failure).message,
+      }),
     )
   }, [load])
 
@@ -242,14 +266,9 @@ export default function OrderDetailPage() {
           )}
           <div className="order-detail__actions">
             {order.status === 'WAITING_PAYMENT' && order.paymentMethod === 'PAYOS' && (
-              <button
-                type="button"
-                className="account-button"
-                disabled={Boolean(busy)}
-                onClick={() => run('pay', () => startPayosPayment(order.id))}
-              >
-                {busy === 'pay' ? 'Đang mở PayOS…' : 'Thanh toán ngay'}
-              </button>
+              <Link className="account-button" to={`/payment/${encodeURIComponent(order.id)}`}>
+                Thanh toán ngay
+              </Link>
             )}
             {canCompleteOrder(order) && (
               <button
@@ -300,6 +319,13 @@ export default function OrderDetailPage() {
             <p className="order-detail__total">
               Tổng tiền hàng <strong>{formatMoney(order.totalAmount)}</strong>
             </p>
+            {state.payment && (
+              <p>
+                Giao dịch {paymentCode(state.payment)}:{' '}
+                {PAYMENT_STATUS_LABELS[state.payment.status] || state.payment.status} ·{' '}
+                <Link to={`/profile/payments/${state.payment.id}`}>Xem giao dịch</Link>
+              </p>
+            )}
           </section>
         </div>
 

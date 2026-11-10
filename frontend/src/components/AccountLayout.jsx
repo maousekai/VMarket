@@ -9,6 +9,7 @@ import './accountForms.css'
 const accountLinks = [
   { to: '/profile', label: 'Hồ sơ cá nhân' },
   { to: '/profile/orders', label: 'Đơn mua' },
+  { to: '/profile/payments', label: 'Lịch sử giao dịch' },
   { to: '/profile/addresses', label: 'Sổ địa chỉ' },
   { to: '/profile/password', label: 'Đổi mật khẩu' },
   { to: '/seller', label: 'Kênh người bán' },

@@ -196,6 +196,9 @@ export default function AppHeader() {
                       <Link role="menuitem" to="/profile/orders" onClick={() => setOpen(false)}>
                         Đơn mua
                       </Link>
+                      <Link role="menuitem" to="/profile/payments" onClick={() => setOpen(false)}>
+                        Lịch sử giao dịch
+                      </Link>
                       <Link role="menuitem" to="/seller" onClick={() => setOpen(false)}>
                         Kênh người bán
                       </Link>
