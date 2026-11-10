@@ -142,11 +142,26 @@ describe('CartPage', () => {
     expect(within(apparel).getByRole('textbox', { name: 'Số lượng' })).toHaveValue('2')
   })
 
-  it('goes to checkout when validation passes', async () => {
-    validateCart.mockResolvedValue({ ok: true, issues: [] })
+  it('totals only the selected lines and starts at zero', async () => {
     renderWithCart(<CartPage />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Tiến hành đặt hàng' }))
+    const summary = await screen.findByRole('complementary', { name: 'Tóm tắt đơn hàng' })
+    expect(within(summary).getByText(/0\s*₫/, { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Tiến hành đặt hàng/ })).toBeDisabled()
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Chọn Ly gốm' }))
+    expect(within(summary).getByText(/120\.000/, { selector: 'strong' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tiến hành đặt hàng (1)' })).toBeEnabled()
+  })
+
+  it('goes to checkout with the selected lines, ignoring issues of other lines', async () => {
+    validateCart.mockResolvedValue({
+      ok: false,
+      issues: [{ productId: 'p1', variantId: 'v1', type: 'OUT_OF_STOCK', availableStock: 0 }],
+    })
+    renderWithCart(<CartPage />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Chọn Ly gốm' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tiến hành đặt hàng (1)' }))
     expect(await screen.findByText('Trang thanh toán')).toBeInTheDocument()
+    expect(JSON.parse(sessionStorage.getItem('vmarket.checkoutLines'))).toEqual(['p2::v2'])
   })
 
   it('shows price and stock warnings and fixes a changed price', async () => {
@@ -166,7 +181,8 @@ describe('CartPage', () => {
     removeCartItem.mockResolvedValue(cartOf(mug))
     addCartItem.mockResolvedValue(cartOf({ ...polo, unitPrice: 259000, lineTotal: 518000 }, mug))
     renderWithCart(<CartPage />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Tiến hành đặt hàng' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Chọn tất cả' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tiến hành đặt hàng (2)' }))
     const apparel = screen.getByRole('region', { name: 'Danang Apparel' })
     expect(await within(apparel).findByText(/Giá đã đổi từ/)).toBeInTheDocument()
     expect(

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Modal from '../components/Modal'
 import { lineKey } from '../cart/cartMath'
+import { saveCheckoutLines } from '../order/checkoutSelection'
 import { useCart } from '../cart/useCart'
 import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
 import { getApiError } from '../services/api/apiClient'
@@ -130,7 +131,10 @@ export default function CartPage() {
   const cart = useCart()
   const navigate = useNavigate()
   const location = useLocation()
-  const [selected, setSelected] = useState(() => new Set())
+  // Chua chon gi thi tong thanh toan la 0; "Mua ngay" o trang san pham chon san dong do.
+  const [selected, setSelected] = useState(
+    () => new Set(location.state?.select ? [location.state.select] : []),
+  )
   const [validation, setValidation] = useState(null)
   const [checking, setChecking] = useState(false)
   const [pageError, setPageError] = useState('')
@@ -149,6 +153,9 @@ export default function CartPage() {
   const generalIssue = validation?.issues?.find((issue) => !ITEM_ISSUES.has(issue.type))
   const selectedItems = items.filter((item) => selected.has(lineKey(item)))
   const allSelected = items.length > 0 && selectedItems.length === items.length
+  const selectedTotal = selectedItems.reduce((sum, item) => sum + Number(item.lineTotal), 0)
+  const selectedQuantity = selectedItems.reduce((sum, item) => sum + item.quantity, 0)
+  const selectedShops = new Set(selectedItems.map((item) => item.shopId)).size
 
   const toggle = (keys, on) =>
     setSelected((current) => {
@@ -164,7 +171,15 @@ export default function CartPage() {
       await cart.flush()
       const result = await validateCart()
       setValidation(result)
-      if (result.ok) navigate('/checkout')
+      const keys = selectedItems.map(lineKey)
+      // Chi chan khi dong DUOC CHON co van de (dong khong chon khong di qua thanh toan).
+      const blocking = (result.issues || []).some(
+        (issue) => !ITEM_ISSUES.has(issue.type) || keys.includes(lineKey(issue)),
+      )
+      if (!blocking) {
+        saveCheckoutLines(keys)
+        navigate('/checkout', { state: { lines: keys } })
+      }
     } catch (failure) {
       setPageError(getApiError(failure).message)
     } finally {
@@ -333,10 +348,10 @@ export default function CartPage() {
               </section>
             )
           })}
-          {groups.length > 1 && (
+          {selectedShops > 1 && (
             <p className="cart-split-note">
-              Giỏ hàng gồm {groups.length} gian hàng; mỗi gian hàng xác nhận và giao phần hàng của
-              mình.
+              Sản phẩm đã chọn thuộc {selectedShops} gian hàng nên sẽ được tách thành{' '}
+              {selectedShops} đơn, mỗi đơn có tiến độ giao và huỷ riêng.
             </p>
           )}
         </div>
@@ -344,8 +359,8 @@ export default function CartPage() {
           <h2>Tóm tắt đơn hàng</h2>
           <dl>
             <div>
-              <dt>Tạm tính ({cart.totalQuantity} sản phẩm)</dt>
-              <dd>{formatMoney(cart.cart.totalAmount)}</dd>
+              <dt>Tạm tính ({selectedQuantity} sản phẩm đã chọn)</dt>
+              <dd>{formatMoney(selectedTotal)}</dd>
             </div>
             <div>
               <dt>Phí vận chuyển</dt>
@@ -354,15 +369,17 @@ export default function CartPage() {
           </dl>
           <div className="cart-summary__total">
             <span>Tổng thanh toán</span>
-            <strong>{formatMoney(cart.cart.totalAmount)}</strong>
+            <strong>{formatMoney(selectedTotal)}</strong>
           </div>
           <button
             type="button"
             className="button button--primary cart-summary__cta"
-            disabled={checking || items.length === 0}
+            disabled={checking || selectedItems.length === 0}
             onClick={checkout}
           >
-            {checking ? 'Đang kiểm tra giá và tồn kho…' : 'Tiến hành đặt hàng'}
+            {checking
+              ? 'Đang kiểm tra giá và tồn kho…'
+              : `Tiến hành đặt hàng (${selectedItems.length})`}
           </button>
           <p className="cart-summary__note">
             Giá và tồn kho được kiểm tra lại trước khi đặt hàng. Thanh toán khi nhận hàng (COD) hoặc

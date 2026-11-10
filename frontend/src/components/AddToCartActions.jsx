@@ -37,7 +37,7 @@ export default function AddToCartActions({ product, variant, quantity, soldOut }
         unitPrice: variant.price,
       })
       if (buyNow) {
-        navigate('/cart')
+        navigate('/cart', { state: { select: `${product.id}::${variant.id}` } })
         return
       }
       setResult({ ok: true })
