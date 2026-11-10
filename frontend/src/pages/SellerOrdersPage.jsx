@@ -413,28 +413,12 @@ export default function SellerOrdersPage() {
 
   return (
     <section className="seller-page" aria-labelledby="seller-orders-title">
-      <div className="seller-page__header seller-page__header--row">
+      <div className="seller-page__header">
         <div>
           <span className="account-eyebrow">Kênh người bán</span>
           <h1 id="seller-orders-title">
             {view === 'returns' ? 'Yêu cầu trả hàng' : 'Quản lý đơn hàng'}
           </h1>
-        </div>
-        <div className="seller-tabs" role="group" aria-label="Chế độ xem">
-          <button
-            type="button"
-            aria-pressed={view === 'orders'}
-            onClick={() => update({ view: null, status: null, page: null })}
-          >
-            Đơn hàng
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === 'returns'}
-            onClick={() => update({ view: 'returns', status: null, page: null })}
-          >
-            Yêu cầu trả hàng
-          </button>
         </div>
       </div>
       <div className="order-tabs" role="group" aria-label="Lọc theo trạng thái">
