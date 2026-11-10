@@ -51,7 +51,7 @@ public class ShopCatalogAccessReconciler {
 		reconcile();
 	}
 
-	@Scheduled(initialDelayString = "${app.catalog-sync.interval:PT15M}",
+	@Scheduled(initialDelayString = "${app.catalog-sync.initial-delay:PT1M}",
 			fixedDelayString = "${app.catalog-sync.interval:PT15M}")
 	public void scheduled() {
 		reconcile();

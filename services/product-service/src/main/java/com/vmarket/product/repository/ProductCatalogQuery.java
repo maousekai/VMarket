@@ -1,5 +1,6 @@
 package com.vmarket.product.repository;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -34,7 +35,9 @@ public class ProductCatalogQuery {
 			criteria.and("categoryPath").is(categoryId);
 		}
 		if (keyword != null && !keyword.isBlank()) {
-			Pattern pattern = Pattern.compile(Pattern.quote(keyword.trim()),
+			// NFC: bo go tieng Viet co the gui "a" + dau to hop; ten shop luu dang dung san.
+			String normalized = Normalizer.normalize(keyword.trim(), Normalizer.Form.NFC);
+			Pattern pattern = Pattern.compile(Pattern.quote(normalized),
 					Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 			// Khớp tên sản phẩm HOẶC tên gian hàng (gõ tên shop ra toàn bộ sản phẩm của shop đó).
 			List<String> matchingShops = mongoTemplate.find(
