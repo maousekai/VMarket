@@ -61,6 +61,10 @@ describe('ShopPublicPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sản phẩm 1' })).toBeInTheDocument()
     expect(screen.getAllByRole('article')).toHaveLength(12)
+    expect(screen.getByRole('link', { name: 'Sản phẩm 1' })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/^\/products\//),
+    )
     expect(screen.queryByRole('heading', { name: 'Sản phẩm 13' })).toBeNull()
     expect(listProducts).toHaveBeenCalledWith({ shopId: 'shop-1', page: 0, size: 12 })
 

@@ -180,6 +180,29 @@
   transform: translateY(-2px);
   box-shadow: 0 10px 24px rgb(15 23 42 / 8%);
 }
+.shop-product-card {
+  position: relative;
+}
+.shop-product-card__link {
+  color: inherit;
+  text-decoration: none;
+}
+.shop-product-card__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.shop-product-card__link:hover {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.shop-product-card:has(.shop-product-card__link:focus-visible) {
+  outline: 3px solid #60a5fa;
+  outline-offset: 2px;
+}
+.shop-product-card__link:focus-visible {
+  outline: none;
+}
 .shop-product-card__image {
   position: relative;
   flex: none;
