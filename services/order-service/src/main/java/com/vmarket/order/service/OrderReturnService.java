@@ -136,6 +136,19 @@ public class OrderReturnService {
 			returnItems.add(returnItem);
 		}
 
+		// Chỉ trả nguyên đơn: mọi dòng của gian hàng trong đơn (đơn mới là một gian hàng) với đủ số
+		// lượng đã mua.
+		final String shopId = targetShopId;
+		boolean wholeOrder = order.getItems().stream()
+				.filter(item -> item.getShopId().equals(shopId))
+				.allMatch(item -> returnItems.stream().anyMatch(
+						line -> line.getOrderItemId().equals(item.getId())
+								&& line.getQuantity() == item.getQuantity()));
+		if (!wholeOrder) {
+			throw ApiException.badRequest("WHOLE_ORDER_RETURN_REQUIRED",
+					"Yêu cầu trả hàng phải gồm toàn bộ sản phẩm trong đơn với đủ số lượng");
+		}
+
 		String evidenceJson = null;
 		if (request.evidenceUrls() != null && !request.evidenceUrls().isEmpty()) {
 			evidenceJson = json.writeValueAsString(request.evidenceUrls());

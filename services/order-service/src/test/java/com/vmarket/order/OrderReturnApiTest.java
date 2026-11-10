@@ -98,18 +98,49 @@ class OrderReturnApiTest {
 		order.setDistrict("Hải Châu");
 		order.setWard("Thạch Thang");
 		order.setStreetAddress("123 Lê Duẩn");
-		order.setTotalAmount(new BigDecimal("300000.00"));
+		order.setTotalAmount(new BigDecimal("150000.00"));
 
 		OrderItem item = new OrderItem();
 		item.setOrder(order);
 		item.setProductId("01JBQ9PROD0000000000000001");
 		item.setShopId(SHOP_ID);
-		item.setQuantity(2);
+		item.setQuantity(1);
 		item.setUnitPrice(new BigDecimal("150000.00"));
-		item.setLineTotal(new BigDecimal("300000.00"));
+		item.setLineTotal(new BigDecimal("150000.00"));
 		order.getItems().add(item);
 
 		return orderRepository.save(order);
+	}
+
+	@Test
+	void buyerCreatesReturn_partOfOrder_isRejected() throws Exception {
+		Order order = createDeliveredOrder();
+		OrderItem second = new OrderItem();
+		second.setOrder(order);
+		second.setProductId("01JBQ9PROD0000000000000002");
+		second.setShopId(SHOP_ID);
+		second.setQuantity(1);
+		second.setUnitPrice(new BigDecimal("50000.00"));
+		second.setLineTotal(new BigDecimal("50000.00"));
+		order.getItems().add(second);
+		order = orderRepository.save(order);
+		String firstId = order.getItems().stream()
+				.filter(i -> i.getProductId().endsWith("1")).findFirst().orElseThrow().getId();
+
+		String body = """
+				{
+				  "reason": "Sản phẩm bị lỗi",
+				  "evidenceUrls": ["https://img/1.jpg"],
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(firstId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("WHOLE_ORDER_RETURN_REQUIRED"));
 	}
 
 	@Test
