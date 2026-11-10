@@ -1,4 +1,4 @@
-import { Navigate, Routes, Route, Outlet } from 'react-router-dom'
+import { Navigate, Routes, Route, Outlet, useParams } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
 import { CartProvider } from './cart/CartProvider'
 import CartPage from './pages/CartPage'
@@ -36,6 +36,12 @@ import SellerOrdersPage from './pages/SellerOrdersPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
 import RoleAreaPage from './pages/RoleAreaPage'
+
+/** Link trong email thong bao (/orders/:id) -> trang chi tiet don cua nguoi mua. */
+function LegacyOrderRedirect() {
+  const { orderId } = useParams()
+  return <Navigate to={`/profile/orders/${encodeURIComponent(orderId)}`} replace />
+}
 
 function ApplicationLayout() {
   return (
@@ -84,6 +90,7 @@ export default function App() {
               <Route path="products/new" element={<SellerProductFormPage />} />
               <Route path="products/:productId/edit" element={<SellerProductFormPage />} />
               <Route path="orders" element={<SellerOrdersPage />} />
+              <Route path="orders/:orderId" element={<Navigate to="/seller/orders" replace />} />
               <Route path="settings" element={<SellerSettingsPage />} />
             </Route>
           </Route>
@@ -105,6 +112,7 @@ export default function App() {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/profile/orders" element={<OrdersPage />} />
               <Route path="/profile/orders/:orderId" element={<OrderDetailPage />} />
+              <Route path="/orders/:orderId" element={<LegacyOrderRedirect />} />
               <Route path="/profile/addresses" element={<AddressBookPage />} />
               <Route path="/profile/password" element={<ChangePasswordPage />} />
               <Route path="/seller/register" element={<SellerRegisterPage />} />
