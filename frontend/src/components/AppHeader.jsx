@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { useCart } from '../cart/useCart'
+import NotificationBell from './NotificationBell'
 import { getApiError } from '../services/api/apiClient'
 import { ACTIVE_CITY } from '../data/city'
 import brandBasket from '../assets/account/brand-basket.svg'
@@ -149,6 +150,7 @@ export default function AppHeader() {
           </span>
         ) : session ? (
           <>
+            {active && <NotificationBell />}
             {active && <CartLink count={totalQuantity} />}
             <div className="account-menu" ref={menuRef}>
               <button

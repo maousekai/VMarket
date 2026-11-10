@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { AccountAvatar } from './AppHeader'
+import NotificationBell from './NotificationBell'
 import { getApiError } from '../services/api/apiClient'
 import { getMyShop } from '../services/api/shopApi'
 import { useSellerAlerts } from '../hooks/useSellerAlerts'
@@ -245,6 +246,7 @@ export default function SellerLayout() {
             </button>
             <span className="seller-topbar__eyebrow">Không gian người bán</span>
           </div>
+          <NotificationBell variant="seller" />
           <div className="seller-user" ref={menuRef}>
             <button
               ref={menuButtonRef}

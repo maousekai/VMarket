@@ -149,6 +149,9 @@
 .seller-user {
   position: relative;
 }
+.notification-bell--seller {
+  margin-left: auto;
+}
 .seller-user__trigger {
   display: flex;
   align-items: center;
