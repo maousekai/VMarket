@@ -21,12 +21,3 @@ export const handoffOrder = async (orderId) =>
 
 /** {assignment:{status,...}, history:[{status, occurred_at}], ...} */
 export const getDelivery = async (orderId) => (await apiClient.get(orderUrl(orderId))).data
-
-// TẠM THỜI (dev): đưa chuyến giao tới DELIVERED khi chưa có giao diện điều phối / shipper.
-// Backend chỉ bật khi DELIVERY_DEV_SIMULATION=true. Xoá cùng nút ở SellerOrdersPage.
-export const simulateDelivery = async (orderId) =>
-  (
-    await apiClient.post(
-      `/api/delivery/seller/orders/${encodeURIComponent(orderId)}/simulate-delivery`,
-    )
-  ).data

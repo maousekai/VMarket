@@ -611,9 +611,6 @@ services:
       SHOP_SERVICE_URL: http://shop-service:8083
       # Browser mo WebSocket qua gateway (cung origin voi API).
       DELIVERY_WS_URL: ${DELIVERY_WS_URL:-ws://localhost:8080/api/delivery/ws}
-      # TAM THOI cho moi truong dev: seller bam "Gia lap giao hang" khi chua co UI
-      # dieu phoi / shipper tren web. Xoa cung nut o frontend khi UI shipper hoan thanh.
-      DELIVERY_DEV_SIMULATION: ${DELIVERY_DEV_SIMULATION:-true}
     ports:
       - "${DELIVERY_SERVICE_PORT:-8088}:8088"
     depends_on:

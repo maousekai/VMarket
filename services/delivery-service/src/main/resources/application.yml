@@ -55,5 +55,3 @@ app:
     order-url: ${ORDER_SERVICE_URL:http://localhost:8086}
     shop-url: ${SHOP_SERVICE_URL:http://localhost:8083}
     web-socket-url: ${DELIVERY_WS_URL:ws://localhost:8088/api/delivery/ws}
-    # TAM THOI: nut "Gia lap giao hang" cho seller khi chua co UI shipper tren web. Tat mac dinh.
-    dev-simulation: ${DELIVERY_DEV_SIMULATION:false}

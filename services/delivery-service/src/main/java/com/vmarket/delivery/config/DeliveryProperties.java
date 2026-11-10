@@ -24,10 +24,4 @@ public class DeliveryProperties {
     @NotBlank
     @Pattern(regexp = "wss?://[^?#]+/api/delivery/ws")
     private String webSocketUrl = "ws://localhost:8088/api/delivery/ws";
-
-    /**
-     * TẠM THỜI (dev): cho seller bấm "Giả lập giao hàng" khi chưa có giao diện điều phối /
-     * shipper trên web. Tắt mặc định; xoá cùng nút ở web khi UI shipper hoàn thành.
-     */
-    private boolean devSimulation = false;
 }
