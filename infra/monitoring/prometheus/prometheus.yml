@@ -48,5 +48,5 @@ scrape_configs:
       # ---- Chay local bang mvnw (tren may host) ----
       - targets: ["host.docker.internal:8089"]
         labels: { service: review-service }
-      - targets: ["host.docker.internal:8090"]
+      - targets: ["notification-service:8090"]
         labels: { service: notification-service }
