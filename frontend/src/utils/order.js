@@ -59,12 +59,16 @@ export function returnDeadline(order) {
   return new Date(new Date(order.deliveredAt).getTime() + RETURN_WINDOW_DAYS * DAY_MS)
 }
 
-/** Con dong hang nao chua yeu cau tra va con trong han 7 ngay ke tu khi giao. */
+/**
+ * Tra hang theo ca don: don da giao (hoac da hoan thanh) trong han 7 ngay ke tu khi giao va chua
+ * co dong nao nam trong yeu cau tra hang khac.
+ */
 export function canRequestReturn(order, returns = [], now = new Date()) {
-  if (order?.status !== 'DELIVERED') return false
+  if (!['DELIVERED', 'COMPLETED'].includes(order?.status)) return false
   const deadline = returnDeadline(order)
   if (deadline && now > deadline) return false
-  return returnableItems(order, returns).length > 0
+  const items = order.items || []
+  return items.length > 0 && returnableItems(order, returns).length === items.length
 }
 
 /** Dong hang chua nam trong yeu cau tra hang nao (moi dong chi tra duoc mot lan). */

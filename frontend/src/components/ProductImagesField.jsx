@@ -2,12 +2,25 @@ import { useId, useRef, useState } from 'react'
 import { getApiError } from '../services/api/apiClient'
 import { uploadProductImage } from '../services/api/mediaApi'
 import { PRODUCT_LIMITS } from '../services/api/productApi'
+import { isVideoUrl } from '../utils/shop'
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime']
 const MAX_SIZE_MB = 5
+const MAX_VIDEO_MB = 30
+const MAX_VIDEOS = 1
 
-function validate(file) {
-  if (!ACCEPTED_TYPES.includes(file.type)) return `${file.name}: chỉ nhận JPEG, PNG hoặc WebP.`
+function validate(file, allowVideo) {
+  if (allowVideo && VIDEO_TYPES.includes(file.type)) {
+    return file.size > MAX_VIDEO_MB * 1024 * 1024
+      ? `${file.name}: video tối đa ${MAX_VIDEO_MB} MB.`
+      : ''
+  }
+  if (!ACCEPTED_TYPES.includes(file.type)) {
+    return allowVideo
+      ? `${file.name}: chỉ nhận ảnh JPEG, PNG, WebP hoặc video MP4, WebM, MOV.`
+      : `${file.name}: chỉ nhận JPEG, PNG hoặc WebP.`
+  }
   if (file.size > MAX_SIZE_MB * 1024 * 1024) return `${file.name}: ảnh tối đa ${MAX_SIZE_MB} MB.`
   return ''
 }
@@ -28,6 +41,7 @@ export default function ProductImagesField({
   label = 'Ảnh sản phẩm',
   required = true,
   showCover = true,
+  allowVideo = false,
 }) {
   const inputId = useId()
   const errorId = useId()
@@ -35,16 +49,22 @@ export default function ProductImagesField({
   const [uploading, setUploading] = useState(0)
   const [problems, setProblems] = useState([])
   const remaining = max - value.length - uploading
+  const unit = allowVideo ? 'tệp' : 'ảnh'
 
   async function onFiles(fileList) {
     const files = [...fileList]
     if (inputRef.current) inputRef.current.value = ''
     const messages = []
     if (files.length > remaining) {
-      messages.push(`Chỉ thêm được ${Math.max(remaining, 0)} ảnh nữa (tối đa ${max} ảnh).`)
+      messages.push(`Chỉ thêm được ${Math.max(remaining, 0)} ${unit} nữa (tối đa ${max} ${unit}).`)
     }
+    let videos = value.filter(isVideoUrl).length
     const accepted = files.slice(0, Math.max(remaining, 0)).filter((file) => {
-      const problem = validate(file)
+      let problem = validate(file, allowVideo)
+      if (!problem && VIDEO_TYPES.includes(file.type)) {
+        if (videos >= MAX_VIDEOS) problem = `${file.name}: chỉ được gửi ${MAX_VIDEOS} video.`
+        else videos += 1
+      }
       if (problem) messages.push(problem)
       return !problem
     })
@@ -70,7 +90,12 @@ export default function ProductImagesField({
       onChange((current) =>
         [...current, ...fresh.filter((url) => !current.includes(url))].slice(0, max),
       )
-      if (duplicates) setProblems((current) => [...current, 'Ảnh này đã có trong danh sách.'])
+      if (duplicates) {
+        setProblems((current) => [
+          ...current,
+          `${allowVideo ? 'Tệp' : 'Ảnh'} này đã có trong danh sách.`,
+        ])
+      }
     }
   }
 
@@ -89,13 +114,19 @@ export default function ProductImagesField({
           {label} {required && <span aria-hidden="true">*</span>}
         </span>
         <span className="product-images__count">
-          {value.length}/{max} ảnh{showCover ? ' · ảnh đầu tiên là ảnh bìa' : ''}
+          {value.length}/{max} {unit}
+          {allowVideo ? ` · tối đa ${MAX_VIDEOS} video ≤ ${MAX_VIDEO_MB} MB` : ''}
+          {showCover ? ' · ảnh đầu tiên là ảnh bìa' : ''}
         </span>
       </div>
       <ul className="product-images__grid" aria-labelledby={`${inputId}-label`}>
         {value.map((url, index) => (
           <li key={url} className="product-images__item">
-            <img src={url} alt={`Ảnh ${index + 1}`} />
+            {isVideoUrl(url) ? (
+              <video src={url} muted preload="metadata" aria-label={`Video ${index + 1}`} />
+            ) : (
+              <img src={url} alt={`Ảnh ${index + 1}`} />
+            )}
             {showCover && index === 0 && <span className="product-images__cover">Ảnh bìa</span>}
             <div className="product-images__actions">
               <button
@@ -134,14 +165,14 @@ export default function ProductImagesField({
           <li>
             <label className="product-images__add" htmlFor={inputId}>
               <span aria-hidden="true">+</span>
-              Thêm ảnh
+              {allowVideo ? 'Thêm ảnh/video' : 'Thêm ảnh'}
             </label>
             <input
               ref={inputRef}
               id={inputId}
               className="visually-hidden"
               type="file"
-              accept={ACCEPTED_TYPES.join(',')}
+              accept={(allowVideo ? [...ACCEPTED_TYPES, ...VIDEO_TYPES] : ACCEPTED_TYPES).join(',')}
               multiple
               disabled={disabled}
               onChange={(event) => onFiles(event.target.files)}

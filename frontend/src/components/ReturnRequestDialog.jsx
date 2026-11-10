@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import Modal from './Modal'
 import ProductImagesField from './ProductImagesField'
-import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
+import { useProductLookup } from '../hooks/useCatalogLookup'
 import { getApiError } from '../services/api/apiClient'
 import { discardUploaded } from '../services/api/mediaApi'
 import { createReturn, deleteReturnEvidence, uploadReturnEvidence } from '../services/api/orderApi'
 import { formatMoney } from '../utils/formatMoney'
+import './sellerProducts.css'
 
 const RETURN_REASONS = [
   'Sản phẩm bị lỗi / hư hỏng',
@@ -18,13 +19,11 @@ const REASON_MAX = 500
 const EVIDENCE_MAX = 5
 
 /**
- * Yeu cau tra hang cho cac dong hang con tra duoc. Order Service chi nhan cac dong cua CUNG
- * mot gian hang trong mot yeu cau, nen chon dong cua shop khac se bo chon cac dong truoc do.
+ * Yeu cau tra hang / hoan tien cho TOAN BO don (moi don thuoc mot gian hang): gui tat ca dong
+ * hang voi du so luong da mua. Minh chung toi da 5 tep, trong do toi da 1 video.
  */
 export default function ReturnRequestDialog({ order, items, onClose, onCreated }) {
   const products = useProductLookup(items.map((item) => item.productId))
-  const shops = useShopLookup(items.map((item) => item.shopId))
-  const [picked, setPicked] = useState({})
   const [reason, setReason] = useState(RETURN_REASONS[0])
   const [otherReason, setOtherReason] = useState('')
   const [evidence, setEvidence] = useState([])
@@ -32,6 +31,7 @@ export default function ReturnRequestDialog({ order, items, onClose, onCreated }
   const [saving, setSaving] = useState(false)
   const uploaded = useRef(new Set())
   const submitted = useRef(false)
+  const refund = items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity, 0)
 
   useEffect(
     () => () => {
@@ -40,44 +40,23 @@ export default function ReturnRequestDialog({ order, items, onClose, onCreated }
     [],
   )
 
-  const pickedIds = Object.keys(picked)
-  const pickedShop = items.find((item) => picked[item.id])?.shopId
-
-  function toggle(item, on) {
-    setPicked((current) => {
-      const sameShop = Object.fromEntries(
-        Object.entries(current).filter(
-          ([id]) => items.find((i) => i.id === id)?.shopId === item.shopId,
-        ),
-      )
-      if (!on) {
-        delete sameShop[item.id]
-        return sameShop
-      }
-      return { ...sameShop, [item.id]: item.quantity }
-    })
-  }
-
   async function submit(event) {
     event.preventDefault()
     const finalReason = reason === OTHER ? otherReason.trim() : reason
-    if (!pickedIds.length) return setError('Chọn ít nhất một sản phẩm cần trả.')
     if (!finalReason) return setError('Vui lòng mô tả lý do trả hàng.')
-    if (!evidence.length) return setError('Vui lòng thêm ít nhất 1 ảnh minh chứng.')
+    if (!evidence.length) return setError('Vui lòng thêm ít nhất 1 ảnh hoặc video minh chứng.')
     setSaving(true)
     setError('')
     try {
       const created = await createReturn(order.id, {
         reason: finalReason,
         evidenceUrls: evidence,
-        items: items
-          .filter((item) => picked[item.id])
-          .map((item) => ({
-            orderItemId: item.id,
-            productId: item.productId,
-            variantId: item.variantId || null,
-            quantity: picked[item.id],
-          })),
+        items: items.map((item) => ({
+          orderItemId: item.id,
+          productId: item.productId,
+          variantId: item.variantId || null,
+          quantity: item.quantity,
+        })),
       })
       submitted.current = true
       discardUploaded(
@@ -94,60 +73,36 @@ export default function ReturnRequestDialog({ order, items, onClose, onCreated }
   return (
     <Modal
       title="Yêu cầu trả hàng / hoàn tiền"
-      description="Mỗi yêu cầu gồm sản phẩm của một gian hàng. Gian hàng phản hồi trong 48 giờ."
+      description="Yêu cầu áp dụng cho toàn bộ đơn hàng. Gian hàng phản hồi trong 48 giờ."
       onClose={onClose}
     >
       <form className="return-form" noValidate onSubmit={submit}>
         <fieldset>
-          <legend>Sản phẩm cần trả</legend>
+          <legend>Sản phẩm trả lại</legend>
           <ul className="return-form__items">
             {items.map((item) => {
               const product = products[item.productId]?.value
               const variant = product?.variants?.find((entry) => entry.id === item.variantId)
-              const otherShop = pickedShop && pickedShop !== item.shopId
               return (
                 <li key={item.id}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(picked[item.id])}
-                      onChange={(event) => toggle(item, event.target.checked)}
-                    />
-                    <span>
-                      <strong>{product?.name || 'Sản phẩm'}</strong>
-                      <small>
-                        {[
-                          shops[item.shopId]?.value?.name,
-                          variant && Object.values(variant.attributes || {}).join(' · '),
-                          formatMoney(item.unitPrice),
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                        {otherShop && ' · khác gian hàng đang chọn'}
-                      </small>
-                    </span>
-                  </label>
-                  {picked[item.id] && item.quantity > 1 && (
-                    <label className="return-form__qty">
-                      <span>Số lượng trả</span>
-                      <select
-                        value={picked[item.id]}
-                        onChange={(event) =>
-                          setPicked({ ...picked, [item.id]: Number(event.target.value) })
-                        }
-                      >
-                        {Array.from({ length: item.quantity }, (_, index) => (
-                          <option key={index + 1} value={index + 1}>
-                            {index + 1}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                  <span>
+                    <strong>{product?.name || 'Sản phẩm'}</strong>
+                    <small>
+                      {[
+                        variant && Object.values(variant.attributes || {}).join(' · '),
+                        `${formatMoney(item.unitPrice)} × ${item.quantity}`,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
+                  </span>
                 </li>
               )
             })}
           </ul>
+          <p className="return-form__refund">
+            Số tiền hoàn dự kiến: <strong>{formatMoney(refund)}</strong>
+          </p>
         </fieldset>
         <fieldset>
           <legend>Lý do</legend>
@@ -176,9 +131,10 @@ export default function ReturnRequestDialog({ order, items, onClose, onCreated }
           )}
         </fieldset>
         <ProductImagesField
-          label="Ảnh minh chứng"
+          label="Ảnh / video minh chứng"
           max={EVIDENCE_MAX}
           showCover={false}
+          allowVideo
           value={evidence}
           onChange={(updater) =>
             setEvidence((current) => (typeof updater === 'function' ? updater(current) : updater))

@@ -7,12 +7,12 @@ import { listAdminReturns, resolveReturn } from '../services/api/orderApi'
 import { formatDateTime } from '../utils/formatDate'
 import { formatMoney } from '../utils/formatMoney'
 import { shortOrderId } from '../utils/order'
-import { imageUrlOrEmpty } from '../utils/shop'
 import '../components/account.css'
 import '../components/accountForms.css'
 import '../components/adminUsers.css'
 import '../components/adminCatalog.css'
 import '../components/orders.css'
+import EvidenceGallery from '../components/EvidenceGallery'
 
 const PAGE_SIZE = 10
 const SELLER_RESPONSE_MS = 48 * 3600 * 1000
@@ -134,17 +134,7 @@ function DisputeCard({ item, onResolve }) {
         {item.sellerNote && <span>Phản hồi gian hàng: {item.sellerNote}</span>}
         {item.adminNote && <span>Kết luận của sàn: {item.adminNote}</span>}
       </div>
-      {item.evidenceUrls?.length > 0 && (
-        <div className="order-return__evidence seller-order__evidence">
-          {item.evidenceUrls.map((url) =>
-            imageUrlOrEmpty(url) ? (
-              <a key={url} href={url} target="_blank" rel="noreferrer">
-                <img src={url} alt="Ảnh minh chứng" />
-              </a>
-            ) : null,
-          )}
-        </div>
-      )}
+      <EvidenceGallery urls={item.evidenceUrls} className="seller-order__evidence" />
       <OrderItemsList items={item.items || []} />
       <footer className="order-card__foot">
         <span>

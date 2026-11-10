@@ -33,9 +33,9 @@ import {
   returnDeadline,
   shortOrderId,
 } from '../utils/order'
-import { imageUrlOrEmpty } from '../utils/shop'
 import '../components/accountForms.css'
 import '../components/orders.css'
+import EvidenceGallery from '../components/EvidenceGallery'
 
 const DISPUTE_MAX = 500
 
@@ -68,17 +68,7 @@ function ReturnCard({ item, onDispute }) {
         <ReturnStatusBadge status={item.status} />
       </div>
       <p>Lý do: {item.reason}</p>
-      {item.evidenceUrls?.length > 0 && (
-        <div className="order-return__evidence">
-          {item.evidenceUrls.map((url) =>
-            imageUrlOrEmpty(url) ? (
-              <a key={url} href={url} target="_blank" rel="noreferrer">
-                <img src={url} alt="Ảnh minh chứng" />
-              </a>
-            ) : null,
-          )}
-        </div>
-      )}
+      <EvidenceGallery urls={item.evidenceUrls} />
       {item.sellerNote && <p>Phản hồi của gian hàng: {item.sellerNote}</p>}
       {item.adminNote && <p>Kết luận của sàn: {item.adminNote}</p>}
       {item.refundAmount != null && item.status === 'RESOLVED' && (
@@ -243,6 +233,11 @@ export default function OrderDetailPage() {
             <p className="order-detail__hint">
               Bạn có thể yêu cầu trả hàng đến {formatDateTime(deadline)}. Đơn tự hoàn tất sau thời
               hạn này.
+            </p>
+          )}
+          {order.status === 'COMPLETED' && deadline && canRequestReturn(order, state.returns) && (
+            <p className="order-detail__hint">
+              Bạn vẫn có thể yêu cầu trả hàng / hoàn tiền đến {formatDateTime(deadline)}.
             </p>
           )}
           <div className="order-detail__actions">

@@ -159,38 +159,68 @@ describe('OrderDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Huỷ đơn hàng' })).not.toBeInTheDocument()
   })
 
-  it('requests a return for items of one shop with evidence', async () => {
+  it('requests a return for the whole order with photo and video evidence', async () => {
     getOrder.mockResolvedValue(delivered)
-    uploadReturnEvidence.mockResolvedValue({ url: 'https://cdn/returns/e1.jpg' })
+    uploadReturnEvidence
+      .mockResolvedValueOnce({ url: 'https://cdn/returns/e1.jpg' })
+      .mockResolvedValueOnce({ url: 'https://cdn/returns/clip.mp4' })
     createReturn.mockResolvedValue({ id: 'r1', status: 'PENDING' })
     renderAt(`/profile/orders/${delivered.id}`)
     fireEvent.click(await screen.findByRole('button', { name: 'Yêu cầu trả hàng / hoàn tiền' }))
     const dialog = screen.getByRole('dialog', { name: 'Yêu cầu trả hàng / hoàn tiền' })
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/369\.000/)).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Gửi yêu cầu' }))
-    expect(within(dialog).getByRole('alert')).toHaveTextContent('Chọn ít nhất một sản phẩm')
-
-    const [first, second] = within(dialog).getAllByRole('checkbox')
-    fireEvent.click(first)
-    fireEvent.click(second)
-    // Picking an item of another shop replaces the previous selection.
-    expect(first).not.toBeChecked()
-    expect(second).toBeChecked()
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('ảnh hoặc video minh chứng')
 
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Khác' }))
     fireEvent.change(within(dialog).getByLabelText('Mô tả lý do khác'), {
       target: { value: 'Ly bị nứt' },
     })
-    fireEvent.change(within(dialog).getByLabelText(/Thêm ảnh/), {
-      target: { files: [new File(['x'], 'e.jpg', { type: 'image/jpeg' })] },
+    fireEvent.change(within(dialog).getByLabelText(/Thêm ảnh\/video/), {
+      target: {
+        files: [
+          new File(['x'], 'e.jpg', { type: 'image/jpeg' }),
+          new File(['v'], 'clip.mp4', { type: 'video/mp4' }),
+          new File(['w'], 'clip2.webm', { type: 'video/webm' }),
+        ],
+      },
     })
-    expect(await within(dialog).findByRole('img', { name: 'Ảnh 1' })).toBeInTheDocument()
+    expect(await within(dialog).findByLabelText('Video 2')).toBeInTheDocument()
+    expect(within(dialog).getByText(/chỉ được gửi 1 video/)).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Gửi yêu cầu' }))
     expect(await screen.findByText(/Đã gửi yêu cầu trả hàng/)).toBeInTheDocument()
     expect(createReturn).toHaveBeenCalledWith(delivered.id, {
       reason: 'Ly bị nứt',
-      evidenceUrls: ['https://cdn/returns/e1.jpg'],
-      items: [{ orderItemId: 'i2', productId: 'p2', variantId: 'v2', quantity: 1 }],
+      evidenceUrls: ['https://cdn/returns/e1.jpg', 'https://cdn/returns/clip.mp4'],
+      items: [
+        { orderItemId: 'i1', productId: 'p1', variantId: 'v1', quantity: 1 },
+        { orderItemId: 'i2', productId: 'p2', variantId: 'v2', quantity: 1 },
+      ],
     })
+  })
+
+  it('still offers a return for a completed order within 7 days', async () => {
+    getOrder.mockResolvedValue({ ...delivered, status: 'COMPLETED' })
+    renderAt(`/profile/orders/${delivered.id}`)
+    expect(
+      await screen.findByRole('button', { name: 'Yêu cầu trả hàng / hoàn tiền' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/vẫn có thể yêu cầu trả hàng/)).toBeInTheDocument()
+  })
+
+  it('rejects a video over 30 MB before uploading', async () => {
+    getOrder.mockResolvedValue(delivered)
+    renderAt(`/profile/orders/${delivered.id}`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Yêu cầu trả hàng / hoàn tiền' }))
+    const dialog = screen.getByRole('dialog', { name: 'Yêu cầu trả hàng / hoàn tiền' })
+    const big = new File(['v'], 'big.mov', { type: 'video/quicktime' })
+    Object.defineProperty(big, 'size', { value: 31 * 1024 * 1024 })
+    fireEvent.change(within(dialog).getByLabelText(/Thêm ảnh\/video/), {
+      target: { files: [big] },
+    })
+    expect(await within(dialog).findByText(/video tối đa 30 MB/)).toBeInTheDocument()
+    expect(uploadReturnEvidence).not.toHaveBeenCalled()
   })
 
   it('hides the return button once the 7-day window has passed', async () => {

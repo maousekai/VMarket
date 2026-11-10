@@ -38,12 +38,19 @@ describe('order helpers', () => {
     expect(returnDeadline(delivered).toISOString()).toBe('2026-11-08T10:00:00.000Z')
     expect(canRequestReturn(delivered, [], new Date('2026-11-05T00:00:00Z'))).toBe(true)
     expect(canRequestReturn(delivered, [], new Date('2026-11-09T00:00:00Z'))).toBe(false)
-    expect(canRequestReturn({ ...delivered, status: 'COMPLETED' }, [])).toBe(false)
+    const completed = { ...delivered, status: 'COMPLETED' }
+    expect(canRequestReturn(completed, [], new Date('2026-11-05T00:00:00Z'))).toBe(true)
+    expect(canRequestReturn(completed, [], new Date('2026-11-09T00:00:00Z'))).toBe(false)
+    expect(canRequestReturn({ ...delivered, status: 'SHIPPED' }, [])).toBe(false)
   })
 
   it('excludes lines that already have a return request', () => {
     const returns = [{ status: 'PENDING', items: [{ orderItemId: 'i1' }] }]
     expect(returnableItems(delivered, returns).map((item) => item.id)).toEqual(['i2', 'i3'])
+    // Chi tra nguyen don: da co mot dong trong yeu cau khac thi khong tao them duoc.
+    expect(canRequestReturn(delivered, returns, new Date('2026-11-02T00:00:00Z'))).toBe(false)
+    const cancelled = [{ status: 'CANCELLED', items: [{ orderItemId: 'i1' }] }]
+    expect(canRequestReturn(delivered, cancelled, new Date('2026-11-02T00:00:00Z'))).toBe(true)
     const all = [
       { status: 'REJECTED', items: ['i1', 'i2', 'i3'].map((orderItemId) => ({ orderItemId })) },
     ]
