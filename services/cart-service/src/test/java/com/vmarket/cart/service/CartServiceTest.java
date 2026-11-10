@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -18,10 +20,17 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -269,5 +278,89 @@ class CartServiceTest {
 		// Đọc lại qua service (decode từ JSON) — tổng đúng đến xu
 		assertThat(cartService.getCart("user-1").totalAmount())
 				.isEqualByComparingTo(new BigDecimal("246913.56"));
+	}
+
+	@ParameterizedTest(name = "Redis unavailable during {0}")
+	@ValueSource(strings = {"read", "write", "delete"})
+	void redisFailurePreservesStoredCartAndRetainsCause(String operation) {
+		cartService.addItem("user-1", add("p1", "red", "shop-1", 2, "100000"));
+		var before = Map.copyOf(store);
+		var failure = new RedisConnectionFailureException("unit Redis unavailable");
+		switch (operation) {
+			case "read" -> when(ops.get("cart:user-1")).thenThrow(failure);
+			case "write" -> doThrow(failure).when(ops)
+					.set(anyString(), anyString(), any(Duration.class));
+			case "delete" -> doThrow(failure).when(redis).delete("cart:user-1");
+			default -> throw new IllegalArgumentException(operation);
+		}
+		clearInvocations(redis, ops);
+
+		assertThatThrownBy(() -> {
+			switch (operation) {
+				case "read" -> cartService.getCart("user-1");
+				case "write" -> cartService.addItem("user-1", add("p1", "red", "shop-1", 1, "100000"));
+				case "delete" -> cartService.clearCart("user-1");
+				default -> throw new IllegalArgumentException(operation);
+			}
+		}).isInstanceOf(CartStorageException.class).hasCause(failure);
+		assertThat(store).isEqualTo(before);
+		if (!operation.equals("write")) {
+			verify(ops, never()).set(anyString(), anyString(), any(Duration.class));
+		}
+		verify(redis, never()).expire(anyString(), any(Duration.class));
+	}
+
+	@Test
+	void corruptJsonIsReadAsEmptyWithoutWritingAndNextAddRecovers() {
+		store.put("cart:user-1", "{invalid-json");
+		var before = Map.copyOf(store);
+		clearInvocations(ops);
+
+		var empty = cartService.getCart("user-1");
+
+		assertThat(empty.groups()).isEmpty();
+		assertThat(empty.totalQuantity()).isZero();
+		assertThat(empty.totalAmount()).isEqualByComparingTo("0");
+		assertThat(store).isEqualTo(before);
+		verify(ops).get("cart:user-1");
+		verifyNoMoreInteractions(ops);
+
+		cartService.addItem("user-1", add("p1", "red", "shop-1", 2, "100000"));
+		assertThat(cartService.items("user-1")).singleElement().satisfies(item -> {
+			assertThat(item.productId()).isEqualTo("p1");
+			assertThat(item.variantId()).isEqualTo("red");
+			assertThat(item.quantity()).isEqualTo(2);
+		});
+		assertThat(cartService.getCart("user-1").totalAmount()).isEqualByComparingTo("200000");
+	}
+
+	@Test
+	void concurrentAddsInOneServiceInstanceDoNotLoseQuantities() throws Exception {
+		cartService.addItem("user-1", add("p1", "red", "shop-1", 1, "100000"));
+		var start = new CyclicBarrier(2);
+		var executor = Executors.newFixedThreadPool(2);
+		Callable<Void> addItems = () -> {
+			for (int i = 0; i < 40; i++) {
+				start.await(5, TimeUnit.SECONDS);
+				cartService.addItem("user-1", add("p1", "red", "shop-1", 1, "100000"));
+			}
+			return null;
+		};
+		try {
+			var first = executor.submit(addItems);
+			var second = executor.submit(addItems);
+			first.get(15, TimeUnit.SECONDS);
+			second.get(15, TimeUnit.SECONDS);
+		} finally {
+			executor.shutdownNow();
+			assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+		}
+
+		var response = cartService.getCart("user-1");
+		assertThat(response.totalQuantity()).isEqualTo(81);
+		assertThat(response.groups()).singleElement().satisfies(group ->
+				assertThat(group.items()).singleElement().satisfies(item ->
+						assertThat(item.quantity()).isEqualTo(81)));
+		assertThat(response.totalAmount()).isEqualByComparingTo("8100000");
 	}
 }

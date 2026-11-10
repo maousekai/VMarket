@@ -1,0 +1,687 @@
+{
+  "schema_version": 1,
+  "tested_source_sha": "d59a8cbb7c8b4055c4c350fa2bc7878741bbfa08",
+  "plan_version": 2,
+  "source_plan_sha256": "240dae057b1268fbf830d85230b3de2dfc319b8460cf25662bb3394dae1c7b04",
+  "input_data": {
+    "path": "input-data.md",
+    "sha256": "e0dc6655e33141fa27b034ecae3667efc68f7a8268695c7817986607c932b3a0"
+  },
+  "environment": {
+    "jdk": "17.0.12",
+    "maven": "3.9.16",
+    "io": "mocked",
+    "business_services_started": [],
+    "parallel": false
+  },
+  "review_status": "Awaiting TV04 review",
+  "tests": [
+    {
+      "function": 1,
+      "source": "services/cart-service/src/test/java/com/vmarket/cart/service/TV01CartSheetTest.java",
+      "sha256": "9e41eee7437ebbf87c829a4261a3920a1b6b948121dc64f1c93e027331bfa74b",
+      "class": "com.vmarket.cart.service.TV01CartSheetTest",
+      "cwd": "services",
+      "command": [
+        "mvnw.cmd",
+        "-B",
+        "-ntp",
+        "-pl",
+        "cart-service",
+        "-am",
+        "clean",
+        "org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent",
+        "test",
+        "org.jacoco:jacoco-maven-plugin:0.8.13:report",
+        "-Dtest=TV01CartSheetTest",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "-DforkCount=1",
+        "-DreuseForks=true",
+        "-Djunit.jupiter.execution.parallel.enabled=false"
+      ]
+    },
+    {
+      "function": 2,
+      "source": "services/cart-service/src/test/java/com/vmarket/cart/service/TV01CheckoutSheetTest.java",
+      "sha256": "6c86c9940a4d31d4abe527bd8a99439001116211fefdb2b97103f3d07e72bce1",
+      "class": "com.vmarket.cart.service.TV01CheckoutSheetTest",
+      "cwd": "services",
+      "command": [
+        "mvnw.cmd",
+        "-B",
+        "-ntp",
+        "-pl",
+        "cart-service",
+        "-am",
+        "clean",
+        "org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent",
+        "test",
+        "org.jacoco:jacoco-maven-plugin:0.8.13:report",
+        "-Dtest=TV01CheckoutSheetTest",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "-DforkCount=1",
+        "-DreuseForks=true",
+        "-Djunit.jupiter.execution.parallel.enabled=false"
+      ]
+    },
+    {
+      "function": 3,
+      "source": "services/product-service/src/test/java/com/vmarket/product/TV01InventorySheetTest.java",
+      "sha256": "1be9452842d0a14b89216784952fd2a00605c0293b06896d0e7de6fceee0bdbc",
+      "class": "com.vmarket.product.TV01InventorySheetTest",
+      "cwd": "services",
+      "command": [
+        "mvnw.cmd",
+        "-B",
+        "-ntp",
+        "-pl",
+        "product-service",
+        "-am",
+        "clean",
+        "org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent",
+        "test",
+        "org.jacoco:jacoco-maven-plugin:0.8.13:report",
+        "-Dtest=TV01InventorySheetTest",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "-DforkCount=1",
+        "-DreuseForks=true",
+        "-Djunit.jupiter.execution.parallel.enabled=false"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "UT-CART-01",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_01",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_01"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-02",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_02",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_02"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-03",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_03",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_03"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-04",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_04",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_04"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-05",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_05",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_05"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-06",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_06",
+      "datasets": [
+        {
+          "label": "a: seed998 + add1",
+          "xml_name": "ut_CART_06(int)[1]"
+        },
+        {
+          "label": "b: seed999 + add1",
+          "xml_name": "ut_CART_06(int)[2]"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-07",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_07",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_07"
+        }
+      ]
+    },
+    {
+      "id": "UT-CART-08",
+      "function": 1,
+      "method": "com.vmarket.cart.service.TV01CartSheetTest#ut_CART_08",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CART_08"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-01",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_01",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_01"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-02",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_02",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_02"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-03",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_03",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_03"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-04",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_04",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_04"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-05",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_05",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_05"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-06",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_06",
+      "datasets": [
+        {
+          "label": "a: product absent",
+          "xml_name": "ut_CHK_06(boolean)[1]"
+        },
+        {
+          "label": "b: only V2 present; V1 absent",
+          "xml_name": "ut_CHK_06(boolean)[2]"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-07",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_07",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_07"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-08",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_08",
+      "datasets": [
+        {
+          "label": "a: V1 price null; stock10; qty2",
+          "xml_name": "ut_CHK_08(boolean)[1]"
+        },
+        {
+          "label": "b: V1 stock null; price100000; qty1",
+          "xml_name": "ut_CHK_08(boolean)[2]"
+        }
+      ]
+    },
+    {
+      "id": "UT-CHK-09",
+      "function": 2,
+      "method": "com.vmarket.cart.service.TV01CheckoutSheetTest#ut_CHK_09",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_CHK_09"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-01",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_01",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_STK_01"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-02",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_02",
+      "datasets": [
+        {
+          "label": "a: available2; reserve2",
+          "xml_name": "ut_STK_02(int)[1]"
+        },
+        {
+          "label": "b: available2; reserve3",
+          "xml_name": "ut_STK_02(int)[2]"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-03",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_03",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_STK_03"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-04",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_04",
+      "datasets": [
+        {
+          "label": "a: hidden category",
+          "xml_name": "ut_STK_04(boolean)[1]"
+        },
+        {
+          "label": "b: deleted V1",
+          "xml_name": "ut_STK_04(boolean)[2]"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-05",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_05",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_STK_05"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-06",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_06",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_STK_06"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-07",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_07",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_STK_07"
+        }
+      ]
+    },
+    {
+      "id": "UT-STK-08",
+      "function": 3,
+      "method": "com.vmarket.product.TV01InventorySheetTest#ut_STK_08",
+      "datasets": [
+        {
+          "label": "main; all sequential substeps",
+          "xml_name": "ut_STK_08"
+        }
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "run_id": "tv01-unit-20261107-135502-d59a8cb",
+      "started_at": "2026-11-07T13:55:04+07:00",
+      "functions": [
+        {
+          "function": 1,
+          "attempt": 2,
+          "started_at": "2026-11-07T13:58:46+07:00",
+          "finished_at": "2026-11-07T13:59:21+07:00",
+          "exit_code": 0,
+          "result": "round-1/TEST-com.vmarket.cart.service.TV01CartSheetTest.xml",
+          "sha256": "6d64430e119c91ca2ff9826268ba08969787630596c8f22d0927c0d32a32706f",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "8799044ea3c97979b7b7cb2c06d60821fe5bac8fa4e6a92b991ee983a29f79bd"
+        },
+        {
+          "function": 2,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:01:03+07:00",
+          "finished_at": "2026-11-07T14:01:27+07:00",
+          "exit_code": 0,
+          "result": "round-1/TEST-com.vmarket.cart.service.TV01CheckoutSheetTest.xml",
+          "sha256": "8bafe6a0b1e1a20331fbf47311f6f5ae2ad149066e5bbbb93e38f8a14d8cf9e5",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "c838ad031a74127bf5d7bf767859c615c64617fa9730eb94cb6794768f40ec9c"
+        },
+        {
+          "function": 3,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:02:21+07:00",
+          "finished_at": "2026-11-07T14:03:05+07:00",
+          "exit_code": 0,
+          "result": "round-1/TEST-com.vmarket.product.TV01InventorySheetTest.xml",
+          "sha256": "f459a746951450590ad83fbbfd8c1aa254b4441a6cc8d662ef00f0cec37fc5a8",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "fe245b5a1c23d9e82841298c74f55197c62cf5dcf3cf258c9a8a0227b91eb224"
+        }
+      ],
+      "logical_cases": 25,
+      "passed": 25,
+      "invocations": 30,
+      "superseded_attempt": {
+        "function": 1,
+        "attempt": 1,
+        "tests_executed": 0,
+        "status": "Pending",
+        "reason": "Mockito attachment blocked by sandbox named-pipe permissions; successful attempt2 executed outside the sandbox."
+      }
+    },
+    {
+      "round": 2,
+      "run_id": "tv01-unit-20261107-141227-d59a8cb",
+      "started_at": "2026-11-07T14:12:29+07:00",
+      "functions": [
+        {
+          "function": 1,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:12:35+07:00",
+          "finished_at": "2026-11-07T14:13:11+07:00",
+          "exit_code": 0,
+          "result": "round-2/TEST-com.vmarket.cart.service.TV01CartSheetTest.xml",
+          "sha256": "2cf70059bccf20d8e80a05beec41e255287b422aecb35406e8c48a7f62db4d44",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "ad2e00a59b6df08b3e0c772d043353d19862f9ac09cddee4cf5c91580b96c99d"
+        },
+        {
+          "function": 2,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:13:30+07:00",
+          "finished_at": "2026-11-07T14:13:57+07:00",
+          "exit_code": 0,
+          "result": "round-2/TEST-com.vmarket.cart.service.TV01CheckoutSheetTest.xml",
+          "sha256": "162b92f5915c923d26ad5e5652c91e4b19ca6157e66e254a1e82c1c7450c072b",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "e40425a58b5700313f0814f159dda3a58f4018d7bb60f9ef2b3651e482a2296b"
+        },
+        {
+          "function": 3,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:14:25+07:00",
+          "finished_at": "2026-11-07T14:15:02+07:00",
+          "exit_code": 0,
+          "result": "round-2/TEST-com.vmarket.product.TV01InventorySheetTest.xml",
+          "sha256": "dac2f00f5d7c4f1e36ecfafb359154aa87c4b0b9b1cc56fc48890e3981665745",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "e1ce3ad4dc302663df9adc9196c55453b07453eaf9d7d2db0ecdcfd4c6cf57bb"
+        }
+      ],
+      "logical_cases": 25,
+      "passed": 25,
+      "invocations": 30
+    },
+    {
+      "round": 3,
+      "run_id": "tv01-unit-20261107-142008-d59a8cb",
+      "started_at": "2026-11-07T14:20:13+07:00",
+      "functions": [
+        {
+          "function": 1,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:20:23+07:00",
+          "finished_at": "2026-11-07T14:20:57+07:00",
+          "exit_code": 0,
+          "result": "round-3/TEST-com.vmarket.cart.service.TV01CartSheetTest.xml",
+          "sha256": "853854575c9ad759979f2257877752d44a0ffbc2b54105cfce6cd5ec675c9793",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "c3b158996181211289f8a9df023c0e3baa99aeb52a8b2581ce040e01dd30f03f"
+        },
+        {
+          "function": 2,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:21:19+07:00",
+          "finished_at": "2026-11-07T14:21:50+07:00",
+          "exit_code": 0,
+          "result": "round-3/TEST-com.vmarket.cart.service.TV01CheckoutSheetTest.xml",
+          "sha256": "e0685cb50c236eaddd17759acd2f13100ac8956dcaf68f0322aa3368ef8c7bde",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "047624f8791b92b1efebbe2abed92607d526d1865a57bf5abc45a88619ae7322"
+        },
+        {
+          "function": 3,
+          "attempt": 1,
+          "started_at": "2026-11-07T14:22:11+07:00",
+          "finished_at": "2026-11-07T14:22:48+07:00",
+          "exit_code": 0,
+          "result": "round-3/TEST-com.vmarket.product.TV01InventorySheetTest.xml",
+          "sha256": "c378f29c5dfb1d503a88bda9a5019e7d68f8033e0603fb6db3652caa1749134c",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "original_sha256": "e8c01953bec758a26eca3a2f574f729e00498b5a57a0d4cb975c1cc5ad457f4e"
+        }
+      ],
+      "logical_cases": 25,
+      "passed": 25,
+      "invocations": 30
+    }
+  ],
+  "limitations": [
+    "Rounds2–3 explicitly rerun the same source and harness.",
+    "Unit results do not establish integration or full project acceptance."
+  ],
+  "publication": {
+    "result_format": "JUnit XML with all system-properties blocks removed",
+    "preserved": "Historical suite counters, testcase identities, assertion outcomes and captured fixture output; supplemental identities, timings and outcomes",
+    "hash_policy": "sha256 identifies the sanitized published file; original_sha256 identifies the original local result",
+    "audit": "audit.json"
+  },
+  "review_regression": {
+    "review_comments": [
+      "https://github.com/maousekai/VMarket/pull/52#issuecomment-6716304242",
+      "https://github.com/maousekai/VMarket/pull/52#issuecomment-6716306369"
+    ],
+    "base_source_sha": "e0c7b115c4be14e50e4d049cb07222afb9cab71c",
+    "scope": "Supplemental unit coverage; original 25 logical cases and three historical rounds unchanged",
+    "commands": [
+      {
+        "cwd": "services",
+        "command": [
+          "mvnw.cmd",
+          "-B",
+          "-ntp",
+          "-pl",
+          "cart-service",
+          "-am",
+          "test",
+          "-Dtest=CartServiceTest,TV01CartSheetTest,TV01CheckoutSheetTest",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-DforkCount=1",
+          "-DreuseForks=true",
+          "-Djunit.jupiter.execution.parallel.enabled=false"
+        ],
+        "exit_code": 0
+      },
+      {
+        "cwd": "services",
+        "command": [
+          "mvnw.cmd",
+          "-B",
+          "-ntp",
+          "-pl",
+          "product-service",
+          "-am",
+          "test",
+          "-Dtest=InventoryServiceTest,InventoryInputValidatorTest,TV01InventorySheetTest",
+          "-Dsurefire.failIfNoSpecifiedTests=false",
+          "-DforkCount=1",
+          "-DreuseForks=true",
+          "-Djunit.jupiter.execution.parallel.enabled=false"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "suites": [
+      {
+        "class": "com.vmarket.cart.service.CartServiceTest",
+        "source": "services/cart-service/src/test/java/com/vmarket/cart/service/CartServiceTest.java",
+        "source_sha256": "0dff1f585d5051f233622bd812d9253cc6b7987467426cdbf36396505eb6c7b1",
+        "original_result_sha256": "792b56ff9b32b06ca5182cf9550fa14feaa0caf0ced86333864c234dc86a15bf",
+        "tests": 18,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:57:22+07:00"
+      },
+      {
+        "class": "com.vmarket.cart.service.TV01CartSheetTest",
+        "source": "services/cart-service/src/test/java/com/vmarket/cart/service/TV01CartSheetTest.java",
+        "source_sha256": "9e41eee7437ebbf87c829a4261a3920a1b6b948121dc64f1c93e027331bfa74b",
+        "original_result_sha256": "8e9b0bcd75702a41c16752dfc5afb2c0e842ecf9ffe6a08afb67e52712c5a678",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:57:22+07:00"
+      },
+      {
+        "class": "com.vmarket.cart.service.TV01CheckoutSheetTest",
+        "source": "services/cart-service/src/test/java/com/vmarket/cart/service/TV01CheckoutSheetTest.java",
+        "source_sha256": "6c86c9940a4d31d4abe527bd8a99439001116211fefdb2b97103f3d07e72bce1",
+        "original_result_sha256": "f329788ea2086f8dfadf83b27c27890b01b13413e355c8fc644039197ff66593",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:57:22+07:00"
+      },
+      {
+        "class": "com.vmarket.product.InventoryInputValidatorTest",
+        "source": "services/product-service/src/test/java/com/vmarket/product/InventoryInputValidatorTest.java",
+        "source_sha256": "069320522c9b3d5196b1b276eaed440ef3c761416ec4f54f24f683a4fa1b2e84",
+        "original_result_sha256": "a8bc6a10f18bc8bae15b61ac180fb013192c1428414c6959d44948bfde4b5431",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:58:18+07:00"
+      },
+      {
+        "class": "com.vmarket.product.InventoryServiceTest",
+        "source": "services/product-service/src/test/java/com/vmarket/product/InventoryServiceTest.java",
+        "source_sha256": "826d886ef118054c4c5e933df5ed9ddbfcd54d681a21df7563bf7438c894a307",
+        "original_result_sha256": "d9311a30ff4e340b66789511639af95a7a46f16f8e3bca1e26c02ef5f8281286",
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:58:20+07:00"
+      },
+      {
+        "class": "com.vmarket.product.TV01InventorySheetTest",
+        "source": "services/product-service/src/test/java/com/vmarket/product/TV01InventorySheetTest.java",
+        "source_sha256": "1be9452842d0a14b89216784952fd2a00605c0293b06896d0e7de6fceee0bdbc",
+        "original_result_sha256": "4a7a0e0ba73ec2aac604efa1936a5f9c020fd84b2c30ca0284d63a3bd69b35fb",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "recorded_at": "2026-11-09T11:58:20+07:00"
+      }
+    ],
+    "tests": 86,
+    "original_tv01_invocations": 30,
+    "other_unit_invocations": 56,
+    "result": {
+      "path": "review/TEST-review-regression.xml",
+      "sha256": "b18bf1a60e6d1661519eb216795e347a8232a0ccb477a4a4ad33de5a2a2e5bc1"
+    },
+    "publication": "System properties and console logs omitted; testcase identities, timings and outcomes preserved",
+    "integration": "No integration tests/services run. Existing ProductInfrastructureIntegrationTest is referenced, not claimed as executed"
+  }
+}
