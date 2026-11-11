@@ -31,7 +31,7 @@ VMarket/
 │   ├── product-service/       # Danh mục, sản phẩm, tồn kho (8084, MongoDB)
 │   ├── cart-service/          # Giỏ hàng (8085, Redis)
 │   ├── order-service/         # Đơn hàng, trả hàng (8086, PostgreSQL)
-│   ├── payment-service/       # Thanh toán PayOS/COD (8087, PostgreSQL)
+│   ├── payment-service/       # Thanh toán VNPay/COD (8087, PostgreSQL)
 │   ├── delivery-service/      # Giao hàng, định vị shipper (8088, PostgreSQL)
 │   ├── review-service/        # Đánh giá sản phẩm (8089, PostgreSQL)
 │   ├── notification-service/  # Thông báo, email, FCM (8090, MongoDB)

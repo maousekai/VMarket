@@ -52,7 +52,7 @@ perf/
 
 70 guest browsing (UC-04), 30 search (UC-03), 50 cart (UC-05), 20 COD checkout
 (UC-06 A1), 30 account and order tracking (UC-02, UC-07). Stress scales the same mix
-up to 400 VUs. Only COD: PayOS, refunds and reconciliation are never called.
+up to 400 VUs. Only COD: VNPay, refunds and reconciliation are never called.
 
 ### Profiles and phases
 
