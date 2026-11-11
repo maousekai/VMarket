@@ -1,60 +1,80 @@
 package com.vmarket.payment.service;
 
 import com.vmarket.payment.client.*;
-import com.vmarket.payment.config.PayosProperties;
-import com.vmarket.payment.dto.PaymentRequests.Webhook;
+import com.vmarket.payment.config.VnpayProperties;
 import com.vmarket.payment.dto.PaymentResponse;
 import com.vmarket.payment.exception.ApiException;
+import com.vmarket.payment.service.PaymentStore.Outcome;
+import com.vmarket.payment.service.PaymentStore.VnpayResult;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
     private final OrderClient orders;
     private final PaymentStore store;
-    private final PayosClient payos;
-    private final PayosSignature signature;
-    private final PayosProperties properties;
+    private final PaymentGatewayClient gateway;
+    private final VnpaySignature signature;
+    private final VnpayProperties properties;
 
     public PaymentResponse create(String buyer, String token, String orderId) {
         var order = orders.getOwn(token, orderId);
         if (!orderId.equals(order.id()))
             throw ApiException.conflict("ORDER_MISMATCH", "Đơn hàng không khớp");
-        return store.createLink(store.reserve(buyer, order), payos);
+        return store.createLink(store.reserve(buyer, order), gateway);
+    }
+
+    private boolean validSignature(Map<String, String> params) {
+        return signature.verify(
+                params, params.get("vnp_SecureHash"), properties.getHashSecret());
+    }
+
+    /** IPN của VNPay: luôn trả HTTP 200, kết quả nằm trong RspCode. */
+    public Map<String, String> ipn(Map<String, String> params) {
+        if (!validSignature(params)) return rsp("97", "Invalid signature");
+        try {
+            return switch (store.process(VnpayResult.from(params))) {
+                case NOT_FOUND -> rsp("01", "Order not found");
+                case INVALID_AMOUNT -> rsp("04", "Invalid amount");
+                case ALREADY_CONFIRMED -> rsp("02", "Order already confirmed");
+                case PROCESSED -> rsp("00", "Confirm Success");
+            };
+        } catch (ApiException rejected) {
+            log.warn("VNPay IPN rejected: {}", rejected.getCode());
+            return rsp("99", "Unknown error");
+        } catch (RuntimeException failure) {
+            log.error("VNPay IPN failed", failure);
+            return rsp("99", "Unknown error");
+        }
     }
 
     /**
-     * Hỏi thẳng PayOS trạng thái giao dịch khi người mua quay lại trang VMarket (môi trường local
-     * không nhận được webhook). Trạng thái đã ký PAID đi qua đúng luồng xử lý của webhook nên kết
-     * quả giống hệt khi webhook tới; webhook đến sau sẽ không làm gì thêm.
+     * Return URL (dev local không nhận được IPN): xác thực chữ ký rồi chạy cùng xử lý idempotent
+     * như IPN.
      */
-    public PaymentResponse sync(String buyer, Long id) {
-        PaymentResponse current = store.own(buyer, id);
-        if (!"PAYOS".equals(current.method()) || current.paidAt() != null) return current;
-        PayosClient.Info info = payos.info(id);
-        if (info.status() == PayosClient.Status.PAID && !info.reference().isBlank()) {
-            Map<String, Object> data = new HashMap<>();
-            data.put("orderCode", id);
-            data.put("amount", info.amount());
-            data.put("currency", "VND");
-            data.put("paymentLinkId", info.paymentLinkId());
-            data.put("reference", info.reference());
-            data.put("transactionDateTime", info.transactionDateTime());
-            data.put("code", "00");
-            store.webhook(data);
-        }
+    public PaymentResponse vnpayReturn(String buyer, Map<String, String> params) {
+        if (!validSignature(params))
+            throw ApiException.badRequest("INVALID_SIGNATURE", "Chữ ký VNPay không hợp lệ");
+        var result = VnpayResult.from(params);
+        Long id = PaymentStore.paymentId(result.txnRef());
+        if (id == null) throw ApiException.notFound("PAYMENT_NOT_FOUND", "Không tìm thấy giao dịch");
+        store.own(buyer, id);
+        Outcome outcome = store.process(result);
+        if (outcome == Outcome.NOT_FOUND)
+            throw ApiException.notFound("PAYMENT_NOT_FOUND", "Không tìm thấy giao dịch");
+        if (outcome == Outcome.INVALID_AMOUNT)
+            throw ApiException.badRequest("PAYMENT_MISMATCH", "Số tiền không khớp");
         return store.own(buyer, id);
     }
 
-    public void webhook(Webhook webhook) {
-        if (!signature.verify(webhook.data(), webhook.signature(), properties.getChecksumKey()))
-            throw ApiException.badRequest("INVALID_SIGNATURE", "Chữ ký PayOS không hợp lệ");
-        store.webhook(webhook.data());
+    private static Map<String, String> rsp(String code, String message) {
+        return Map.of("RspCode", code, "Message", message);
     }
 }

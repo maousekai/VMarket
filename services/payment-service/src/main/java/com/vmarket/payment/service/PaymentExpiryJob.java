@@ -1,6 +1,6 @@
 package com.vmarket.payment.service;
 
-import com.vmarket.payment.client.PayosClient;
+import com.vmarket.payment.client.PaymentGatewayClient;
 import com.vmarket.payment.repository.PaymentRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -21,7 +21,7 @@ import java.util.List;
 public class PaymentExpiryJob {
     private final PaymentRepository repository;
     private final PaymentStore store;
-    private final PayosClient client;
+    private final PaymentGatewayClient client;
     private final Clock clock;
 
     @Scheduled(fixedDelayString = "${app.payment.expiry-delay:10000}")

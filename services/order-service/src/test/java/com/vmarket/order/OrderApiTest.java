@@ -274,7 +274,7 @@ class OrderApiTest {
     }
 
     @Test
-    void payosDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
+    void vnpayDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
         when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
         when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
         when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
@@ -285,7 +285,7 @@ class OrderApiTest {
                                 .content(
                                         "{\"addressId\":\""
                                                 + ADDRESS_ID
-                                                + "\",\"paymentMethod\":\"PAYOS\"}"))
+                                                + "\",\"paymentMethod\":\"VNPAY\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("WAITING_PAYMENT"))
                 .andExpect(jsonPath("$.paymentExpiresAt").value("2026-10-19T12:10:00Z"));

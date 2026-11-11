@@ -308,7 +308,7 @@ class DeliveryApiTest {
 
     @Test
     void prepaidCannotCollectCodAndThirdFailureReturnsOrder() throws Exception {
-        when(clients.order(anyString(), anyBoolean())).thenReturn(order("PAYOS", false));
+        when(clients.order(anyString(), anyBoolean())).thenReturn(order("VNPAY", false));
         String id = handoff();
         inTransit(id);
         call(

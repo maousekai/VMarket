@@ -23,7 +23,7 @@ public record CheckoutRequest(
 		String addressId,
 		@Size(max = 255, message = "Ghi chú tối đa 255 ký tự")
 		String note,
-		@Pattern(regexp = "COD|PAYOS") String paymentMethod,
+		@Pattern(regexp = "COD|VNPAY") String paymentMethod,
 		@Size(max = 50, message = "Tối đa 50 dòng hàng") List<@Valid Item> items) {
 
 	public record Item(

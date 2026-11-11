@@ -27,7 +27,7 @@ public record PlaceOrderRequest(
 		@Schema(example = "Giao giờ hành chính")
 		@Size(max = 255, message = "Ghi chú tối đa 255 ký tự")
 		String note,
-        @jakarta.validation.constraints.Pattern(regexp = "COD|PAYOS") String paymentMethod) {
+        @jakarta.validation.constraints.Pattern(regexp = "COD|VNPAY") String paymentMethod) {
     public PlaceOrderRequest(String addressId, String note) { this(addressId, note, "COD"); }
 
 }

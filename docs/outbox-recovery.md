@@ -42,15 +42,15 @@ event có thể được gửi lại. Consumer chống trùng bằng trạng th�
 - `OrderOutboxTest`: DEAD chặn successor, Admin replay giải phóng theo đúng thứ tự,
   kiểm tra quyền, audit sau ACK, metric và mô phỏng broker nhận nhưng mất confirm.
 - `python scripts/test-payment-flow.py --build`: chạy **Order, Payment, Product thật**,
-  PostgreSQL, RabbitMQ và MongoDB replica set trong container tách biệt. Cart/User/PayOS
-  dùng HTTP stub. Barrier PostgreSQL giữ consumer hủy để ép webhook commit trước;
-  barrier thứ hai đợi cancellation commit rồi mới cho webhook chạy. Mỗi trường hợp
+  PostgreSQL, RabbitMQ và MongoDB replica set trong container tách biệt. Cart/User
+  dùng HTTP stub. Barrier PostgreSQL giữ consumer hủy để ép IPN VNPay commit trước;
+  barrier thứ hai đợi cancellation commit rồi mới cho IPN chạy. Mỗi trường hợp
   kiểm tra Order=CANCELLED, Payment=SUCCEEDED, tồn kho đã release, đúng một refund,
-  8 request tạo payment đồng thời, 4 webhook trùng và event broker gửi lại. Suite
+  8 request tạo payment đồng thời, 4 IPN trùng và event broker gửi lại. Suite
   kiểm tra cả quyền/audit hoàn tiền thủ công và replay DEAD trên PostgreSQL.
 - CI `payment-flow-integration` lưu log và `result.json` của suite thành artifact.
 
 Fixture được tạo qua API Orders và HTTP stub, không phải bản sao dữ liệu production.
-Suite không chuyển tiền, không xác nhận PayOS/ngân hàng thật và không chứng minh
+Suite không chuyển tiền, không xác nhận VNPay/ngân hàng thật và không chứng minh
 khả năng chạy nhiều instance của toàn hệ thống. Các trường hợp lỗi broker và mất
 confirm là mô phỏng có kiểm soát trong test outbox; suite liên service dùng broker thật.
