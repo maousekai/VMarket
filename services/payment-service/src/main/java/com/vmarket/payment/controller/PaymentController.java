@@ -14,6 +14,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/payments")
@@ -44,9 +45,15 @@ public class PaymentController {
         return store.own(buyer, id);
     }
 
-    @PostMapping("/webhooks/payos")
-    public void webhook(@Valid @RequestBody PaymentRequests.Webhook webhook) {
-        service.webhook(webhook);
+    @GetMapping("/webhooks/vnpay")
+    public Map<String, String> ipn(@RequestParam Map<String, String> params) {
+        return service.ipn(params);
+    }
+
+    @GetMapping("/vnpay/return")
+    public PaymentResponse vnpayReturn(
+            @AuthenticationPrincipal String buyer, @RequestParam Map<String, String> params) {
+        return service.vnpayReturn(buyer, params);
     }
 
     @GetMapping("/admin/refunds")
