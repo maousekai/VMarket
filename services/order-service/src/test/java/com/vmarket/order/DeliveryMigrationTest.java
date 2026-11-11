@@ -14,7 +14,7 @@ class DeliveryMigrationTest {
         Flyway.configure().dataSource(url, "sa", "").target("2").load().migrate();
         var flyway = Flyway.configure().dataSource(url, "sa", "").load();
         flyway.migrate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("11");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("12");
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(url, "sa", ""));
         assertThat(jdbc.queryForObject("select count(*) from event_outbox", Integer.class))
                 .isZero();

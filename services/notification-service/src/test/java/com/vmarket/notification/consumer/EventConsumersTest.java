@@ -83,7 +83,7 @@ class EventConsumersTest {
 
 	@Test
 	void onlinePaymentOrderWaitsForPaymentBeforeNotifyingSeller() {
-		order("PAYOS");
+		order("VNPAY");
 
 		new OrderPlacedConsumer(dispatcher, templates, recipients).handle(new OrderPlaced("o1", List.of()), envelope);
 		verify(dispatcher, never()).deliver(eq("seller-1"), any(), any());
@@ -95,7 +95,7 @@ class EventConsumersTest {
 
 	@Test
 	void buyerPaymentEmailIsSent() {
-		order("PAYOS");
+		order("VNPAY");
 		new PaymentSucceededConsumer(dispatcher, templates, recipients).handle(new PaymentSucceeded("o1"), envelope);
 
 		ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
@@ -117,7 +117,7 @@ class EventConsumersTest {
 	@Test
 	void internalStatusesDoNotCallOrderService() {
 		new OrderStatusChangedConsumer(dispatcher, templates, recipients)
-				.handle(new OrderStatusChanged("o1", "PENDING", "WAITING_PAYMENT", "PAYOS"), envelope);
+				.handle(new OrderStatusChanged("o1", "PENDING", "WAITING_PAYMENT", "VNPAY"), envelope);
 		new OrderStatusChangedConsumer(dispatcher, templates, recipients)
 				.handle(new OrderStatusChanged("o1", "SHIPPED", "SHIPPED", "COD"), envelope);
 
@@ -205,7 +205,7 @@ class EventConsumersTest {
 
 	@Test
 	void buyerEmailFailureDoesNotBlockSeller() {
-		order("PAYOS");
+		order("VNPAY");
 		org.mockito.Mockito.doThrow(new IllegalStateException("Brevo down")).when(dispatcher)
 				.deliver(eq("buyer-1"), any(), any());
 
@@ -218,7 +218,7 @@ class EventConsumersTest {
 
 	@Test
 	void shopServiceOutageStillNotifiesBuyerAndKnownSellerThenRetries() {
-		order("PAYOS");
+		order("VNPAY");
 		when(clients.shopOwner("shop-unknown"))
 				.thenThrow(new org.springframework.web.client.ResourceAccessException("shop-service down"));
 
