@@ -55,8 +55,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      - run: npx playwright install --with-deps chromium
+      # Runner doi khi khong tai duoc goi tu archive.ubuntu.com (loi DNS). Image ubuntu-latest da co
+      # gan du thu vien cho Chromium, nen thu lai roi moi bo qua buoc apt thay vi lam do ca job.
+      - name: Install Playwright Chromium
         working-directory: frontend
+        run: |
+          for attempt in 1 2; do
+            npx playwright install --with-deps chromium && exit 0
+            echo "playwright --with-deps failed (attempt $attempt), retrying"
+            sleep 20
+          done
+          echo "::warning::apt mirror unreachable, installing Chromium without system deps"
+          npx playwright install chromium
       - name: Build and start isolated Java 17/PostgreSQL stack
         run: docker compose -p vmarket-auth-e2e -f frontend/e2e/compose.yml up -d --build --wait --wait-timeout 300
       - run: npm run test:e2e
