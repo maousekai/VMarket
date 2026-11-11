@@ -4,7 +4,7 @@ import { newIdempotencyKey } from './userApi'
 // Order Service (PBL6-17). Don dat tu TOAN BO gio hang tren server; request chi gui dia chi,
 // ghi chu va phuong thuc thanh toan.
 
-export const PAYMENT_METHOD = Object.freeze({ cod: 'COD', payos: 'PAYOS' })
+export const PAYMENT_METHOD = Object.freeze({ cod: 'COD', vnpay: 'VNPAY' })
 
 const ordersUrl = '/api/orders'
 const orderUrl = (orderId) => `${ordersUrl}/${encodeURIComponent(orderId)}`

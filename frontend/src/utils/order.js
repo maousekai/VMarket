@@ -21,8 +21,8 @@ export const RETURN_STATUS_LABELS = Object.freeze({
 })
 
 export const PAYMENT_METHOD_LABELS = Object.freeze({
-  COD: 'Thanh toán khi nhận hàng (COD)',
-  PAYOS: 'Chuyển khoản / QR qua PayOS',
+  COD: 'Thanh toán khi nhận hàng',
+  VNPAY: 'VNPay',
 })
 
 /** Cac buoc timeline theo state machine; CANCELLED hien rieng. */

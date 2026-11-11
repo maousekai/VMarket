@@ -1,10 +1,10 @@
-/** Chu ky hoi lai trang thai khi dang cho nguoi mua quet QR. */
+/** Chu ky hoi lai trang thai khi dang cho nguoi mua thanh toan tren VNPay. */
 export const PAYMENT_POLL_MS = 4000
 
 // Trang thai giao dich cua Payment Service (PaymentTransaction.status).
 export const PAYMENT_STATUS_LABELS = Object.freeze({
-  CREATED: 'Đang tạo mã thanh toán',
-  CREATING: 'Đang tạo mã thanh toán',
+  CREATED: 'Đang tạo liên kết thanh toán',
+  CREATING: 'Đang tạo liên kết thanh toán',
   PENDING: 'Chờ thanh toán',
   AWAITING_WEBHOOK: 'Đang xác nhận với ngân hàng',
   RECONCILING: 'Đang đối soát',
@@ -31,13 +31,13 @@ export const REFUND_STATUS_LABELS = Object.freeze({
   COMPLETED: 'Đã hoàn tiền',
 })
 
-/** Giao dich PayOS con dang cho nguoi mua quet ma. */
+/** Giao dich VNPay con dang cho nguoi mua thanh toan. */
 export const isAwaitingPayment = (payment) =>
-  payment?.method === 'PAYOS' &&
+  payment?.method === 'VNPAY' &&
   !payment.paidAt &&
   ['CREATED', 'CREATING', 'PENDING'].includes(payment.status)
 
-/** Thoi diem het han hien cho nguoi mua: han cua link PayOS, khong co thi han giu don. */
+/** Thoi diem het han hien cho nguoi mua: han cua link VNPay, khong co thi han giu don. */
 export const paymentDeadline = (payment) => payment?.linkExpiresAt || payment?.expiresAt || null
 
 /** "mm:ss" con lai (00:00 khi da het han). */
@@ -47,5 +47,5 @@ export function formatCountdown(ms) {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-/** Ma ngan hien thi cho giao dich (orderCode cua PayOS la id so). */
+/** Ma ngan hien thi cho giao dich (id so cua giao dich). */
 export const paymentCode = (payment) => (payment?.id != null ? `GD${payment.id}` : '')

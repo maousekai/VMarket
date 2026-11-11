@@ -269,7 +269,7 @@ export default function OrderDetailPage() {
             </p>
           )}
           <div className="order-detail__actions">
-            {order.status === 'WAITING_PAYMENT' && order.paymentMethod === 'PAYOS' && (
+            {order.status === 'WAITING_PAYMENT' && order.paymentMethod === 'VNPAY' && (
               <Link className="account-button" to={`/payment/${encodeURIComponent(order.id)}`}>
                 Thanh toán ngay
               </Link>
@@ -374,7 +374,7 @@ export default function OrderDetailPage() {
       {dialog?.type === 'cancel' && (
         <Modal
           title="Huỷ đơn hàng?"
-          description="Hàng được trả lại kho; đơn đã thanh toán qua PayOS sẽ được hoàn tiền."
+          description="Hàng được trả lại kho; đơn đã thanh toán qua VNPay sẽ được hoàn tiền."
           onClose={() => setDialog(null)}
         >
           <div className="account-actions">

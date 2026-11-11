@@ -382,8 +382,8 @@ export default function CartPage() {
               : `Tiến hành đặt hàng (${selectedItems.length})`}
           </button>
           <p className="cart-summary__note">
-            Giá và tồn kho được kiểm tra lại trước khi đặt hàng. Thanh toán khi nhận hàng (COD) hoặc
-            PayOS.
+            Giá và tồn kho được kiểm tra lại trước khi đặt hàng. Thanh toán khi nhận hàng hoặc
+            VNPay.
           </p>
         </aside>
       </div>

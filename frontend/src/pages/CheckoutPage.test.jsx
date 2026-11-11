@@ -4,18 +4,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import CheckoutPage from './CheckoutPage'
 import OrderResultPage from './OrderResultPage'
+import VnpayReturnPage from './VnpayReturnPage'
 import { CartContext } from '../cart/useCart'
 import { resetCatalogLookup } from '../hooks/useCatalogLookup'
 import {
   findNextUnpaid,
-  preparePayosPayment,
-  readPayosCheckout,
-  startPayosQueue,
+  prepareVnpayPayment,
+  readVnpayCheckout,
+  startVnpayQueue,
   waitForReservation,
-} from '../order/payos'
+} from '../order/vnpay'
 import { validateCart } from '../services/api/cartApi'
 import { checkoutOrders, getOrder } from '../services/api/orderApi'
-import { createPayment, syncPayment } from '../services/api/paymentApi'
+import { confirmVnpayReturn, createPayment } from '../services/api/paymentApi'
 import { getProduct } from '../services/api/productApi'
 import { getPublicShop } from '../services/api/shopApi'
 import { listMyAddresses } from '../services/api/userApi'
@@ -26,7 +27,10 @@ vi.mock('../services/api/orderApi', async (importOriginal) => ({
   checkoutOrders: vi.fn(),
   getOrder: vi.fn(),
 }))
-vi.mock('../services/api/paymentApi', () => ({ createPayment: vi.fn(), syncPayment: vi.fn() }))
+vi.mock('../services/api/paymentApi', () => ({
+  createPayment: vi.fn(),
+  confirmVnpayReturn: vi.fn(),
+}))
 vi.mock('../services/api/productApi', () => ({ getProduct: vi.fn() }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
 vi.mock('../services/api/userApi', async (importOriginal) => ({
@@ -81,7 +85,7 @@ const renderCheckout = (value = cart) =>
           <Route path="/cart" element={<p>Trang giỏ hàng</p>} />
           <Route path="/checkout/success" element={<p>Đặt thành công</p>} />
           <Route path="/profile/orders/:orderId" element={<p>Chi tiết đơn</p>} />
-          <Route path="/payment/:orderId" element={<p>Màn thanh toán QR</p>} />
+          <Route path="/payment/:orderId" element={<p>Màn thanh toán VNPay</p>} />
         </Routes>
       </MemoryRouter>
     </CartContext.Provider>,
@@ -180,20 +184,20 @@ describe('CheckoutPage', () => {
     expect(checkoutOrders).not.toHaveBeenCalled()
   })
 
-  it('opens the QR payment screen of the first order for PayOS', async () => {
+  it('opens the VNPay payment screen of the first order for VNPay', async () => {
     selectLines('p1::v1', 'p2::v2')
     checkoutOrders.mockResolvedValue([
-      { ...order, id: 'o1', status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' },
-      { ...order, id: 'o2', status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' },
+      { ...order, id: 'o1', status: 'WAITING_PAYMENT', paymentMethod: 'VNPAY' },
+      { ...order, id: 'o2', status: 'WAITING_PAYMENT', paymentMethod: 'VNPAY' },
     ])
     renderCheckout()
     await screen.findByRole('radio', { name: /Bình/ })
-    fireEvent.click(screen.getByRole('radio', { name: /PayOS/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /VNPay/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Đặt 2 đơn hàng' }))
-    expect(await screen.findByText('Màn thanh toán QR')).toBeInTheDocument()
-    expect(readPayosCheckout().queue).toEqual(['o1', 'o2'])
+    expect(await screen.findByText('Màn thanh toán VNPay')).toBeInTheDocument()
+    expect(readVnpayCheckout().queue).toEqual(['o1', 'o2'])
     expect(checkoutOrders).toHaveBeenCalledWith(
-      expect.objectContaining({ paymentMethod: 'PAYOS' }),
+      expect.objectContaining({ paymentMethod: 'VNPAY' }),
       expect.any(String),
     )
   })
@@ -215,7 +219,7 @@ describe('CheckoutPage', () => {
   })
 })
 
-describe('PayOS helpers', () => {
+describe('VNPay helpers', () => {
   it('waits for the stock reservation before creating the payment link', async () => {
     getOrder
       .mockResolvedValueOnce({ id: 'o1', status: 'WAITING_PAYMENT', stockReserved: false })
@@ -228,27 +232,30 @@ describe('PayOS helpers', () => {
 
   it('creates the payment once stock is reserved and remembers it', async () => {
     getOrder.mockResolvedValue({ id: 'o1', status: 'WAITING_PAYMENT', stockReserved: true })
-    createPayment.mockResolvedValue({ id: 7, qrCode: '000201...', checkoutUrl: 'https://pay' })
+    createPayment.mockResolvedValue({ id: 7, checkoutUrl: 'https://pay' })
     sessionStorage.setItem(
-      'vmarket.payosCheckout',
+      'vmarket.vnpayCheckout',
       JSON.stringify({ queue: ['o1', 'o2'], payments: {} }),
     )
-    const payment = await preparePayosPayment('o1')
+    const payment = await prepareVnpayPayment('o1')
     expect(payment.id).toBe(7)
-    expect(readPayosCheckout()).toEqual({ queue: ['o1', 'o2'], payments: { o1: 7 } })
+    expect(readVnpayCheckout()).toEqual({ queue: ['o1', 'o2'], payments: { o1: 7 } })
     expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBe('o1')
   })
 
   it('refuses to pay for an order cancelled because stock ran out', async () => {
     getOrder.mockResolvedValue({ id: 'o1', status: 'CANCELLED', stockReserved: false })
-    await expect(preparePayosPayment('o1')).rejects.toThrow('hết hàng')
+    await expect(prepareVnpayPayment('o1')).rejects.toThrow('hết hàng')
     expect(createPayment).not.toHaveBeenCalled()
   })
 
   it('starts a queue on the first order and finds the next unpaid one', async () => {
     const navigate = vi.fn()
-    startPayosQueue(['o1', 'o2', 'o3'], navigate)
-    expect(navigate).toHaveBeenCalledWith('/payment/o1', { replace: true })
+    startVnpayQueue(['o1', 'o2', 'o3'], navigate)
+    expect(navigate).toHaveBeenCalledWith('/payment/o1', {
+      replace: true,
+      state: { autoRedirect: true },
+    })
     getOrder.mockImplementation(async (id) => ({
       id,
       status: id === 'o2' ? 'CANCELLED' : 'WAITING_PAYMENT',
@@ -258,20 +265,29 @@ describe('PayOS helpers', () => {
 })
 
 describe('OrderResultPage', () => {
+  const renderVnpayReturn = (search) =>
+    render(
+      <MemoryRouter initialEntries={[`/payment/vnpay-return${search}`]}>
+        <Routes>
+          <Route path="/payment/vnpay-return" element={<VnpayReturnPage />} />
+          <Route path="/payment/:orderId" element={<p>Màn thanh toán VNPay</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
   const renderResult = (path, element) =>
     render(
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/checkout/success" element={element} />
           <Route path="/checkout/success/:orderId" element={element} />
-          <Route path="/payment/:result" element={element} />
         </Routes>
       </MemoryRouter>,
     )
 
   it('confirms a COD order', async () => {
     getOrder.mockResolvedValue(order)
-    renderResult(`/checkout/success/${order.id}`, <OrderResultPage mode="success" />)
+    renderResult(`/checkout/success/${order.id}`, <OrderResultPage />)
     expect(await screen.findByRole('heading', { name: 'Đặt hàng thành công' })).toBeInTheDocument()
     expect(screen.getByText('Đơn #0P4S6A2B')).toBeInTheDocument()
   })
@@ -283,49 +299,89 @@ describe('OrderResultPage', () => {
     expect(screen.getAllByRole('link', { name: 'Xem đơn' })).toHaveLength(2)
   })
 
-  it('syncs PayOS on return and reports a paid order', async () => {
-    sessionStorage.setItem('vmarket.pendingPaymentOrder', order.id)
+  it('confirms a VNPay return and reports a paid order', async () => {
     sessionStorage.setItem(
-      'vmarket.payosCheckout',
-      JSON.stringify({ queue: [order.id], payments: { [order.id]: 'pay1' } }),
+      'vmarket.vnpayCheckout',
+      JSON.stringify({ queue: [order.id], payments: { [order.id]: 7 } }),
     )
-    syncPayment.mockResolvedValue({ status: 'SUCCEEDED' })
-    getOrder.mockResolvedValue({ ...order, paymentMethod: 'PAYOS' })
-    renderResult('/payment/return', <OrderResultPage mode="return" />)
+    confirmVnpayReturn.mockResolvedValue({
+      id: 7,
+      orderId: order.id,
+      amount: 249000,
+      status: 'SUCCEEDED',
+      paidAt: '2026-11-10T08:00:00Z',
+    })
+    renderVnpayReturn('?vnp_ResponseCode=00&vnp_SecureHash=abc')
     expect(
       await screen.findByRole('heading', { name: 'Thanh toán thành công' }),
     ).toBeInTheDocument()
-    expect(syncPayment).toHaveBeenCalledWith('pay1')
-    await waitFor(() => expect(sessionStorage.getItem('vmarket.pendingPaymentOrder')).toBeNull())
+    expect(confirmVnpayReturn).toHaveBeenCalledWith('?vnp_ResponseCode=00&vnp_SecureHash=abc')
+    await waitFor(() => expect(sessionStorage.getItem('vmarket.vnpayCheckout')).toBeNull())
   })
 
   it('offers to pay the next unpaid order of the same checkout', async () => {
-    sessionStorage.setItem('vmarket.pendingPaymentOrder', 'o1')
     sessionStorage.setItem(
-      'vmarket.payosCheckout',
-      JSON.stringify({ queue: ['o1', 'o2'], payments: { o1: 'pay1' } }),
+      'vmarket.vnpayCheckout',
+      JSON.stringify({ queue: ['o1', 'o2'], payments: { o1: 7 } }),
     )
-    syncPayment.mockResolvedValue({})
+    confirmVnpayReturn.mockResolvedValue({
+      id: 7,
+      orderId: 'o1',
+      amount: 249000,
+      status: 'SUCCEEDED',
+      paidAt: '2026-11-10T08:00:00Z',
+    })
     getOrder.mockImplementation(async (id) => ({
       ...order,
       id,
-      paymentMethod: 'PAYOS',
+      paymentMethod: 'VNPAY',
       status: id === 'o1' ? 'PENDING' : 'WAITING_PAYMENT',
     }))
-    renderResult('/payment/return', <OrderResultPage mode="return" />)
+    renderVnpayReturn('?vnp_ResponseCode=00')
     expect(await screen.findByRole('link', { name: 'Thanh toán đơn tiếp theo' })).toHaveAttribute(
       'href',
       '/payment/o2',
     )
   })
 
-  it('explains a cancelled payment', async () => {
-    sessionStorage.setItem('vmarket.pendingPaymentOrder', order.id)
-    getOrder.mockResolvedValue({ ...order, status: 'WAITING_PAYMENT', paymentMethod: 'PAYOS' })
-    renderResult('/payment/cancel', <OrderResultPage mode="cancel" />)
+  it('explains a payment the buyer cancelled on VNPay (code 24)', async () => {
+    confirmVnpayReturn.mockResolvedValue({
+      id: 7,
+      orderId: order.id,
+      amount: 249000,
+      status: 'PENDING',
+      paidAt: null,
+    })
+    getOrder.mockResolvedValue({ ...order, status: 'WAITING_PAYMENT', paymentMethod: 'VNPAY' })
+    renderVnpayReturn('?vnp_ResponseCode=24')
     expect(
       await screen.findByRole('heading', { name: 'Bạn đã huỷ thanh toán' }),
     ).toBeInTheDocument()
-    expect(syncPayment).not.toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: 'Xem chi tiết đơn' })).toBeInTheDocument()
+  })
+
+  it('shows a failure for other VNPay response codes', async () => {
+    confirmVnpayReturn.mockResolvedValue({
+      id: 7,
+      orderId: order.id,
+      amount: 249000,
+      status: 'PENDING',
+      paidAt: null,
+    })
+    renderVnpayReturn('?vnp_ResponseCode=51')
+    expect(
+      await screen.findByRole('heading', { name: 'Thanh toán không thành công' }),
+    ).toBeInTheDocument()
+  })
+
+  it('reports an invalid signature', async () => {
+    confirmVnpayReturn.mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error: { code: 'INVALID_SIGNATURE', message: 'Chữ ký VNPay không hợp lệ' } },
+      },
+    })
+    renderVnpayReturn('?vnp_ResponseCode=00&vnp_SecureHash=bad')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Chữ ký VNPay không hợp lệ')
   })
 })

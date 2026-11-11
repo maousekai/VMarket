@@ -84,7 +84,7 @@ function ConfirmRefundDialog({ refund, onClose, onDone }) {
   )
 }
 
-/** Admin: hoan tien thu cong (chuyen khoan) va cac giao dich PayOS can doi soat. */
+/** Admin: hoan tien thu cong (chuyen khoan) va cac giao dich VNPay can doi soat. */
 export default function AdminPaymentsPage() {
   const [tab, setTab] = useState('refunds')
   const [page, setPage] = useState(0)

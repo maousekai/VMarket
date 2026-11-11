@@ -1,15 +1,14 @@
-import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import QRCode from 'qrcode'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { getApiError } from '../services/api/apiClient'
-import { syncPayment } from '../services/api/paymentApi'
+import { getPaymentByOrder } from '../services/api/paymentApi'
 import CheckoutOrderList from '../components/CheckoutOrderList'
 import {
-  clearPayosCheckout,
+  clearVnpayCheckout,
   findNextUnpaid,
   loadCheckoutOrders,
-  preparePayosPayment,
-} from '../order/payos'
+  prepareVnpayPayment,
+} from '../order/vnpay'
 import { formatMoney } from '../utils/formatMoney'
 import { shortOrderId } from '../utils/order'
 import {
@@ -38,28 +37,16 @@ function useCountdown(deadline) {
   return deadline ? new Date(deadline).getTime() - now : null
 }
 
-function QrImage({ value }) {
-  const [src, setSrc] = useState('')
-  useEffect(() => {
-    let current = true
-    QRCode.toDataURL(value, { width: 240, margin: 1, errorCorrectionLevel: 'M' })
-      .then((url) => current && setSrc(url))
-      .catch(() => current && setSrc(''))
-    return () => {
-      current = false
-    }
-  }, [value])
-  if (!src) return <div className="payment-qr__placeholder" aria-hidden="true" />
-  return <img className="payment-qr__image" src={src} alt="Mã VietQR thanh toán đơn hàng" />
-}
-
 /**
- * Man thanh toan PayOS: QR VietQR + dem nguoc han thanh toan. Trang thai duoc hoi lai Payment
- * Service moi vai giay (sync hoi thang PayOS nen khong can webhook o local).
+ * Man thanh toan VNPay: so tien, dem nguoc han link va nut mo trang VNPay. Khi vua dat hang xong
+ * (state.autoRedirect) trinh duyet tu chuyen sang VNPay; trang thai duoc hoi lai Payment Service
+ * moi vai giay.
  */
 export default function PaymentPage() {
   const { orderId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  const redirected = useRef(false)
   const [state, setState] = useState({ status: 'preparing', payment: null, error: '' })
   const [next, setNext] = useState(null)
   const [batch, setBatch] = useState([])
@@ -72,7 +59,7 @@ export default function PaymentPage() {
     setState({ status: 'preparing', payment: null, error: '' })
     setNext(null)
     setBatch([])
-    preparePayosPayment(orderId)
+    prepareVnpayPayment(orderId)
       .then((created) => current && setState({ status: 'ready', payment: created, error: '' }))
       .catch((failure) => {
         if (!current) return
@@ -95,17 +82,26 @@ export default function PaymentPage() {
     const timer = setInterval(async () => {
       if (document.visibilityState === 'hidden') return
       try {
-        const latest = await syncPayment(paymentId)
+        const latest = await getPaymentByOrder(orderId)
         if (current) setState((value) => ({ ...value, payment: latest }))
       } catch {
-        // Keep the QR on screen; the next tick retries.
+        // Keep the page as is; the next tick retries.
       }
     }, PAYMENT_POLL_MS)
     return () => {
       current = false
       clearInterval(timer)
     }
-  }, [paymentId, waiting])
+  }, [paymentId, waiting, orderId])
+
+  // Vua dat hang xong: chuyen thang sang cong VNPay mot lan (quay lai trang nay thi khong tu chuyen).
+  const checkoutUrl = payment?.checkoutUrl
+  const autoRedirect = Boolean(location.state?.autoRedirect)
+  useEffect(() => {
+    if (!autoRedirect || !waiting || expired || !checkoutUrl || redirected.current) return
+    redirected.current = true
+    window.location.assign(checkoutUrl)
+  }, [autoRedirect, waiting, expired, checkoutUrl])
 
   const paid = Boolean(payment?.paidAt)
   useEffect(() => {
@@ -119,7 +115,7 @@ export default function PaymentPage() {
       const orders = await loadCheckoutOrders()
       if (!current) return
       setBatch(orders)
-      clearPayosCheckout()
+      clearVnpayCheckout()
     })
     return () => {
       current = false
@@ -130,7 +126,7 @@ export default function PaymentPage() {
   if (state.status === 'preparing') {
     body = (
       <p className="account-notice" role="status">
-        Đang tạo mã thanh toán…
+        Đang tạo liên kết thanh toán…
       </p>
     )
   } else if (state.status === 'error') {
@@ -194,10 +190,12 @@ export default function PaymentPage() {
   } else if (!isAwaitingPayment(payment) || expired) {
     body = (
       <section className="account-card payment-card is-warning" aria-live="polite">
-        <h1>{expired ? 'Mã thanh toán đã hết hạn' : PAYMENT_STATUS_LABELS[payment.status]}</h1>
+        <h1>
+          {expired ? 'Liên kết thanh toán đã hết hạn' : PAYMENT_STATUS_LABELS[payment.status]}
+        </h1>
         <p>
           {payment.status === 'AWAITING_WEBHOOK' || payment.status === 'RECONCILING'
-            ? 'Nếu bạn đã chuyển khoản, VMarket sẽ xác nhận ngay khi ngân hàng báo về. Không cần chuyển lại.'
+            ? 'Nếu bạn đã thanh toán, VMarket sẽ xác nhận ngay khi VNPay báo về. Không cần thanh toán lại.'
             : 'Đơn không thanh toán đúng hạn sẽ tự huỷ và hàng được trả lại kho.'}
         </p>
         <div className="account-actions">
@@ -211,20 +209,13 @@ export default function PaymentPage() {
     const urgent = remaining != null && remaining < 60_000
     body = (
       <section className="account-card payment-card" aria-labelledby="payment-title">
-        <h1 id="payment-title">Quét mã để thanh toán</h1>
-        <p>Mở ứng dụng ngân hàng hoặc ví điện tử, quét mã VietQR bên dưới.</p>
+        <h1 id="payment-title">Thanh toán qua VNPay</h1>
+        <p>Bạn sẽ được chuyển sang cổng VNPay để thanh toán bằng thẻ, QR hoặc ví.</p>
         <div className="payment-card__grid">
           <div className="payment-qr">
-            {payment.qrAvailable ? (
-              <QrImage value={payment.qrCode} />
-            ) : (
-              <p className="payment-qr__fallback">
-                Mã QR chưa sẵn sàng, hãy mở trang thanh toán PayOS.
-              </p>
-            )}
             {remaining != null && (
               <p className={`payment-countdown${urgent ? ' is-urgent' : ''}`} role="timer">
-                Mã hết hạn sau <strong>{formatCountdown(remaining)}</strong>
+                Liên kết hết hạn sau <strong>{formatCountdown(remaining)}</strong>
               </p>
             )}
           </div>
@@ -248,12 +239,12 @@ export default function PaymentPage() {
           </dl>
         </div>
         <p className="payment-card__hint">
-          Trang tự cập nhật khi thanh toán thành công, bạn không cần tải lại.
+          Sau khi thanh toán xong VNPay sẽ đưa bạn về VMarket để xác nhận kết quả.
         </p>
         <div className="account-actions">
           {payment.checkoutUrl && (
-            <a className="button button--secondary" href={payment.checkoutUrl}>
-              Mở trang thanh toán PayOS
+            <a className="button button--primary" href={payment.checkoutUrl}>
+              Thanh toán qua VNPay
             </a>
           )}
           <Link className="button button--secondary" to={orderLink(orderId)}>

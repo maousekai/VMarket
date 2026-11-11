@@ -4,6 +4,7 @@ import { CartProvider } from './cart/CartProvider'
 import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import OrderResultPage from './pages/OrderResultPage'
+import VnpayReturnPage from './pages/VnpayReturnPage'
 import OrdersPage from './pages/OrdersPage'
 import OrderDetailPage from './pages/OrderDetailPage'
 import PaymentPage from './pages/PaymentPage'
@@ -109,13 +110,9 @@ export default function App() {
             <Route element={<RouteGuard />}>
               <Route path="/cart" element={<CartPage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
-              <Route path="/checkout/success" element={<OrderResultPage mode="success" />} />
-              <Route
-                path="/checkout/success/:orderId"
-                element={<OrderResultPage mode="success" />}
-              />
-              <Route path="/payment/return" element={<OrderResultPage mode="return" />} />
-              <Route path="/payment/cancel" element={<OrderResultPage mode="cancel" />} />
+              <Route path="/checkout/success" element={<OrderResultPage />} />
+              <Route path="/checkout/success/:orderId" element={<OrderResultPage />} />
+              <Route path="/payment/vnpay-return" element={<VnpayReturnPage />} />
               <Route path="/payment/:orderId" element={<PaymentPage />} />
               <Route path="/profile/payments" element={<PaymentHistoryPage />} />
               <Route path="/profile/payments/:paymentId" element={<PaymentDetailPage />} />

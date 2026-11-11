@@ -101,7 +101,7 @@ export function PurchasePanel({ product, renderActions }) {
                 ranged ? ` – ${formatMoney(product.maxPrice, product.currency)}` : ''
               }`}
         </strong>
-        <span>Giá đã bao gồm VAT · Thanh toán khi nhận hàng hoặc PayOS</span>
+        <span>Giá đã bao gồm VAT · Thanh toán khi nhận hàng hoặc VNPay</span>
       </div>
 
       {groups.map((group) => (

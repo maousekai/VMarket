@@ -1,11 +1,11 @@
 import apiClient from './apiClient'
 
-// Payment Service (PBL6-19): COD tao ban ghi COD_PENDING; PayOS tra checkoutUrl + qrCode khi don da
-// WAITING_PAYMENT va da giu hang (stockReserved).
+// Payment Service (PBL6-19): COD tao ban ghi COD_PENDING; VNPay tra checkoutUrl (khong co QR) khi
+// don da WAITING_PAYMENT va da giu hang (stockReserved).
 const baseUrl = '/api/payments'
 const paymentUrl = (paymentId) => `${baseUrl}/${encodeURIComponent(paymentId)}`
 
-/** Tao (hoac lay lai) giao dich cua don; goi nhieu lan tra cung mot link PayOS. */
+/** Tao (hoac lay lai) giao dich cua don; goi nhieu lan tra cung mot link VNPay. */
 export const createPayment = async (orderId) => (await apiClient.post(baseUrl, { orderId })).data
 
 export const getPayment = async (paymentId) => (await apiClient.get(paymentUrl(paymentId))).data
@@ -20,9 +20,12 @@ export const getPaymentByOrder = async (orderId) =>
 export const listPaymentRefunds = async (paymentId) =>
   (await apiClient.get(`${paymentUrl(paymentId)}/refunds`)).data
 
-/** Hoi PayOS trang thai giao dich (khong can webhook o moi truong local). */
-export const syncPayment = async (paymentId) =>
-  (await apiClient.post(`${paymentUrl(paymentId)}/sync`)).data
+/**
+ * Trang /payment/vnpay-return: gui nguyen query vnp_* VNPay tra ve de Payment Service xac thuc chu
+ * ky va ghi nhan ket qua (khong can IPN o moi truong local).
+ */
+export const confirmVnpayReturn = async (search) =>
+  (await apiClient.get(`${baseUrl}/vnpay/return${search}`)).data
 
 // ---- Admin ----
 

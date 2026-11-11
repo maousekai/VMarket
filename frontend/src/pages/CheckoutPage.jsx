@@ -7,7 +7,7 @@ import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
 import { getApiError } from '../services/api/apiClient'
 import { validateCart } from '../services/api/cartApi'
 import { checkoutOrders, PAYMENT_METHOD } from '../services/api/orderApi'
-import { startPayosQueue } from '../order/payos'
+import { startVnpayQueue } from '../order/vnpay'
 import { clearCheckoutLines, lineToItem, loadCheckoutLines } from '../order/checkoutSelection'
 import { listMyAddresses, newIdempotencyKey } from '../services/api/userApi'
 import { formatMoney } from '../utils/formatMoney'
@@ -152,9 +152,9 @@ export default function CheckoutPage() {
       clearCheckoutLines()
       cart.refresh().catch(() => {})
       const ids = orders.map((order) => order.id)
-      if (method === PAYMENT_METHOD.payos) {
-        // Moi gian hang mot don: quet QR lan luot, man thanh toan mo don tiep theo.
-        startPayosQueue(ids, navigate)
+      if (method === PAYMENT_METHOD.vnpay) {
+        // Moi gian hang mot don: thanh toan lan luot tung don tren VNPay, sau moi don co nut sang don tiep theo.
+        startVnpayQueue(ids, navigate)
         return
       }
       navigate(`/checkout/success?orders=${ids.map(encodeURIComponent).join(',')}`, {
@@ -265,7 +265,7 @@ export default function CheckoutPage() {
           <section className="account-card checkout-section" aria-labelledby="checkout-payment">
             <h2 id="checkout-payment">Phương thức thanh toán</h2>
             <div className="checkout-methods" role="radiogroup" aria-labelledby="checkout-payment">
-              {[PAYMENT_METHOD.cod, PAYMENT_METHOD.payos].map((value) => (
+              {[PAYMENT_METHOD.cod, PAYMENT_METHOD.vnpay].map((value) => (
                 <label
                   key={value}
                   className={`checkout-method${method === value ? ' is-selected' : ''}`}
@@ -282,7 +282,7 @@ export default function CheckoutPage() {
                     <small>
                       {value === PAYMENT_METHOD.cod
                         ? 'Trả tiền mặt cho shipper khi nhận hàng.'
-                        : 'Quét mã VietQR, đơn được giữ hàng trong thời gian thanh toán.'}
+                        : 'Chuyển sang cổng VNPay để thanh toán, đơn được giữ hàng trong thời gian thanh toán.'}
                     </small>
                   </span>
                 </label>

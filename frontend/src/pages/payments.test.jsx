@@ -15,14 +15,11 @@ import {
   listMyPayments,
   listPaymentRefunds,
   listPendingRefunds,
+  getPaymentByOrder,
   listReconciliations,
-  syncPayment,
 } from '../services/api/paymentApi'
 import { formatCountdown } from '../utils/payment'
 
-vi.mock('qrcode', () => ({
-  default: { toDataURL: vi.fn(async () => 'data:image/png;base64,QR') },
-}))
 vi.mock('../services/api/orderApi', async (importOriginal) => ({
   ...(await importOriginal()),
   getOrder: vi.fn(),
@@ -36,7 +33,7 @@ vi.mock('../services/api/paymentApi', () => ({
   listPaymentRefunds: vi.fn(),
   listPendingRefunds: vi.fn(),
   listReconciliations: vi.fn(),
-  syncPayment: vi.fn(),
+  getPaymentByOrder: vi.fn(),
 }))
 
 const ORDER = '01JC4X9Q2W5R8T6V8N0P4S6A2B'
@@ -45,11 +42,10 @@ const pending = {
   id: 42,
   orderId: ORDER,
   amount: 249000,
-  method: 'PAYOS',
+  method: 'VNPAY',
   status: 'PENDING',
-  checkoutUrl: 'https://pay.payos.vn/web/abc',
-  qrCode: '00020101021238570010A000000727',
-  qrAvailable: true,
+  checkoutUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_TxnRef=42T1',
+  qrAvailable: false,
   linkExpiresAt: minutes(14),
   expiresAt: minutes(15),
   createdAt: new Date().toISOString(),
@@ -104,16 +100,12 @@ describe('formatCountdown', () => {
 })
 
 describe('PaymentPage', () => {
-  it('shows the VietQR code, amount and a countdown', async () => {
+  it('shows the amount, a countdown and the VNPay button', async () => {
     renderAt(`/payment/${ORDER}`)
-    expect(await screen.findByRole('img', { name: /Mã VietQR/ })).toHaveAttribute(
-      'src',
-      'data:image/png;base64,QR',
-    )
-    expect(screen.getByText('GD42')).toBeInTheDocument()
+    expect(await screen.findByText('GD42')).toBeInTheDocument()
     expect(screen.getByText(/249\.000/)).toBeInTheDocument()
     expect(screen.getByRole('timer')).toHaveTextContent(/1[34]:\d\d/)
-    expect(screen.getByRole('link', { name: 'Mở trang thanh toán PayOS' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Thanh toán qua VNPay' })).toHaveAttribute(
       'href',
       pending.checkoutUrl,
     )
@@ -122,23 +114,23 @@ describe('PaymentPage', () => {
 
   it('polls the payment and offers the next unpaid order once paid', async () => {
     sessionStorage.setItem(
-      'vmarket.payosCheckout',
+      'vmarket.vnpayCheckout',
       JSON.stringify({ queue: [ORDER, 'o2'], payments: {} }),
     )
     getOrder.mockImplementation(async (id) =>
       id === ORDER ? waitingOrder : { id: 'o2', status: 'WAITING_PAYMENT', totalAmount: 120000 },
     )
-    syncPayment.mockResolvedValue(paid)
+    getPaymentByOrder.mockResolvedValue(paid)
     vi.useFakeTimers({ shouldAdvanceTime: true })
     renderAt(`/payment/${ORDER}`)
-    await screen.findByRole('img', { name: /Mã VietQR/ })
+    await screen.findByRole('link', { name: 'Thanh toán qua VNPay' })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4100)
     })
     expect(
       await screen.findByRole('heading', { name: 'Thanh toán thành công' }),
     ).toBeInTheDocument()
-    expect(syncPayment).toHaveBeenCalledWith(42)
+    expect(getPaymentByOrder).toHaveBeenCalledWith(ORDER)
     expect(await screen.findByRole('link', { name: 'Thanh toán đơn tiếp theo' })).toHaveAttribute(
       'href',
       '/payment/o2',
@@ -147,7 +139,7 @@ describe('PaymentPage', () => {
 
   it('lists every order of the checkout once the last one is paid', async () => {
     sessionStorage.setItem(
-      'vmarket.payosCheckout',
+      'vmarket.vnpayCheckout',
       JSON.stringify({ queue: ['o1', ORDER], payments: {} }),
     )
     getOrder.mockImplementation(async (id) =>
@@ -164,30 +156,51 @@ describe('PaymentPage', () => {
       screen.getByText('Bạn đã thanh toán xong cả 2 đơn của lần đặt hàng này.'),
     ).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Thanh toán đơn tiếp theo' })).not.toBeInTheDocument()
-    expect(sessionStorage.getItem('vmarket.payosCheckout')).toBeNull()
+    expect(sessionStorage.getItem('vmarket.vnpayCheckout')).toBeNull()
   })
 
   it('explains an expired code', async () => {
     createPayment.mockResolvedValue({ ...pending, linkExpiresAt: minutes(-1) })
     renderAt(`/payment/${ORDER}`)
     expect(
-      await screen.findByRole('heading', { name: 'Mã thanh toán đã hết hạn' }),
+      await screen.findByRole('heading', { name: 'Liên kết thanh toán đã hết hạn' }),
     ).toBeInTheDocument()
   })
 
-  it('shows why PayOS could not start and keeps the order reachable', async () => {
+  it('shows why VNPay could not start and keeps the order reachable', async () => {
     createPayment.mockRejectedValue({
       response: {
         status: 503,
-        data: { error: { code: 'PAYOS_DISABLED', message: 'PayOS đang tắt.' } },
+        data: { error: { code: 'VNPAY_NOT_CONFIGURED', message: 'VNPay đang tắt.' } },
       },
     })
     renderAt(`/payment/${ORDER}`)
-    expect(await screen.findByRole('alert')).toHaveTextContent('PayOS đang tắt.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('VNPay đang tắt.')
     expect(screen.getByRole('link', { name: 'Xem đơn hàng' })).toHaveAttribute(
       'href',
       `/profile/orders/${ORDER}`,
     )
+  })
+})
+
+describe('PaymentPage redirect', () => {
+  it('sends the browser to VNPay right after checkout', async () => {
+    const assign = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign })
+    render(
+      <AuthContext.Provider value={auth}>
+        <MemoryRouter
+          initialEntries={[{ pathname: `/payment/${ORDER}`, state: { autoRedirect: true } }]}
+        >
+          <Routes>
+            <Route path="/payment/:orderId" element={<PaymentPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>,
+    )
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(pending.checkoutUrl))
+    expect(assign).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
   })
 })
 
@@ -250,7 +263,7 @@ describe('PaymentDetailPage', () => {
     ).toHaveAttribute('href', `/profile/orders/${ORDER}`)
   })
 
-  it('lets the buyer resume a pending PayOS payment', async () => {
+  it('lets the buyer resume a pending VNPay payment', async () => {
     getPayment.mockResolvedValue(pending)
     listPaymentRefunds.mockResolvedValue([])
     renderAt('/profile/payments/42')
