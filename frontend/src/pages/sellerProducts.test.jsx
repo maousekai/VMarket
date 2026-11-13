@@ -37,6 +37,7 @@ const products = [
     id: 'p1',
     shopId: 's1',
     name: 'Áo polo',
+    description: 'Áo polo cotton',
     categoryId: 'c1',
     imageUrls: ['https://cdn/p1.jpg'],
     status: 'ACTIVE',
@@ -168,6 +169,7 @@ describe('SellerProductFormPage', () => {
       target: { value: 'Túi tote' },
     })
     fireEvent.change(screen.getByLabelText('Danh mục *'), { target: { value: 'c1' } })
+    fireEvent.change(screen.getByLabelText(/^Mô tả \*/), { target: { value: 'Túi vải canvas' } })
     fireEvent.change(screen.getByLabelText('SKU *'), { target: { value: 'TOTE' } })
     fireEvent.change(screen.getByLabelText('Giá bán (₫) *'), { target: { value: '89000' } })
     fireEvent.change(screen.getByLabelText('Tồn kho *'), { target: { value: '20' } })
@@ -183,6 +185,7 @@ describe('SellerProductFormPage', () => {
     expect(body).toMatchObject({
       shopId: 's1',
       name: 'Túi tote',
+      description: 'Túi vải canvas',
       status: 'DRAFT',
       imageUrls: ['https://cdn/new.jpg'],
       variants: [{ sku: 'TOTE', price: 89000, stock: 20, attributes: {} }],

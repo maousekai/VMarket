@@ -13,6 +13,7 @@ const product = {
   name: 'Áo polo',
   description: 'Cotton',
   categoryId: 'c1',
+  brandId: 'b1',
   imageUrls: ['https://cdn/1.jpg'],
   status: 'ACTIVE',
   variants: [
@@ -36,13 +37,26 @@ const product = {
 }
 
 describe('product form helpers', () => {
-  it('round-trips a product into a request, keeping variant ids', () => {
+  it('requires every variant to use the same attribute groups', () => {
+    const form = productToForm({
+      ...product,
+      variants: [
+        { id: 'v1', sku: 'A', attributes: { Màu: 'Đỏ' }, price: 1000, stock: 1 },
+        { id: 'v2', sku: 'B', attributes: { Size: 'M' }, price: 1000, stock: 1 },
+      ],
+    })
+    expect(validateProductForm(form)['variants.1.attributes']).toMatch(/cùng nhóm thuộc tính/)
+    expect(validateProductForm(productToForm(product))['variants.1.attributes']).toBeUndefined()
+  })
+
+  it('round-trips a product into a request, keeping variant ids and the brand', () => {
     expect(productToRequest(product, 'HIDDEN')).toEqual({
       shopId: 's1',
       name: 'Áo polo',
       description: 'Cotton',
       imageUrls: ['https://cdn/1.jpg'],
       categoryId: 'c1',
+      brandId: 'b1',
       status: 'HIDDEN',
       currency: 'VND',
       variants: [
@@ -52,10 +66,11 @@ describe('product form helpers', () => {
     })
   })
 
-  it('requires name, category, an image and valid variants', () => {
-    const errors = validateProductForm(emptyProductForm())
+  it('requires name, description, category, an image and valid variants', () => {
+    const errors = validateProductForm({ ...emptyProductForm(), description: '   ' })
     expect(errors).toMatchObject({
       name: expect.any(String),
+      description: 'Vui lòng nhập mô tả sản phẩm.',
       categoryId: expect.any(String),
       imageUrls: expect.any(String),
       'variants.0.sku': expect.any(String),

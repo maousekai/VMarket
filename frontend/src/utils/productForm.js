@@ -17,6 +17,7 @@ export const emptyProductForm = () => ({
   name: '',
   description: '',
   categoryId: '',
+  brandId: null,
   imageUrls: [],
   variants: [emptyVariant()],
 })
@@ -27,6 +28,8 @@ export function productToForm(product) {
     name: product.name || '',
     description: product.description || '',
     categoryId: product.categoryId || '',
+    // Form chua co o chon thuong hieu, nhung PUT ghi de brandId: phai giu nguyen gia tri cu.
+    brandId: product.brandId || null,
     imageUrls: [...(product.imageUrls || [])],
     variants: (product.variants?.length ? product.variants : [null]).map((variant) =>
       variant
@@ -56,7 +59,8 @@ export function validateProductForm(form) {
   if (!name) errors.name = 'Vui lòng nhập tên sản phẩm.'
   else if (name.length > PRODUCT_LIMITS.name)
     errors.name = `Tên tối đa ${PRODUCT_LIMITS.name} ký tự.`
-  if (form.description.length > PRODUCT_LIMITS.description)
+  if (!form.description.trim()) errors.description = 'Vui lòng nhập mô tả sản phẩm.'
+  else if (form.description.length > PRODUCT_LIMITS.description)
     errors.description = `Mô tả tối đa ${PRODUCT_LIMITS.description} ký tự.`
   if (!form.categoryId) errors.categoryId = 'Vui lòng chọn danh mục.'
   if (!form.imageUrls.length) errors.imageUrls = 'Cần ít nhất 1 ảnh sản phẩm.'
@@ -65,6 +69,14 @@ export function validateProductForm(form) {
 
   const skus = new Map()
   const combos = new Map()
+  // Moi phan loai phai cung bo nhom thuoc tinh, nguoi mua moi chon duoc tung phan loai.
+  const groupsOf = (variant) =>
+    variant.attributes
+      .filter((item) => item.name.trim())
+      .map((item) => item.name.trim().toLowerCase())
+      .sort()
+      .join('|')
+  const firstGroups = groupsOf(form.variants[0])
   form.variants.forEach((variant, index) => {
     const prefix = `variants.${index}`
     const sku = variant.sku.trim()
@@ -92,6 +104,9 @@ export function validateProductForm(form) {
       .join('|')
     if (form.variants.length > 1 && !combo)
       errors[`${prefix}.attributes`] = 'Sản phẩm nhiều phân loại cần thuộc tính để phân biệt.'
+    else if (index > 0 && groupsOf(variant) !== firstGroups)
+      errors[`${prefix}.attributes`] =
+        'Mọi phân loại cần cùng nhóm thuộc tính với phân loại đầu tiên (vd đều có Màu và Size).'
     else if (combo && combos.has(combo))
       errors[`${prefix}.attributes`] = 'Trùng thuộc tính với một phân loại khác.'
     else combos.set(combo, index)
@@ -104,9 +119,10 @@ export function formToRequest(form, { shopId, status = PRODUCT_STATUS.active }) 
   return {
     shopId,
     name: form.name.trim(),
-    description: form.description.trim() || null,
+    description: form.description.trim(),
     imageUrls: form.imageUrls,
     categoryId: form.categoryId,
+    brandId: form.brandId || null,
     status,
     currency: 'VND',
     variants: form.variants.map((variant) => ({

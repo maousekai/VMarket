@@ -5,6 +5,7 @@ import {
   findVariant,
   initialSelection,
   isOptionAvailable,
+  selectOption,
 } from './variant'
 
 const variants = [
@@ -39,6 +40,32 @@ describe('variant helpers', () => {
 
   it('starts from the first variant in stock', () => {
     expect(initialSelection(variants)).toEqual({ Màu: 'Đen', Size: 'L' })
+  })
+
+  it('lets buyers pick variants that use different attribute groups', () => {
+    const mixed = [
+      { id: 'red', attributes: { Màu: 'Đỏ' }, availableStock: 2 },
+      { id: 'm', attributes: { Size: 'M' }, availableStock: 4 },
+    ]
+    let selection = initialSelection(mixed)
+    expect(findVariant(mixed, selection).id).toBe('red')
+    expect(isOptionAvailable(mixed, selection, 'Size', 'M')).toBe(true)
+    selection = selectOption(mixed, selection, 'Size', 'M')
+    expect(selection).toEqual({ Size: 'M' })
+    expect(findVariant(mixed, selection).id).toBe('m')
+    selection = selectOption(mixed, selection, 'Màu', 'Đỏ')
+    expect(findVariant(mixed, selection).id).toBe('red')
+  })
+
+  it('keeps the combination when it exists and switches to an in-stock variant otherwise', () => {
+    expect(selectOption(variants, { Màu: 'Đen', Size: 'L' }, 'Size', 'M')).toEqual({
+      Màu: 'Đen',
+      Size: 'M',
+    })
+    expect(selectOption(variants, { Màu: 'Đen', Size: 'L' }, 'Màu', 'Trắng')).toEqual({
+      Màu: 'Trắng',
+      Size: 'M',
+    })
   })
 
   it('describes a variant', () => {

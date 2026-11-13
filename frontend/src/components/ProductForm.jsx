@@ -179,12 +179,13 @@ export default function ProductForm({ form, setForm, errors, categories, disable
           <FieldError id={`${ids}-category`} message={errors.categoryId} />
         </label>
         <label className="product-field">
-          <span>Mô tả</span>
+          <span>Mô tả *</span>
           <textarea
             rows={6}
             value={form.description}
             maxLength={PRODUCT_LIMITS.description}
             disabled={disabled}
+            aria-required="true"
             aria-invalid={Boolean(errors.description)}
             onChange={(event) => set({ description: event.target.value })}
           />

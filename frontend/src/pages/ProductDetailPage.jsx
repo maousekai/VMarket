@@ -12,7 +12,13 @@ import { getPublicShop } from '../services/api/shopApi'
 import { findPath } from '../utils/category'
 import { formatMoney } from '../utils/formatMoney'
 import { imageUrlOrEmpty } from '../utils/shop'
-import { attributeGroups, findVariant, initialSelection, isOptionAvailable } from '../utils/variant'
+import {
+  attributeGroups,
+  findVariant,
+  initialSelection,
+  isOptionAvailable,
+  selectOption,
+} from '../utils/variant'
 import '../components/home.css'
 import '../components/catalog.css'
 import '../components/productDetail.css'
@@ -118,7 +124,7 @@ export function PurchasePanel({ product, renderActions }) {
                   type="button"
                   aria-pressed={selection[group.name] === value}
                   className={available ? '' : 'is-unavailable'}
-                  onClick={() => setSelection({ ...selection, [group.name]: value })}
+                  onClick={() => setSelection(selectOption(variants, selection, group.name, value))}
                 >
                   {value}
                 </button>
