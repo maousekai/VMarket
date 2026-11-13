@@ -212,7 +212,7 @@ export default function PaymentPage() {
         <h1 id="payment-title">Thanh toán qua VNPay</h1>
         <p>Bạn sẽ được chuyển sang cổng VNPay để thanh toán bằng thẻ, QR hoặc ví.</p>
         <div className="payment-card__grid">
-          <div className="payment-qr">
+          <div className="payment-card__timer">
             {remaining != null && (
               <p className={`payment-countdown${urgent ? ' is-urgent' : ''}`} role="timer">
                 Liên kết hết hạn sau <strong>{formatCountdown(remaining)}</strong>

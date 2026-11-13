@@ -31,30 +31,10 @@
 .payment-card__hint {
   font-size: 13px;
 }
-.payment-qr {
+.payment-card__timer {
   display: grid;
   justify-items: center;
   gap: 10px;
-}
-.payment-qr__image,
-.payment-qr__placeholder {
-  width: 240px;
-  height: 240px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: white;
-}
-.payment-qr__placeholder {
-  background: var(--color-surface-muted);
-}
-.payment-qr__fallback {
-  width: 240px;
-  margin: 0;
-  padding: 24px 16px;
-  color: var(--color-muted);
-  text-align: center;
-  border: 1px dashed var(--color-border);
-  border-radius: 12px;
 }
 .payment-countdown {
   margin: 0;
