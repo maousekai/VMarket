@@ -24,7 +24,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -153,8 +158,11 @@ public class OrderService {
      */
     public List<OrderResponse> checkout(
             String userId, String bearerToken, String idempotencyKey, CheckoutRequest request) {
-        String baseKey =
-                (idempotencyKey != null && !idempotencyKey.isBlank()) ? idempotencyKey.trim() : null;
+        String checkoutKey =
+                checkoutKey(
+                        (idempotencyKey != null && !idempotencyKey.isBlank())
+                                ? idempotencyKey.trim()
+                                : null);
         AddressView address = userServiceClient.getAddress(bearerToken, request.addressId());
         CartView cart = cartServiceClient.getCart(userId);
         List<CartItemView> cartItems =
@@ -176,22 +184,27 @@ public class OrderService {
         for (CartItemView item : chosen) {
             byShop.computeIfAbsent(item.shopId(), ignored -> new ArrayList<>()).add(item);
         }
-        List<OrderResponse> orders = new ArrayList<>();
-        if (byShop.isEmpty() && baseKey != null) {
-            // Giỏ đã bị request song song cùng khoá xoá: trả lại các đơn đã tạo bằng khoá đó.
-            orders.addAll(
-                    orderRepository.findByUserIdAndIdempotencyKeyStartingWith(userId, baseKey + ":")
-                            .stream()
-                            .map(OrderResponse::from)
-                            .toList());
-        }
-        if (byShop.isEmpty() && orders.isEmpty()) {
+        // Đơn đã tạo bằng khoá này ở lần gửi trước (dòng giỏ của chúng đã bị xoá nên không còn
+        // trong byShop). Luôn trả lại cùng đơn mới để trang kết quả / hàng đợi thanh toán đủ đơn.
+        List<OrderResponse> previous =
+                checkoutKey == null
+                        ? List.of()
+                        : orderRepository
+                                .findByUserIdAndIdempotencyKeyStartingWith(userId, checkoutKey + ":")
+                                .stream()
+                                .sorted(Comparator.comparing(Order::getCreatedAt,
+                                        Comparator.nullsLast(Comparator.naturalOrder())))
+                                .map(OrderResponse::from)
+                                .toList();
+        if (byShop.isEmpty() && previous.isEmpty()) {
             throw ApiException.badRequest(
                     "CART_EMPTY", "Không có sản phẩm nào được chọn trong giỏ để đặt hàng");
         }
 
+        Map<String, OrderResponse> orders = new LinkedHashMap<>();
+        previous.forEach(order -> orders.put(order.id(), order));
         for (Map.Entry<String, List<CartItemView>> group : byShop.entrySet()) {
-            String key = shopKey(baseKey, group.getKey());
+            String key = shopKey(checkoutKey, group.getKey());
             Optional<Order> existing =
                     key == null ? Optional.empty() : orderRepository.findByUserIdAndIdempotencyKey(userId, key);
             OrderResponse response;
@@ -207,23 +220,41 @@ public class OrderService {
                 }
             }
             removeCheckoutItemsFromCart(userId, response.id(), group.getValue());
-            orders.add(response);
+            orders.put(response.id(), response);
         }
-        return orders;
+        return List.copyOf(orders.values());
     }
 
     private static String lineKey(String productId, String variantId) {
         return productId + "::" + Objects.toString(variantId, "");
     }
 
-    /** Khoá chống trùng của đơn thuộc {@code shopId}; vừa cột VARCHAR(64). */
-    static String shopKey(String baseKey, String shopId) {
-        if (baseKey == null) return null;
-        String suffix = ":" + shopId;
-        String prefix = baseKey.length() + suffix.length() > 64
-                ? baseKey.substring(0, 64 - suffix.length())
-                : baseKey;
-        return prefix + suffix;
+    /** Cột {@code idempotency_key} là VARCHAR(64); shopId là ULID 26 ký tự. */
+    private static final int KEY_COLUMN_LENGTH = 64;
+    private static final int SHOP_ID_LENGTH = 26;
+    public static final int MAX_RAW_CHECKOUT_KEY = KEY_COLUMN_LENGTH - 1 - SHOP_ID_LENGTH;
+
+    /**
+     * Định danh của một lần checkout, dùng chung cho tạo đơn và tra cứu khi gửi lại. Khoá đủ ngắn
+     * (UUID của web) giữ nguyên; khoá dài hơn được băm SHA-256 thay vì cắt bớt, để hai khoá khác
+     * nhau không bao giờ trùng tiền tố.
+     */
+    public static String checkoutKey(String idempotencyKey) {
+        if (idempotencyKey == null) return null;
+        if (idempotencyKey.length() <= MAX_RAW_CHECKOUT_KEY) return idempotencyKey;
+        try {
+            byte[] digest =
+                    MessageDigest.getInstance("SHA-256")
+                            .digest(idempotencyKey.getBytes(StandardCharsets.UTF_8));
+            return "#" + HexFormat.of().formatHex(digest).substring(0, MAX_RAW_CHECKOUT_KEY - 1);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 không khả dụng", ex);
+        }
+    }
+
+    /** Khoá chống trùng của đơn thuộc {@code shopId} trong lần checkout {@code checkoutKey}. */
+    static String shopKey(String checkoutKey, String shopId) {
+        return checkoutKey == null ? null : checkoutKey + ":" + shopId;
     }
 
     private OrderResponse recoverIdempotentOrderOrThrow(
