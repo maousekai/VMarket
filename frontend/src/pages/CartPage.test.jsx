@@ -212,6 +212,63 @@ describe('CartPage', () => {
     await waitFor(() => expect(screen.queryByText('Áo polo')).not.toBeInTheDocument())
   })
 
+  it('waits for a slow quantity update before validating the cart', async () => {
+    let finish
+    updateCartItemQuantity.mockImplementation(
+      () =>
+        new Promise((resolve) => (finish = () => resolve(cartOf({ ...polo, quantity: 3 }, mug)))),
+    )
+    validateCart.mockResolvedValue({ ok: true, issues: [] })
+    renderWithCart(<CartPage />)
+    const apparel = await screen.findByRole('region', { name: 'Danang Apparel' })
+    fireEvent.click(within(apparel).getByRole('checkbox', { name: 'Chọn Áo polo' }))
+    fireEvent.click(within(apparel).getByRole('button', { name: 'Tăng' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tiến hành đặt hàng (1)' }))
+    // flush() gui ngay PATCH dang hen gio va cho no, khong bo qua sau mot thoi gian.
+    await waitFor(() => expect(updateCartItemQuantity).toHaveBeenCalledWith('p1', 'v1', 3))
+    // Truoc day flush() chi cho toi da 4 giay roi van kiem tra gio voi so luong cu.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    vi.useRealTimers()
+    expect(validateCart).not.toHaveBeenCalled()
+    await act(async () => finish())
+    expect(await screen.findByText('Trang thanh toán')).toBeInTheDocument()
+    expect(validateCart).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks checkout when the pending quantity update fails', async () => {
+    updateCartItemQuantity.mockRejectedValue({
+      response: { status: 400, data: { error: { code: 'X', message: 'Không đổi được số lượng' } } },
+    })
+    renderWithCart(<CartPage />)
+    const apparel = await screen.findByRole('region', { name: 'Danang Apparel' })
+    fireEvent.click(within(apparel).getByRole('checkbox', { name: 'Chọn Áo polo' }))
+    fireEvent.click(within(apparel).getByRole('button', { name: 'Tăng' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Tiến hành đặt hàng (1)' }))
+    expect((await screen.findAllByText('Không đổi được số lượng')).length).toBeGreaterThan(0)
+    expect(validateCart).not.toHaveBeenCalled()
+    expect(screen.queryByText('Trang thanh toán')).not.toBeInTheDocument()
+  })
+
+  it('removes several lines one after another and ignores stale snapshots', async () => {
+    const calls = []
+    removeCartItem.mockImplementation(async (productId) => {
+      calls.push(productId)
+      // Response cua DELETE dau van con dong thu hai; response cuoi la gio rong.
+      return productId === 'p1' ? cartOf(mug) : cartOf()
+    })
+    renderWithCart(<CartPage />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Chọn tất cả' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Xoá đã chọn (2)' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Xoá' }))
+    await waitFor(() => expect(removeCartItem).toHaveBeenCalledTimes(2))
+    expect(calls).toEqual(['p1', 'p2'])
+    await waitFor(() => expect(screen.queryByText('Ly gốm')).not.toBeInTheDocument())
+    expect(screen.queryByText('Áo polo')).not.toBeInTheDocument()
+  })
+
   it('shows the empty state', async () => {
     getCart.mockResolvedValue({ groups: [], totalQuantity: 0, totalAmount: 0 })
     renderWithCart(<CartPage />)

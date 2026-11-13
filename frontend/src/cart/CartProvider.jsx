@@ -47,7 +47,9 @@ export function CartProvider({ children }) {
   useEffect(() => {
     generation.current += 1
     const pending = timers.current
-    pending.forEach((timer) => clearTimeout(timer.id))
+    pending.forEach((timer) => {
+      if (!timer.promise) clearTimeout(timer.id)
+    })
     pending.clear()
     confirmed.current = null
     if (!userId) {
@@ -69,14 +71,18 @@ export function CartProvider({ children }) {
 
   const addItem = useCallback(async (item) => apply(await addCartItem(item)), [apply])
 
+  /** Huy PATCH so luong chua gui cua dong `key` (dong sap bi xoa). */
+  const dropPending = useCallback((key) => {
+    const pending = timers.current.get(key)
+    if (!pending) return
+    if (!pending.promise) clearTimeout(pending.id)
+    timers.current.delete(key)
+  }, [])
+
   const removeItem = useCallback(
     async (item) => {
       const key = lineKey(item)
-      const timer = timers.current.get(key)
-      if (timer) {
-        clearTimeout(timer.id)
-        timers.current.delete(key)
-      }
+      dropPending(key)
       setState((current) => ({ ...current, cart: withQuantity(current.cart, key, 0) }))
       try {
         return apply(await removeCartItem(item.productId, item.variantId))
@@ -85,7 +91,41 @@ export function CartProvider({ children }) {
         throw error
       }
     },
-    [apply],
+    [apply, dropPending],
+  )
+
+  /**
+   * Xoa nhieu dong: an ngay tren giao dien, gui DELETE lan luot va chi ap dung gio cua response
+   * cuoi cung, de response cu ve sau khong lam hien lai dong vua bi xoa. Loi thi tai lai gio
+   * tu server roi bao loi dau tien.
+   */
+  const removeItems = useCallback(
+    async (items) => {
+      const keys = items.map(lineKey)
+      keys.forEach(dropPending)
+      setState((current) => ({
+        ...current,
+        cart: keys.reduce((cart, key) => withQuantity(cart, key, 0), current.cart),
+      }))
+      let latest = null
+      let failure = null
+      for (const item of items) {
+        try {
+          latest = await removeCartItem(item.productId, item.variantId)
+        } catch (error) {
+          failure ??= error
+        }
+      }
+      if (failure) {
+        await refresh().catch(() =>
+          setState((current) => ({ ...current, cart: confirmed.current })),
+        )
+        throw failure
+      }
+      if (latest) apply(latest)
+      return latest
+    },
+    [apply, dropPending, refresh],
   )
 
   /**
@@ -96,35 +136,57 @@ export function CartProvider({ children }) {
     const key = lineKey(item)
     setState((current) => ({ ...current, cart: withQuantity(current.cart, key, quantity) }))
     const previous = timers.current.get(key)
-    if (previous) clearTimeout(previous.id)
+    if (previous && !previous.promise) clearTimeout(previous.id)
     const ticket = generation.current
-    const id = setTimeout(async () => {
+    const entry = {}
+    entry.run = async () => {
+      // PATCH cua cung dong chay lan luot: PATCH cu toi server sau khong de len so luong moi.
+      await previous?.promise?.catch(() => {})
       try {
         const cart = await updateCartItemQuantity(item.productId, item.variantId, quantity)
-        if (timers.current.get(key)?.id !== id || ticket !== generation.current) return
+        if (timers.current.get(key) !== entry || ticket !== generation.current) return
         timers.current.delete(key)
         confirmed.current = cart
         if (timers.current.size === 0) setState({ status: 'ready', cart, error: null })
       } catch (error) {
-        if (timers.current.get(key)?.id !== id) return
+        if (timers.current.get(key) !== entry) return
         timers.current.delete(key)
         setState((current) => ({ ...current, cart: confirmed.current }))
         onError?.(getApiError(error))
+        throw error
       }
-    }, QUANTITY_DEBOUNCE_MS)
-    timers.current.set(key, { id })
+    }
+    entry.start = () => {
+      if (!entry.promise) {
+        entry.promise = entry.run()
+        entry.promise.catch(() => {})
+      }
+      return entry.promise
+    }
+    entry.id = setTimeout(entry.start, QUANTITY_DEBOUNCE_MS)
+    timers.current.set(key, entry)
   }, [])
 
-  /** Cho cac PATCH dang hen gio chay xong (vd truoc khi kiem tra gio de thanh toan). */
+  /**
+   * Gui ngay cac PATCH dang hen gio va cho tat ca xong (truoc khi kiem tra gio de thanh toan).
+   * Neu mot PATCH loi hoac het thoi gian cho thi nem loi de chan buoc thanh toan.
+   */
   const flush = useCallback(async () => {
-    for (let attempt = 0; attempt < 20 && timers.current.size > 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, QUANTITY_DEBOUNCE_MS / 2))
-    }
+    const pending = [...timers.current.values()]
+    pending.forEach((entry) => {
+      if (!entry.promise) clearTimeout(entry.id)
+    })
+    const results = await Promise.allSettled(pending.map((entry) => entry.start()))
+    const failed = results.find((result) => result.status === 'rejected')
+    if (failed) throw failed.reason
   }, [])
 
   useEffect(() => {
     const pending = timers.current
-    return () => pending.forEach((timer) => clearTimeout(timer.id))
+    return () =>
+      pending.forEach((timer) => {
+        if (!timer.promise) clearTimeout(timer.id)
+      })
   }, [])
 
   const value = useMemo(
@@ -135,10 +197,11 @@ export function CartProvider({ children }) {
       refresh,
       addItem,
       removeItem,
+      removeItems,
       setQuantity,
       flush,
     }),
-    [state, userId, refresh, addItem, removeItem, setQuantity, flush],
+    [state, userId, refresh, addItem, removeItem, removeItems, setQuantity, flush],
   )
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>
 }

@@ -212,9 +212,11 @@ export default function CartPage() {
   async function removeSelected() {
     setConfirmRemove(false)
     setPageError('')
-    const results = await Promise.allSettled(selectedItems.map((item) => cart.removeItem(item)))
-    const failed = results.find((result) => result.status === 'rejected')
-    if (failed) setPageError(getApiError(failed.reason).message)
+    try {
+      await cart.removeItems(selectedItems)
+    } catch (failure) {
+      setPageError(getApiError(failure).message)
+    }
     setSelected(new Set())
   }
 
