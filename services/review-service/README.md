@@ -28,7 +28,7 @@ Swagger UI: `http://localhost:8089/swagger-ui.html`.
 | GET | `/api/reviews/products/{productId}/summary` | Công khai | FR-REV-02: điểm TB, số lượt, phân bố sao |
 | GET | `/api/reviews/shops/{shopId}` | Công khai | Đánh giá của gian hàng |
 | GET | `/api/reviews/shops/{shopId}/summary` | Công khai | Điểm tổng hợp của gian hàng |
-| GET | `/api/reviews/seller?status=&rating=` | SELLER | Đánh giá thuộc gian hàng của tôi |
+| GET | `/api/reviews/seller?status=&rating=&replied=` | SELLER | Đánh giá thuộc gian hàng của tôi (`replied=false`: chưa phản hồi) |
 | PUT | `/api/reviews/seller/{reviewId}/reply` | SELLER | FR-REV-03: tạo/sửa phản hồi |
 | DELETE | `/api/reviews/seller/{reviewId}/reply` | SELLER | Xoá phản hồi |
 | GET | `/api/reviews/admin?status=&productId=&shopId=` | ADMIN | Tìm đánh giá để kiểm duyệt |

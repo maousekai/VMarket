@@ -40,6 +40,22 @@ public interface ReviewRepository extends JpaRepository<Review, String> {
 	Page<Review> findByShop(@Param("shopId") String shopId, @Param("status") ReviewStatus status,
 			@Param("rating") Integer rating, Pageable pageable);
 
+	/**
+	 * Danh sách cho seller: như {@link #findByShop} và thêm lọc đã/chưa phản hồi ({@code replied} null = tất cả).
+	 */
+	@EntityGraph(attributePaths = "reply")
+	@Query("""
+			select r from Review r
+			where r.shopId = :shopId
+			  and (:status is null or r.status = :status)
+			  and (:rating is null or r.rating = :rating)
+			  and (:replied is null
+			       or (:replied = true and exists (select 1 from SellerReply sr where sr.review = r))
+			       or (:replied = false and not exists (select 1 from SellerReply sr where sr.review = r)))
+			""")
+	Page<Review> findForSeller(@Param("shopId") String shopId, @Param("status") ReviewStatus status,
+			@Param("rating") Integer rating, @Param("replied") Boolean replied, Pageable pageable);
+
 	@EntityGraph(attributePaths = "reply")
 	@Query("""
 			select r from Review r
