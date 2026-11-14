@@ -30,6 +30,9 @@ const paths = {
       <path d="M16 10a4 4 0 0 1-8 0" />
     </>
   ),
+  reviews: (
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  ),
   shippers: <polygon points="3 11 22 2 13 21 11 13 3 11" />,
   disputes: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
   users: (

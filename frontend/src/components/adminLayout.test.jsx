@@ -78,6 +78,7 @@ describe('Admin sidebar', () => {
     expect(links.map((link) => link.textContent)).toEqual([
       'Tổng quan',
       'Kiểm duyệt sản phẩm',
+      'Kiểm duyệt đánh giá',
       'Giám sát đơn hàng',
       'Phê duyệt gian hàng',
       'Điều phối Shipper',
@@ -90,6 +91,7 @@ describe('Admin sidebar', () => {
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
       '/admin',
       '/admin/products',
+      '/admin/reviews',
       '/admin/orders',
       '/admin/shops',
       '/admin/shippers',
@@ -144,7 +146,7 @@ describe('Admin sidebar', () => {
     view('/admin/khong-co')
     expect(screen.getByRole('heading', { name: 'Không tìm thấy trang' })).toBeTruthy()
     expect(screen.getAllByRole('main')).toHaveLength(1)
-    expect(nav().getAllByRole('link')).toHaveLength(10)
+    expect(nav().getAllByRole('link')).toHaveLength(11)
     fireEvent.click(screen.getByRole('link', { name: 'Về trang tổng quan' }))
     expect(screen.getByRole('heading', { name: 'Tổng quan nền tảng' })).toBeTruthy()
   })

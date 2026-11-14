@@ -40,6 +40,7 @@ import SellerDashboardPage from './pages/SellerDashboardPage'
 import SellerProductsPage from './pages/SellerProductsPage'
 import SellerProductFormPage from './pages/SellerProductFormPage'
 import SellerOrdersPage from './pages/SellerOrdersPage'
+import SellerReviewsPage from './pages/SellerReviewsPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
 import RoleAreaPage from './pages/RoleAreaPage'
@@ -98,6 +99,7 @@ export default function App() {
               <Route path="products/:productId/edit" element={<SellerProductFormPage />} />
               <Route path="orders" element={<SellerOrdersPage />} />
               <Route path="orders/:orderId" element={<Navigate to="/seller/orders" replace />} />
+              <Route path="reviews" element={<SellerReviewsPage />} />
               <Route path="payment" element={<SellerPaymentInfoPage />} />
               <Route path="settings" element={<SellerSettingsPage />} />
             </Route>
