@@ -326,8 +326,9 @@
 .seller-reviews__stat {
   display: grid;
   gap: 6px;
+  padding: 16px 18px;
 }
-.seller-reviews__stat span {
+.seller-reviews__stat > span:not(.review-stars) {
   color: var(--color-subtle);
   font-size: 13px;
   font-weight: 600;
@@ -342,6 +343,10 @@
 .seller-review-card {
   display: grid;
   gap: 10px;
+  padding: 16px 18px;
+}
+.seller-review-card .review-item {
+  padding: 4px 0 0;
 }
 .seller-review-card__product {
   display: flex;

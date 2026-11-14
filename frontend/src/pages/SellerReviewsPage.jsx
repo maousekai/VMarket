@@ -212,6 +212,7 @@ export default function SellerReviewsPage() {
   const products = useProductLookup(result?.items.map((review) => review.productId) || [])
 
   function update(changes) {
+    setNotice('')
     const next = new URLSearchParams(params)
     Object.entries(changes).forEach(([key, value]) =>
       value === null || value === undefined ? next.delete(key) : next.set(key, value),
