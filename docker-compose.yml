@@ -660,6 +660,50 @@ services:
       retries: 10
       start_period: 40s
 
+  # Review Service (PBL6-22/PBL6-35) - danh gia san pham, diem tong hop, phan hoi
+  # seller, kiem duyet. Postgres vmarket_review (Flyway) + RabbitMQ (ReviewCreated).
+  review-service:
+    build:
+      context: .
+      dockerfile: services/review-service/Dockerfile
+    container_name: VMarket-review-service
+    networks:
+      - vmarket-network
+    # Cung muc voi order/shop/user (Spring Boot + JPA + MinIO): 384m chi con ~70MB ngoai heap 75%.
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_review
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # Kiem tra don (GET /api/orders/{id}) va gian hang cua seller bang token nguoi goi.
+      ORDER_SERVICE_URL: http://order-service:8086
+      SHOP_SERVICE_URL: http://shop-service:8083
+      # MinIO - anh danh gia (reviews/{buyerId}/...). URL anh chi duoc tro toi
+      # REVIEW_IMAGE_ORIGINS, nen mac dinh trung MINIO_PUBLIC_ORIGIN.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      REVIEW_IMAGE_ORIGINS: ${REVIEW_IMAGE_ORIGINS:-http://localhost:9000}
+    ports:
+      - "${REVIEW_SERVICE_PORT:-8089}:8089"
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8089/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   # Chatbot Service (PBL6-18) - FastAPI, chi can MongoDB. Cau hinh LLM/embedding
   # (tuy chon) doc tu services/chatbot-service/.env neu co; cac bien ket noi ben
   # duoi luon ghi de file do. Chua co LLM thi chatbot tra loi o che do trich dan.
@@ -726,6 +770,7 @@ services:
       ORDER_SERVICE_URL: http://order-service:8086
       PAYMENT_SERVICE_URL: http://payment-service:8087
       DELIVERY_SERVICE_URL: http://delivery-service:8088
+      REVIEW_SERVICE_URL: http://review-service:8089
       NOTIFICATION_SERVICE_URL: http://notification-service:8090
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
