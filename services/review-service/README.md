@@ -24,6 +24,8 @@ Swagger UI: `http://localhost:8089/swagger-ui.html`.
 |---|---|---|---|
 | POST | `/api/reviews` | BUYER | FR-REV-01: viết đánh giá 1–5 sao, tối đa 5 ảnh |
 | GET | `/api/reviews/me?orderId=&page=&size=` | BUYER | Đánh giá của tôi (lọc theo đơn) |
+| POST | `/api/reviews/media` (multipart `file`) | BUYER | Tải ảnh đánh giá (JPEG/PNG/WebP ≤ 5 MB) → `{url}` để gửi kèm `imageUrls` |
+| DELETE | `/api/reviews/media?url=` | BUYER | Xoá ảnh đã tải nhưng chưa gửi kèm đánh giá (`409 MEDIA_IN_USE` nếu đã dùng) |
 | GET | `/api/reviews/products/{productId}?rating=&page=&size=` | Công khai | Đánh giá của sản phẩm |
 | GET | `/api/reviews/products/{productId}/summary` | Công khai | FR-REV-02: điểm TB, số lượt, phân bố sao |
 | GET | `/api/reviews/shops/{shopId}` | Công khai | Đánh giá của gian hàng |

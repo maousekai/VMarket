@@ -22,7 +22,10 @@ public enum ImageKind {
 	PRODUCT("ảnh sản phẩm", 5 * 1024 * 1024, 1200, 1200, "jpg"),
 
 	/** Ảnh minh chứng trả hàng: vừa trong 1600×1600, JPEG, tối đa 5 MB. */
-	EVIDENCE("ảnh minh chứng", 5 * 1024 * 1024, 1600, 1600, "jpg");
+	EVIDENCE("ảnh minh chứng", 5 * 1024 * 1024, 1600, 1600, "jpg"),
+
+	/** Ảnh đánh giá sản phẩm của người mua: vừa trong 1600×1600, JPEG, tối đa 5 MB. */
+	REVIEW("ảnh đánh giá", 5 * 1024 * 1024, 1600, 1600, "jpg");
 
 	private static final long MAX_PIXELS = 25_000_000L;
 

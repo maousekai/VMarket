@@ -23,5 +23,12 @@ app:
     outbox-enabled: false
     outbox-monitor-enabled: false
     image-origins: https://cdn.vmarket.vn
+  media:
+    endpoint: http://minio.test:9000
+    public-origin: https://cdn.vmarket.vn
+    bucket: vmarket-media-test
+    access-key: test-access-key
+    secret-key: test-secret-key
+    region: us-east-1
   cors:
     allowed-origins: http://localhost:5173

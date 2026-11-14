@@ -3,6 +3,11 @@ spring:
     name: review-service
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  servlet:
+    multipart:
+      # Anh danh gia toi da 5 MB (ImageKind.REVIEW); du phong overhead multipart.
+      max-file-size: 6MB
+      max-request-size: 7MB
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:vmarket_review}
     username: ${DB_USERNAME:vmarket}
@@ -51,3 +56,13 @@ app:
     # Origin kho anh (MinIO/CDN) ma URL anh danh gia duoc phep tro toi, phan tach bang dau phay.
     # Khong co mac dinh o day: dev lay o application-dev.yml, prod bat buoc khai (https).
     image-origins: ${REVIEW_IMAGE_ORIGINS}
+  # Kho anh MinIO (services/shared-media) cho anh danh gia (PBL6-35). public-origin PHAI nam trong
+  # REVIEW_IMAGE_ORIGINS, neu khong URL vua upload se bi tu choi khi gui danh gia.
+  # Thieu credential la fail luc khoi dong; gia tri local nam o application-dev.yml.
+  media:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-origin: ${MINIO_PUBLIC_ORIGIN:http://localhost:9000}
+    bucket: ${MINIO_BUCKET:vmarket-media}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
+    region: ${MINIO_REGION:us-east-1}

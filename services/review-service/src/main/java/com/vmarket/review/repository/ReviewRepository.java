@@ -21,6 +21,13 @@ public interface ReviewRepository extends JpaRepository<Review, String> {
 
 	boolean existsByOrderIdAndProductId(String orderId, String productId);
 
+	/** Ảnh đã gắn vào một đánh giá của người mua này (không được xoá khỏi kho nữa). */
+	@Query("""
+			select count(i) > 0 from ReviewImage i
+			where i.url = :url and i.review.buyerId = :buyerId
+			""")
+	boolean isImageUsed(@Param("buyerId") String buyerId, @Param("url") String url);
+
 	@EntityGraph(attributePaths = "reply")
 	@Query("""
 			select r from Review r

@@ -9,3 +9,7 @@ app:
   review:
     # Trung MINIO_PUBLIC_ORIGIN cua docker compose
     image-origins: ${REVIEW_IMAGE_ORIGINS:http://localhost:9000}
+  # MinIO chay trong docker compose voi credential local trong .env.example.
+  media:
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
