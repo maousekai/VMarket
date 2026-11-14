@@ -25,6 +25,7 @@ const PAGE_SIZE = 20
 const TABS = [
   [REVIEW_STATUS.visible, 'Đang hiển thị'],
   [REVIEW_STATUS.hidden, 'Đã ẩn'],
+  [REVIEW_STATUS.returned, 'Đơn đã trả hàng'],
   ['', 'Tất cả'],
 ]
 
@@ -217,6 +218,7 @@ export default function AdminReviewsPage() {
                 const product = products[review.productId]?.value
                 const shop = shops[review.shopId]?.value
                 const hidden = review.status === REVIEW_STATUS.hidden
+                const returned = review.status === REVIEW_STATUS.returned
                 return (
                   <tr key={review.id}>
                     <td>
@@ -237,9 +239,11 @@ export default function AdminReviewsPage() {
                     </td>
                     <td>{formatDateTime(review.createdAt)}</td>
                     <td>
-                      {hidden ? (
+                      {returned || hidden ? (
                         <>
-                          <span className="review-badge review-badge--hidden">Đã ẩn</span>
+                          <span className="review-badge review-badge--hidden">
+                            {returned ? 'Đơn đã trả hàng' : 'Đã ẩn'}
+                          </span>
                           <small className="seller-products__muted">
                             {review.moderationReason}
                           </small>
@@ -249,15 +253,18 @@ export default function AdminReviewsPage() {
                       )}
                     </td>
                     <td>
-                      <div className="admin-catalog__actions">
-                        <button
-                          type="button"
-                          className={`link-button${hidden ? '' : ' admin-catalog__danger'}`}
-                          onClick={() => setSelected(review)}
-                        >
-                          {hidden ? 'Khôi phục' : 'Ẩn'}
-                        </button>
-                      </div>
+                      {/* Danh gia cua don da tra hang / hoan tien khong an / khoi phuc duoc. */}
+                      {!returned && (
+                        <div className="admin-catalog__actions">
+                          <button
+                            type="button"
+                            className={`link-button${hidden ? '' : ' admin-catalog__danger'}`}
+                            onClick={() => setSelected(review)}
+                          >
+                            {hidden ? 'Khôi phục' : 'Ẩn'}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )

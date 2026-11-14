@@ -133,6 +133,49 @@ describe('SellerReviewsPage', () => {
   })
 })
 
+describe('Reviews of returned orders', () => {
+  it('seller sees the returned badge and cannot reply', async () => {
+    listSellerReviews.mockResolvedValue(
+      page([
+        review({
+          status: 'RETURNED',
+          moderationReason: 'Đơn hàng đã được trả hàng / hoàn tiền',
+        }),
+      ]),
+    )
+    renderSeller()
+    const card = (await screen.findByText('Vải hơi mỏng')).closest('article.seller-review-card')
+    expect(within(card).getByText('Đơn đã trả hàng')).toBeInTheDocument()
+    expect(within(card).getByText(/Đơn hàng đã được trả hàng/)).toBeInTheDocument()
+    expect(within(card).queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('admin can filter returned reviews but not hide or restore them', async () => {
+    searchReviews.mockResolvedValue(
+      page([
+        review({ status: 'RETURNED', moderationReason: 'Đơn hàng đã được trả hàng / hoàn tiền' }),
+      ]),
+    )
+    render(
+      <MemoryRouter>
+        <AdminReviewsPage />
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Đơn đã trả hàng' }))
+    await waitFor(() =>
+      expect(searchReviews).toHaveBeenLastCalledWith({
+        status: 'RETURNED',
+        productId: '',
+        page: 0,
+        size: 20,
+      }),
+    )
+    expect(await screen.findByText(/Đơn hàng đã được trả hàng/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ẩn' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Khôi phục' })).not.toBeInTheDocument()
+  })
+})
+
 describe('AdminReviewsPage', () => {
   const renderAdmin = () =>
     render(

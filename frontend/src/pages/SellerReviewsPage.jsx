@@ -105,15 +105,19 @@ function ReplyForm({ review, onSaved, onCancel }) {
 
 function SellerReviewCard({ review, product, onChanged, onDeleteReply }) {
   const [editing, setEditing] = useState(false)
-  const hidden = review.status === REVIEW_STATUS.hidden
+  // Bi admin an hoac don da tra hang / hoan tien: khong hien cong khai, khong phan hoi duoc.
+  const hidden = review.status !== REVIEW_STATUS.visible
   const image = imageUrlOrEmpty(product?.imageUrls?.[0])
-  const badge = hidden ? (
-    <span className="review-badge review-badge--hidden">Đã bị ẩn</span>
-  ) : review.reply ? (
-    <span className="review-badge review-badge--done">Đã phản hồi</span>
-  ) : (
-    <span className="review-badge review-badge--pending">Chưa phản hồi</span>
-  )
+  const badge =
+    review.status === REVIEW_STATUS.returned ? (
+      <span className="review-badge review-badge--hidden">Đơn đã trả hàng</span>
+    ) : hidden ? (
+      <span className="review-badge review-badge--hidden">Đã bị ẩn</span>
+    ) : review.reply ? (
+      <span className="review-badge review-badge--done">Đã phản hồi</span>
+    ) : (
+      <span className="review-badge review-badge--pending">Chưa phản hồi</span>
+    )
 
   return (
     <article className="account-card seller-review-card">

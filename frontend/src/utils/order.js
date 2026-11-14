@@ -53,8 +53,14 @@ export const canCancelOrder = (order) => ['PENDING', 'WAITING_PAYMENT'].includes
 
 export const canCompleteOrder = (order) => order?.status === 'DELIVERED'
 
-/** Review Service nhan danh gia cho don da giao hoac da hoan tat (REVIEWABLE_STATUSES). */
-export const canReviewOrder = (order) => ['DELIVERED', 'COMPLETED'].includes(order?.status)
+/**
+ * Danh gia tu khi nhan hang (DELIVERED / COMPLETED) toi truoc khi tra hang: yeu cau tra hang da chot
+ * (RESOLVED = da thu hoi, kich hoat hoan tien) thi khong danh gia duoc nua (PBL6-35).
+ */
+export const isOrderReturned = (returns = []) => returns.some((item) => item.status === 'RESOLVED')
+
+export const canReviewOrder = (order, returns = []) =>
+  ['DELIVERED', 'COMPLETED'].includes(order?.status) && !isOrderReturned(returns)
 
 /** Han tra hang (deliveredAt + 7 ngay) hoac null khi chua biet thoi diem giao. */
 export function returnDeadline(order) {

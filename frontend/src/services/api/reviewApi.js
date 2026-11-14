@@ -17,7 +17,12 @@ export const REVIEW_LIMITS = Object.freeze({
   maxPageSize: 50,
 })
 
-export const REVIEW_STATUS = Object.freeze({ visible: 'VISIBLE', hidden: 'HIDDEN' })
+// RETURNED: don da tra hang / hoan tien — danh gia khong con hien thi (PBL6-35).
+export const REVIEW_STATUS = Object.freeze({
+  visible: 'VISIBLE',
+  hidden: 'HIDDEN',
+  returned: 'RETURNED',
+})
 
 const pageParams = ({ rating, page = 0, size = 10 } = {}) => {
   const params = { page, size }

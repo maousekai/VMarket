@@ -336,6 +336,46 @@ describe('OrderDetailPage', () => {
     expect(listMyReviews).toHaveBeenCalledWith({ orderId: delivered.id })
   })
 
+  it('stops reviews once the return is resolved and explains hidden reviews', async () => {
+    getOrder.mockResolvedValue({ ...delivered, status: 'COMPLETED' })
+    listOrderReturns.mockResolvedValue([
+      {
+        id: 'ret1',
+        status: 'RESOLVED',
+        reason: 'Hàng lỗi',
+        evidenceUrls: [],
+        createdAt: '2026-11-03T00:00:00Z',
+      },
+    ])
+    listMyReviews.mockResolvedValue({
+      items: [{ id: 'r1', productId: 'p1', rating: 5, status: 'RETURNED' }],
+      page: 0,
+      size: 50,
+      totalElements: 1,
+      totalPages: 1,
+    })
+    renderAt(`/profile/orders/${delivered.id}`)
+    expect(
+      await screen.findByText('Đánh giá không còn hiển thị vì đơn đã trả hàng / hoàn tiền'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Đánh giá' })).not.toBeInTheDocument()
+  })
+
+  it('still offers reviews while a return is only requested', async () => {
+    getOrder.mockResolvedValue(delivered)
+    listOrderReturns.mockResolvedValue([
+      {
+        id: 'ret1',
+        status: 'PENDING',
+        reason: 'Hàng lỗi',
+        evidenceUrls: [],
+        createdAt: '2026-11-03T00:00:00Z',
+      },
+    ])
+    renderAt(`/profile/orders/${delivered.id}`)
+    expect(await screen.findAllByRole('button', { name: 'Đánh giá' })).toHaveLength(2)
+  })
+
   it('does not offer reviews for an order that is not delivered yet', async () => {
     getOrder.mockResolvedValue(pending)
     renderAt(`/profile/orders/${pending.id}`)

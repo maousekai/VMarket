@@ -12,7 +12,7 @@ import ReturnRequestDialog from '../components/ReturnRequestDialog'
 import ReviewDialog from '../components/ReviewDialog'
 import { StarRow } from '../components/ReviewParts'
 import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
-import { listMyReviews } from '../services/api/reviewApi'
+import { listMyReviews, REVIEW_STATUS } from '../services/api/reviewApi'
 import { getApiError } from '../services/api/apiClient'
 import { DELIVERY_STATUS_LABELS, getDelivery } from '../services/api/deliveryApi'
 import {
@@ -195,12 +195,14 @@ export default function OrderDetailPage() {
   const order = state.order
   const shops = useShopLookup(order?.items.map((item) => item.shopId) || [])
   const products = useProductLookup(order?.items.map((item) => item.productId) || [])
-  const reviewable = canReviewOrder(order)
+  // Da nhan hang: doc danh gia cua toi; con viet duoc hay khong con tuy don da tra hang chua.
+  const received = ['DELIVERED', 'COMPLETED'].includes(order?.status)
+  const reviewable = canReviewOrder(order, state.returns)
   // productId -> danh gia cua toi trong don nay (moi san pham trong mot don chi danh gia mot lan).
   const [reviews, setReviews] = useState({ orderId: null, byProduct: {} })
 
   useEffect(() => {
-    if (!reviewable) return undefined
+    if (!received) return undefined
     let current = true
     listMyReviews({ orderId })
       .then((page) => {
@@ -212,16 +214,21 @@ export default function OrderDetailPage() {
     return () => {
       current = false
     }
-  }, [orderId, reviewable])
+  }, [orderId, received])
 
   const myReviews = reviews.orderId === orderId ? reviews.byProduct : null
 
   function renderReview(item) {
-    if (!reviewable || !myReviews) return null
+    if (!received || !myReviews) return null
     const review = myReviews[item.productId]
+    if (!review && !reviewable) return null
     return (
       <span className="order-item__review">
-        {review ? (
+        {review?.status === REVIEW_STATUS.returned ? (
+          <span className="order-item__reviewed">
+            Đánh giá không còn hiển thị vì đơn đã trả hàng / hoàn tiền
+          </span>
+        ) : review ? (
           <span className="order-item__reviewed">
             Đã đánh giá <StarRow value={review.rating} size={12} />
           </span>
