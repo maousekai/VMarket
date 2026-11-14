@@ -239,10 +239,17 @@
   box-shadow: 0 6px 16px rgb(4 66 127 / 10%);
 }
 .product-card__media {
+  position: relative;
+  flex: none;
   aspect-ratio: 1;
+  overflow: hidden;
   background: var(--color-surface-muted);
 }
-.product-card__media img {
+/* Absolute so portrait photos cannot stretch the square frame (min-height: auto in flex). */
+.product-card__media img,
+.product-card__media .product-card__placeholder {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;

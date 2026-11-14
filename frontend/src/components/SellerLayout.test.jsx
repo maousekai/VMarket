@@ -4,9 +4,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthContext } from '../auth/useAuth'
 import { getMyShop } from '../services/api/shopApi'
+import { listSellerOrders, listSellerReturns } from '../services/api/orderApi'
+import { refreshSellerAlerts } from '../hooks/useSellerAlerts'
 import SellerLayout from './SellerLayout'
 
 vi.mock('../services/api/shopApi', () => ({ getMyShop: vi.fn() }))
+vi.mock('../services/api/orderApi', () => ({
+  listSellerOrders: vi.fn(),
+  listSellerReturns: vi.fn(),
+}))
 
 const session = {
   userId: 'seller-1',
@@ -44,6 +50,8 @@ function view(value = auth()) {
 beforeEach(() => {
   logout = vi.fn().mockResolvedValue(undefined)
   getMyShop.mockResolvedValue({ id: 'shop-1', status: 'ACTIVE' })
+  listSellerOrders.mockResolvedValue({ totalElements: 0 })
+  listSellerReturns.mockResolvedValue({ totalElements: 0 })
 })
 afterEach(cleanup)
 
@@ -75,5 +83,31 @@ describe('Seller account menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Đăng xuất' }))
     await waitFor(() => expect(logout).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('trang đăng nhập')).toBeTruthy()
+  })
+})
+
+describe('Seller alerts', () => {
+  it('shows red badges for orders and returns waiting for the seller', async () => {
+    listSellerOrders.mockImplementation(async ({ status }) => ({
+      totalElements: status === 'PENDING' ? 2 : 1,
+    }))
+    listSellerReturns.mockResolvedValue({ totalElements: 1 })
+    view()
+    expect(await screen.findByLabelText('3 đơn cần xử lý')).toHaveTextContent('3')
+    expect(screen.getByLabelText('1 yêu cầu trả hàng chờ phản hồi')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Trả hàng/ })).toHaveAttribute(
+      'href',
+      '/seller/orders?view=returns',
+    )
+  })
+
+  it('hides the badge once nothing is waiting', async () => {
+    listSellerReturns.mockResolvedValue({ totalElements: 1 })
+    view()
+    await screen.findByLabelText('1 yêu cầu trả hàng chờ phản hồi')
+    expect(screen.queryByLabelText(/đơn cần xử lý/)).toBeNull()
+    listSellerReturns.mockResolvedValue({ totalElements: 0 })
+    refreshSellerAlerts()
+    await waitFor(() => expect(screen.queryByLabelText(/chờ phản hồi/)).toBeNull())
   })
 })

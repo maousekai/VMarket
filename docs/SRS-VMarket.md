@@ -20,7 +20,7 @@ Nhóm thực hiện: \[Tên nhóm – Danh sách thành viên\]
 
 Lớp: \[Lớp học phần\]
 
-*Đà Nẵng, 08/2026 – Phiên bản 1.1*
+*Đà Nẵng, 08/2026 – Phiên bản 1.1 (cập nhật cổng thanh toán: PayOS đổi sang VNPay Sandbox)*
 
 **MỤC LỤC**
 
@@ -44,7 +44,7 @@ Hệ thống gồm ba sản phẩm bàn giao:
 
 - **Ứng dụng di động (Android/iOS):** trải nghiệm mua sắm cho người mua; kèm phân hệ dành cho Người giao hàng (Shipper) để nhận đơn, cập nhật trạng thái và chia sẻ vị trí giao hàng.
 
-**Trong phạm vi (in-scope):** đăng ký/đăng nhập, quản lý gian hàng, danh mục – sản phẩm – biến thể, giỏ hàng, đặt hàng, thanh toán trực tuyến qua PayOS và COD, giao hàng nội bộ với vai trò Shipper và theo dõi vị trí đơn hàng thời gian thực, trả hàng – hoàn tiền, đánh giá sản phẩm, thông báo, tìm kiếm AI theo từ khóa và theo hình ảnh, gợi ý AI, chatbot AI, quản trị – kiểm duyệt nền tảng, thống kê.
+**Trong phạm vi (in-scope):** đăng ký/đăng nhập, quản lý gian hàng, danh mục – sản phẩm – biến thể, giỏ hàng, đặt hàng, thanh toán trực tuyến qua VNPay và COD, giao hàng nội bộ với vai trò Shipper và theo dõi vị trí đơn hàng thời gian thực, trả hàng – hoàn tiền, đánh giá sản phẩm, thông báo, tìm kiếm AI theo từ khóa và theo hình ảnh, gợi ý AI, chatbot AI, quản trị – kiểm duyệt nền tảng, thống kê.
 
 **Ngoài phạm vi (out-of-scope):** tích hợp hãng vận chuyển bên thứ ba (giao hàng do đội ngũ Shipper nội bộ của nền tảng đảm nhiệm), đa tiền tệ/thuế quốc tế, ví điện tử nội bộ, phiên bản native riêng cho từng hệ điều hành (dùng một mã nguồn đa nền tảng).
 
@@ -58,7 +58,7 @@ Hệ thống gồm ba sản phẩm bàn giao:
 | Event Bus                                | Kênh truyền sự kiện bất đồng bộ giữa các service (sử dụng RabbitMQ).                                                                        |
 | JWT                                      | JSON Web Token – chuẩn token dùng để xác thực và truyền thông tin phiên đăng nhập.                                                          |
 | RBAC                                     | Role-Based Access Control – phân quyền truy cập theo vai trò người dùng.                                                                    |
-| PayOS                                    | Cổng thanh toán trực tuyến tại Việt Nam, cung cấp payment link, mã QR VietQR và webhook xác nhận giao dịch.                                 |
+| VNPay                                    | Cổng thanh toán trực tuyến tại Việt Nam; người mua được chuyển hướng sang trang VNPay, kết quả giao dịch gửi về qua IPN và return URL.      |
 | COD                                      | Cash On Delivery – thanh toán bằng tiền mặt khi nhận hàng.                                                                                  |
 | RAG                                      | Retrieval-Augmented Generation – kỹ thuật cho phép mô hình ngôn ngữ trả lời dựa trên dữ liệu được truy xuất từ kho tri thức của hệ thống.   |
 | FCM                                      | Firebase Cloud Messaging – dịch vụ gửi thông báo đẩy (push notification) cho ứng dụng di động.                                              |
@@ -73,7 +73,7 @@ Hệ thống gồm ba sản phẩm bàn giao:
 
 2.  Slide giới thiệu học phần PBL6 – Dự án chuyên ngành Công nghệ phần mềm, Khoa CNTT, Trường ĐH Bách khoa – ĐHĐN.
 
-3.  Tài liệu tích hợp PayOS dành cho lập trình viên (payos.vn/docs).
+3.  Tài liệu tích hợp cổng thanh toán VNPay (môi trường Sandbox) dành cho lập trình viên (sandbox.vnpayment.vn).
 
 4.  Tài liệu chính thức: Spring Boot (Java), FastAPI, Elasticsearch, RabbitMQ, PostgreSQL, MongoDB, Redis, Docker.
 
@@ -111,7 +111,7 @@ Tài liệu phân tích hệ thống theo hướng chức năng. Hệ thống đ
 
 VMarket tương tác với các hệ thống bên ngoài sau:
 
-- **Cổng thanh toán PayOS:** tạo yêu cầu thanh toán và xác nhận kết quả giao dịch.
+- **Cổng thanh toán VNPay:** nhận yêu cầu thanh toán (URL chuyển hướng có chữ ký) và gửi kết quả giao dịch qua IPN/return URL.
 
 - **Dịch vụ email:** gửi email xác thực tài khoản và email giao dịch.
 
@@ -133,7 +133,7 @@ Chi tiết kiến trúc kỹ thuật được trình bày trong tài liệu thi�
 | Người giao hàng (Shipper) | Nhân viên giao hàng nội bộ của nền tảng, tài khoản do quản trị viên cấp. Làm việc ngoài hiện trường, thao tác trên điện thoại khi đang di chuyển nên cần giao diện đơn giản, ít bước.                               | Biết rõ cần giao đơn nào, lấy hàng ở đâu, giao tới đâu, thu bao nhiêu tiền; cập nhật kết quả giao hàng nhanh chóng và chính xác.                                                          |
 | Quản trị viên (Admin)     | Nhân sự vận hành nền tảng, sử dụng Web Admin thường xuyên, hiểu rõ quy trình nghiệp vụ và chính sách của sàn.                                                                                                       | Giữ cho sàn hoạt động an toàn, minh bạch: kiểm soát chất lượng người bán và sản phẩm, xử lý tranh chấp công bằng, điều phối giao hàng hiệu quả và theo dõi tình hình kinh doanh toàn sàn. |
 
-Ngoài ra, các hệ thống ngoài (cổng thanh toán PayOS, dịch vụ email, dịch vụ thông báo đẩy, dịch vụ bản đồ, dịch vụ mô hình ngôn ngữ) tham gia như tác nhân phụ trong các use case liên quan.
+Ngoài ra, các hệ thống ngoài (cổng thanh toán VNPay, dịch vụ email, dịch vụ thông báo đẩy, dịch vụ bản đồ, dịch vụ mô hình ngôn ngữ) tham gia như tác nhân phụ trong các use case liên quan.
 
 ## **2.3. Các chức năng chính của sản phẩm**
 
@@ -153,7 +153,7 @@ Ngoài ra, các hệ thống ngoài (cổng thanh toán PayOS, dịch vụ email
 
 - Quản lý hồ sơ cá nhân, sổ địa chỉ, đổi mật khẩu.
 
-- Quản lý giỏ hàng; đặt hàng và thanh toán qua PayOS hoặc COD.
+- Quản lý giỏ hàng; đặt hàng và thanh toán qua VNPay hoặc COD.
 
 - Theo dõi, hủy đơn hàng; theo dõi vị trí giao hàng thời gian thực trên bản đồ.
 
@@ -229,7 +229,7 @@ Ngoài ra, các hệ thống ngoài (cổng thanh toán PayOS, dịch vụ email
 
 - Tìm kiếm bằng hình ảnh sử dụng mô hình CNN tiền huấn luyện để trích xuất embedding; embedding lưu và truy vấn tương đồng trên Elasticsearch (dense vector).
 
-- Thanh toán trực tuyến tích hợp PayOS ở môi trường thử nghiệm (sandbox/test) trước khi chạy thật; bắt buộc xác minh chữ ký webhook.
+- Thanh toán trực tuyến tích hợp VNPay ở môi trường Sandbox (miễn phí, có thẻ test) trước khi chạy thật; bắt buộc xác minh chữ ký vnp_SecureHash của IPN và return URL.
 
 - Toàn bộ API công khai qua HTTP; tài liệu API sinh tự động bằng OpenAPI/Swagger (springdoc-openapi cho các service Spring Boot).
 
@@ -243,7 +243,7 @@ Ngoài ra, các hệ thống ngoài (cổng thanh toán PayOS, dịch vụ email
 
 ## **2.6. Giả định và phụ thuộc**
 
-- Tài khoản PayOS (kênh thanh toán thử nghiệm), dự án Firebase và tài khoản SMTP được cấp và hoạt động ổn định.
+- Tài khoản merchant VNPay Sandbox (TmnCode và Hash Secret), dự án Firebase và tài khoản SMTP được cấp và hoạt động ổn định.
 
 - Dịch vụ mô hình ngôn ngữ (LLM API) dùng cho chatbot khả dụng trong suốt quá trình phát triển và bảo vệ.
 
@@ -310,7 +310,7 @@ Yêu cầu chức năng được tổ chức theo từng microservice. Mỗi yê
 
 | **Mã**    | **Tên yêu cầu**                 | **Mô tả**                                                                                                                                                                                                                                                                                                    | **Ưu tiên** |
 |-----------|---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|
-| FR-ORD-01 | Tạo đơn hàng                    | Tạo đơn từ giỏ hàng, tự động tách thành các đơn con theo từng gian hàng; chọn địa chỉ giao và phương thức thanh toán (PayOS/COD); phát sự kiện OrderPlaced.                                                                                                                                                  | Cao         |
+| FR-ORD-01 | Tạo đơn hàng                    | Tạo đơn từ giỏ hàng, tự động tách thành các đơn con theo từng gian hàng; chọn địa chỉ giao và phương thức thanh toán (VNPay/COD); phát sự kiện OrderPlaced.                                                                                                                                                  | Cao         |
 | FR-ORD-02 | Vòng đời đơn hàng               | Quản lý trạng thái: Chờ thanh toán → Chờ xác nhận → Đang chuẩn bị → Chờ giao (đã phân công shipper) → Đang giao → Đã giao → Hoàn thành; các nhánh Đã hủy, Trả hàng/Hoàn tiền. Lưu lịch sử chuyển trạng thái. Đơn "Đã giao" tự chuyển "Hoàn thành" sau 7 ngày nếu không có yêu cầu trả hàng.                  | Cao         |
 | FR-ORD-03 | Theo dõi và hủy đơn             | Buyer xem lịch sử/chi tiết đơn, theo dõi trạng thái; được hủy đơn khi đơn chưa được xác nhận.                                                                                                                                                                                                                | Cao         |
 | FR-ORD-04 | \[Seller\] Xử lý đơn hàng       | Seller xác nhận đơn, chuẩn bị hàng và bàn giao cho bộ phận giao hàng; các trạng thái giao do Shipper cập nhật (Delivery Service đồng bộ về đơn).                                                                                                                                                             | Cao         |
@@ -318,12 +318,12 @@ Yêu cầu chức năng được tổ chức theo từng microservice. Mỗi yê
 | FR-ORD-06 | Yêu cầu trả hàng                | Trong vòng 7 ngày kể từ khi đơn "Đã giao", Buyer tạo yêu cầu trả hàng cho sản phẩm lỗi, không đúng mô tả hoặc giao thiếu/sai, kèm lý do và tối đa 5 ảnh/video minh chứng; mỗi sản phẩm trong đơn chỉ yêu cầu một lần.                                                                                        | Cao         |
 | FR-ORD-07 | Xử lý trả hàng                  | Seller chấp nhận hoặc từ chối (kèm lý do) trong 48 giờ; quá hạn hoặc Buyer khiếu nại quyết định từ chối thì chuyển Admin phân xử. Yêu cầu được chấp nhận: đơn/sản phẩm chuyển trạng thái "Trả hàng", hàng được thu hồi, sau đó kích hoạt hoàn tiền (FR-PAY-05). Phát sự kiện ReturnRequested/ReturnResolved. | Cao         |
 
-## **3.7. Payment Service – Thanh toán (PayOS)**
+## **3.7. Payment Service – Thanh toán (VNPay)**
 
 | **Mã**    | **Tên yêu cầu**        | **Mô tả**                                                                                                                                                                                              | **Ưu tiên** |
 |-----------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|
-| FR-PAY-01 | Tạo yêu cầu thanh toán | Với đơn chọn PayOS: tạo payment link/mã QR VietQR gắn mã đơn hàng và số tiền; trả về cho client hiển thị; thời hạn thanh toán 15 phút.                                                                 | Cao         |
-| FR-PAY-02 | Xử lý webhook PayOS    | Nhận webhook từ PayOS, xác minh chữ ký bằng checksum key; cập nhật giao dịch thành công/thất bại; phát sự kiện PaymentSucceeded/PaymentFailed; đảm bảo idempotent (webhook trùng không xử lý hai lần). | Cao         |
+| FR-PAY-01 | Tạo yêu cầu thanh toán | Với đơn chọn VNPay: tạo URL thanh toán VNPay gắn mã giao dịch và số tiền, ký bằng HMAC-SHA512 với hash secret; trả về cho client chuyển hướng người mua sang trang VNPay; thời hạn thanh toán 15 phút.                                                                 | Cao         |
+| FR-PAY-02 | Xử lý IPN/return VNPay | Nhận IPN (và return URL khi chạy local) từ VNPay, xác minh chữ ký vnp_SecureHash bằng hash secret, kiểm tra số tiền; cập nhật giao dịch thành công/thất bại; phát sự kiện PaymentSucceeded/PaymentFailed; đảm bảo idempotent (IPN/return trùng không xử lý hai lần). | Cao         |
 | FR-PAY-03 | Thanh toán COD         | Hỗ trợ đặt hàng thanh toán khi nhận hàng; đơn chuyển thẳng sang "Chờ xác nhận".                                                                                                                        | Cao         |
 | FR-PAY-04 | Quản lý giao dịch      | Lưu lịch sử giao dịch; tự động hủy đơn và hoàn tồn kho khi hết hạn thanh toán; cho phép Buyer thanh toán lại trong thời hạn.                                                                           | Cao         |
 | FR-PAY-05 | Hoàn tiền              | Ghi nhận và theo dõi hoàn tiền cho đơn đã thanh toán bị hủy hoặc có yêu cầu trả hàng được chấp nhận; Admin xác nhận hoàn tiền (chuyển khoản thủ công, hệ thống lưu trạng thái Chờ hoàn → Đã hoàn).     | Cao         |
@@ -398,7 +398,7 @@ Yêu cầu chức năng được tổ chức theo từng microservice. Mỗi yê
 | UC-03  | Tìm kiếm sản phẩm (AI)                | Guest, Buyer           | Web end-user, Mobile            |
 | UC-04  | Xem chi tiết và sản phẩm tương tự     | Guest, Buyer           | Web end-user, Mobile            |
 | UC-05  | Quản lý giỏ hàng                      | Buyer                  | Web end-user, Mobile            |
-| UC-06  | Đặt hàng và thanh toán (PayOS/COD)    | Buyer, PayOS           | Web end-user, Mobile            |
+| UC-06  | Đặt hàng và thanh toán (VNPay/COD)    | Buyer, VNPay           | Web end-user, Mobile            |
 | UC-07  | Theo dõi / hủy đơn hàng               | Buyer                  | Web end-user, Mobile            |
 | UC-08  | Đánh giá sản phẩm                     | Buyer                  | Web end-user, Mobile            |
 | UC-09  | Hỏi đáp với trợ lý AI                 | Guest, Buyer           | Web end-user, Mobile            |
@@ -480,15 +480,15 @@ Dưới đây đặc tả chi tiết các use case tiêu biểu, đại diện c
 | Luồng thay thế / ngoại lệ | Không có kết quả: hiển thị thông báo và gợi ý sản phẩm bán chạy thuộc danh mục gần nhất. Dịch vụ tìm kiếm lỗi: chuyển hướng sang tìm kiếm cơ bản theo tên tại Product Catalog Service.                                                                                                                                                                                                                                                                                                                            |
 | Hậu điều kiện             | Danh sách kết quả hiển thị; hành vi tìm kiếm được lưu phục vụ gợi ý.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
-## **4.4. UC-06: Đặt hàng và thanh toán qua PayOS**
+## **4.4. UC-06: Đặt hàng và thanh toán qua VNPay**
 
 | **Mục**                   | **Nội dung**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Tác nhân                  | Buyer (chính), PayOS (phụ)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Mô tả                     | Người mua đặt hàng từ giỏ và thanh toán trực tuyến bằng mã QR/payment link của PayOS.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Tác nhân                  | Buyer (chính), VNPay (phụ)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Mô tả                     | Người mua đặt hàng từ giỏ và thanh toán trực tuyến trên trang thanh toán của VNPay (thẻ/QR).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Tiền điều kiện            | Buyer đã đăng nhập, giỏ hàng có ít nhất một sản phẩm còn hàng.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Luồng chính               | 1\) Buyer chọn "Thanh toán"; hệ thống kiểm tra lại giá/tồn kho và hiển thị trang xác nhận, tách đơn theo từng gian hàng. 2) Buyer chọn địa chỉ giao hàng, phương thức thanh toán PayOS và xác nhận đặt hàng. 3) Order Service tạo đơn ở trạng thái "Chờ thanh toán", phát sự kiện OrderPlaced; Product Catalog Service tạm giữ tồn kho. 4) Payment Service gọi API PayOS tạo payment link/mã QR (hạn 15 phút) và trả về cho client hiển thị. 5) Buyer quét mã QR bằng ứng dụng ngân hàng và hoàn tất chuyển khoản. 6) PayOS gửi webhook về Payment Service; service xác minh chữ ký, ghi nhận giao dịch thành công và phát sự kiện PaymentSucceeded. 7) Order Service chuyển đơn sang "Chờ xác nhận"; Notification Service gửi thông báo cho Buyer và Seller; giỏ hàng được xóa các mặt hàng đã đặt. |
-| Luồng thay thế / ngoại lệ | A1 – COD: bỏ qua bước 4–6, đơn chuyển thẳng sang "Chờ xác nhận". A2 – Hết hạn thanh toán: hệ thống hủy đơn, hoàn tồn kho, thông báo cho Buyer (được phép đặt lại). A3 – Webhook sai chữ ký hoặc trùng lặp: bỏ qua và ghi log cảnh báo. A4 – Tồn kho không đủ ở bước 1/3: báo lỗi và yêu cầu cập nhật giỏ hàng.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Luồng chính               | 1\) Buyer chọn "Thanh toán"; hệ thống kiểm tra lại giá/tồn kho và hiển thị trang xác nhận, tách đơn theo từng gian hàng. 2) Buyer chọn địa chỉ giao hàng, phương thức thanh toán VNPay và xác nhận đặt hàng. 3) Order Service tạo đơn ở trạng thái "Chờ thanh toán", phát sự kiện OrderPlaced; Product Catalog Service tạm giữ tồn kho. 4) Payment Service dựng URL thanh toán VNPay đã ký (hạn 15 phút) và trả về; client chuyển hướng Buyer sang trang VNPay. 5) Buyer thanh toán bằng thẻ hoặc quét mã QR trên trang VNPay. 6) VNPay gửi IPN về Payment Service và chuyển trình duyệt Buyer về return URL; service xác minh chữ ký, ghi nhận giao dịch thành công và phát sự kiện PaymentSucceeded (xử lý idempotent, IPN và return không làm trùng). 7) Order Service chuyển đơn sang "Chờ xác nhận"; Notification Service gửi thông báo cho Buyer và Seller; giỏ hàng được xóa các mặt hàng đã đặt. |
+| Luồng thay thế / ngoại lệ | A1 – COD: bỏ qua bước 4–6, đơn chuyển thẳng sang "Chờ xác nhận". A2 – Hết hạn thanh toán: hệ thống hủy đơn, hoàn tồn kho, thông báo cho Buyer (được phép đặt lại). A3 – IPN/return sai chữ ký hoặc trùng lặp: bỏ qua (IPN trả mã 97/02) và ghi log cảnh báo. A4 – Tồn kho không đủ ở bước 1/3: báo lỗi và yêu cầu cập nhật giỏ hàng.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Hậu điều kiện             | Đơn hàng và giao dịch được lưu vết đầy đủ; tồn kho nhất quán; các bên liên quan nhận được thông báo.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## **4.5. UC-09: Hỏi đáp với trợ lý AI**
@@ -542,8 +542,8 @@ Dưới đây đặc tả chi tiết các use case tiêu biểu, đại diện c
 | Tác nhân                  | Buyer (chính), Seller, Admin (phụ)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Mô tả                     | Người mua khiếu nại sản phẩm lỗi hoặc không đúng mô tả và yêu cầu trả hàng – hoàn tiền; người bán xử lý, Admin phân xử khi có tranh chấp.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Tiền điều kiện            | Đơn hàng ở trạng thái "Đã giao" trong vòng 7 ngày; sản phẩm chưa từng có yêu cầu trả hàng.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Luồng chính               | 1\) Buyer mở chi tiết đơn, chọn "Yêu cầu trả hàng", chọn sản phẩm, lý do (lỗi, không đúng mô tả, giao thiếu/sai…) và tải lên tối đa 5 ảnh/video minh chứng. 2) Hệ thống tạo yêu cầu ở trạng thái "Chờ người bán xử lý", phát sự kiện ReturnRequested và thông báo cho Seller. 3) Seller xem minh chứng và chấp nhận yêu cầu trong vòng 48 giờ. 4) Sản phẩm/đơn chuyển trạng thái "Trả hàng"; shipper được phân công thu hồi hàng về gian hàng; Seller xác nhận đã nhận lại hàng. 5) Payment Service ghi nhận hoàn tiền (đơn đã thanh toán PayOS); Admin xác nhận đã chuyển hoàn; yêu cầu chuyển "Đã hoàn tiền" và thông báo các bên. |
-| Luồng thay thế / ngoại lệ | A1 – Seller từ chối (kèm lý do): Buyer được khiếu nại lên Admin; Admin xem minh chứng hai bên và ra quyết định cuối cùng. A2 – Seller không phản hồi sau 48 giờ: yêu cầu tự động chuyển Admin xử lý. A3 – Quá 7 ngày kể từ khi "Đã giao": hệ thống không cho tạo yêu cầu. A4 – Đơn COD: bỏ bước hoàn tiền qua PayOS, chỉ hoàn trạng thái và tiền mặt do hai bên/Admin xác nhận.                                                                                                                                                                                                                                                      |
+| Luồng chính               | 1\) Buyer mở chi tiết đơn, chọn "Yêu cầu trả hàng", chọn sản phẩm, lý do (lỗi, không đúng mô tả, giao thiếu/sai…) và tải lên tối đa 5 ảnh/video minh chứng. 2) Hệ thống tạo yêu cầu ở trạng thái "Chờ người bán xử lý", phát sự kiện ReturnRequested và thông báo cho Seller. 3) Seller xem minh chứng và chấp nhận yêu cầu trong vòng 48 giờ. 4) Sản phẩm/đơn chuyển trạng thái "Trả hàng"; shipper được phân công thu hồi hàng về gian hàng; Seller xác nhận đã nhận lại hàng. 5) Payment Service ghi nhận hoàn tiền (đơn đã thanh toán VNPay); Admin xác nhận đã chuyển hoàn; yêu cầu chuyển "Đã hoàn tiền" và thông báo các bên. |
+| Luồng thay thế / ngoại lệ | A1 – Seller từ chối (kèm lý do): Buyer được khiếu nại lên Admin; Admin xem minh chứng hai bên và ra quyết định cuối cùng. A2 – Seller không phản hồi sau 48 giờ: yêu cầu tự động chuyển Admin xử lý. A3 – Quá 7 ngày kể từ khi "Đã giao": hệ thống không cho tạo yêu cầu. A4 – Đơn COD: bỏ bước hoàn tiền qua VNPay, chỉ hoàn trạng thái và tiền mặt do hai bên/Admin xác nhận.                                                                                                                                                                                                                                                      |
 | Hậu điều kiện             | Trạng thái trả hàng – hoàn tiền được lưu vết đầy đủ; thống kê tỷ lệ trả hàng của gian hàng được cập nhật.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## **4.10. UC-23 & UC-24: Giao hàng và theo dõi vị trí đơn hàng**
@@ -578,7 +578,7 @@ Hệ thống không giao tiếp trực tiếp với phần cứng chuyên dụng
 | **Thành phần**       | **Mô tả giao tiếp**                                                                                                                                                                                                |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | API Gateway          | Điểm vào duy nhất cho ba ứng dụng khách; định tuyến REST/JSON tới các service; xác thực JWT; giới hạn tần suất; tài liệu OpenAPI/Swagger cho từng service.                                                         |
-| PayOS                | Payment Service gọi REST API của PayOS để tạo/hủy payment link; nhận webhook xác nhận giao dịch qua HTTPS, xác minh chữ ký bằng checksum key; sử dụng SDK Java chính thức của PayOS (hoặc gọi REST API trực tiếp). |
+| VNPay                | Payment Service dựng URL thanh toán đã ký (HMAC-SHA512, hash secret) để chuyển hướng người mua sang VNPay Sandbox; nhận IPN (GET) và return URL kèm tham số vnp_*, xác minh chữ ký vnp_SecureHash; không gọi API tạo/hủy link của VNPay. |
 | RabbitMQ (Event Bus) | Các service phát/nhận sự kiện nghiệp vụ theo cơ chế publish/subscribe; cấu hình retry và DLQ cho thông điệp lỗi.                                                                                                   |
 | Elasticsearch        | AI Search Service đọc/ghi chỉ mục sản phẩm; các service khác không truy cập trực tiếp.                                                                                                                             |
 | FCM                  | Notification Service gửi thông báo đẩy tới thiết bị di động qua Firebase Cloud Messaging.                                                                                                                          |
@@ -597,7 +597,7 @@ Hệ thống không giao tiếp trực tiếp với phần cứng chuyên dụng
 
 - Theo dõi vị trí: ứng dụng Shipper gửi tọa độ qua HTTPS/WebSocket; client người mua nhận cập nhật vị trí qua WebSocket theo từng đơn hàng.
 
-- Webhook PayOS: HTTPS POST tới endpoint công khai của Payment Service.
+- IPN VNPay: HTTPS GET tới endpoint công khai của Payment Service (cần URL public, ví dụ ngrok, khi chạy local); return URL do trình duyệt Buyer gọi qua Frontend.
 
 # **6. Yêu cầu phi chức năng**
 
@@ -621,7 +621,7 @@ Hệ thống không giao tiếp trực tiếp với phần cứng chuyên dụng
 
 - **NFR-SEC-03:** Phân quyền kiểm tra ở cả API Gateway và từng service; người dùng chỉ truy cập được dữ liệu thuộc quyền của mình (Seller chỉ thao tác gian hàng của mình, Buyer chỉ xem đơn của mình).
 
-- **NFR-SEC-04:** Toàn bộ giao tiếp qua HTTPS; xác minh chữ ký webhook PayOS; endpoint webhook có cơ chế idempotent.
+- **NFR-SEC-04:** Toàn bộ giao tiếp qua HTTPS; xác minh chữ ký vnp_SecureHash của IPN/return VNPay; endpoint IPN có cơ chế idempotent.
 
 - **NFR-SEC-05:** Phòng chống các lỗ hổng phổ biến theo OWASP Top 10 (SQL Injection, XSS, CSRF, IDOR…); dữ liệu đầu vào được kiểm tra hợp lệ ở cả client và server.
 
@@ -721,7 +721,7 @@ Ma trận trên là căn cứ thiết kế bảng Role/Permission trong CSDL và
 | **Sự kiện**                        | **Service phát** | **Service nhận**                               | **Ý nghĩa**                                                                         |
 |------------------------------------|------------------|------------------------------------------------|-------------------------------------------------------------------------------------|
 | OrderPlaced                        | Order            | Product, Payment, Notification, Recommendation | Đơn mới được tạo; tạm giữ tồn kho, khởi tạo thanh toán.                             |
-| PaymentSucceeded / PaymentFailed   | Payment          | Order, Notification                            | Kết quả thanh toán PayOS; cập nhật trạng thái đơn.                                  |
+| PaymentSucceeded / PaymentFailed   | Payment          | Order, Notification                            | Kết quả thanh toán VNPay; cập nhật trạng thái đơn.                                  |
 | OrderStatusChanged                 | Order            | Notification, Recommendation                   | Đơn chuyển trạng thái; thông báo các bên.                                           |
 | StockReserved / StockReleased      | Product          | Order                                          | Kết quả giữ/hoàn tồn kho cho đơn hàng.                                              |
 | ProductCreated / Updated / Deleted | Product          | Search, Recommendation                         | Đồng bộ chỉ mục tìm kiếm và đặc trưng gợi ý.                                        |
@@ -737,7 +737,7 @@ Ma trận trên là căn cứ thiết kế bảng Role/Permission trong CSDL và
 
 - Ba sản phẩm (Web Admin, Web end-user, Mobile) được triển khai thực tế trên môi trường công khai và truy cập được trong buổi bảo vệ.
 
-- Luồng nghiệp vụ đầu-cuối chạy thông suốt: đăng ký gian hàng → duyệt → đăng sản phẩm → tìm kiếm → đặt hàng → thanh toán PayOS (môi trường thử nghiệm) → phân công shipper giao hàng và người mua theo dõi vị trí → nhận hàng → đánh giá; kèm luồng trả hàng – hoàn tiền được nghiệm thu riêng.
+- Luồng nghiệp vụ đầu-cuối chạy thông suốt: đăng ký gian hàng → duyệt → đăng sản phẩm → tìm kiếm → đặt hàng → thanh toán VNPay (môi trường Sandbox) → phân công shipper giao hàng và người mua theo dõi vị trí → nhận hàng → đánh giá; kèm luồng trả hàng – hoàn tiền được nghiệm thu riêng.
 
 - Bốn tính năng AI (tìm kiếm từ khóa thông minh, tìm kiếm bằng hình ảnh CNN, gợi ý sản phẩm, chatbot) hoạt động được với dữ liệu thật của hệ thống.
 

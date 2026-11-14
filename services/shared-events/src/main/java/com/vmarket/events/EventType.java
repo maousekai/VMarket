@@ -36,7 +36,7 @@ public final class EventType {
 	/** Product Catalog phát khi Seller đã sửa và gửi lại sản phẩm bị gỡ. */
 	public static final String PRODUCT_MODERATION_REQUESTED = "ProductModerationRequested";
 
-	/** Payment Service phát theo kết quả giao dịch (PayOS webhook). */
+	/** Payment Service phát theo kết quả giao dịch (IPN/return của VNPay). */
 	public static final String PAYMENT_SUCCEEDED = "PaymentSucceeded";
 	public static final String PAYMENT_FAILED = "PaymentFailed";
 

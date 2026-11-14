@@ -207,7 +207,7 @@ order by s.id limit ? offset ?
                                     a.setOrderSnapshot(json.writeValueAsString(claimed));
                                     a.setPaymentMethod(
                                             claimed.path("paymentMethod").asString("COD"));
-                                    if (!Set.of("COD", "PAYOS").contains(a.getPaymentMethod()))
+                                    if (!Set.of("COD", "VNPAY", "PAYOS").contains(a.getPaymentMethod()))
                                         throw ApiException.conflict(
                                                 "PAYMENT_METHOD_UNSUPPORTED",
                                                 "Sai phương thức thanh toán");

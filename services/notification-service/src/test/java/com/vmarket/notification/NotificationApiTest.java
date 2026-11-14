@@ -1,6 +1,7 @@
 package com.vmarket.notification;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -9,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,11 +30,14 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.vmarket.notification.domain.DeviceToken;
+import com.vmarket.notification.domain.NotificationCategory;
 import com.vmarket.notification.domain.NotificationType;
+import com.vmarket.notification.dto.NotificationPreferencesDto;
 import com.vmarket.notification.dto.NotificationResponse;
 import com.vmarket.notification.dto.PageResponse;
 import com.vmarket.notification.exception.ApiException;
 import com.vmarket.notification.service.NotificationCenterService;
+import com.vmarket.notification.service.NotificationPreferenceService;
 
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -49,6 +54,34 @@ class NotificationApiTest {
 
 	@MockitoBean
 	private NotificationCenterService service;
+
+	@MockitoBean
+	private NotificationPreferenceService preferences;
+
+	@Test
+	void readsAndUpdatesPreferencesOfTokenSubject() throws Exception {
+		var response = new NotificationPreferencesDto.Response(List.of(
+				new NotificationPreferencesDto.Category("ORDER", "Đơn hàng & giao hàng", false, true)));
+		when(preferences.get("u1")).thenReturn(response);
+		when(preferences.update(eq("u1"), any())).thenReturn(response);
+
+		mvc.perform(get("/api/notifications/preferences").header("Authorization", token("u1")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.categories[0].key").value("ORDER"))
+				.andExpect(jsonPath("$.categories[0].email").value(false));
+		mvc.perform(put("/api/notifications/preferences").header("Authorization", token("u1"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"categories\":[{\"key\":\"ORDER\",\"email\":false,\"push\":true}]}"))
+				.andExpect(status().isOk());
+		verify(preferences).update("u1", new NotificationPreferencesDto.Update(List.of(
+				new NotificationPreferencesDto.CategoryUpdate(NotificationCategory.ORDER, false, true))));
+
+		mvc.perform(put("/api/notifications/preferences").header("Authorization", token("u1"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"categories\":[{\"email\":false,\"push\":true}]}"))
+				.andExpect(status().isBadRequest());
+		mvc.perform(get("/api/notifications/preferences")).andExpect(status().isUnauthorized());
+	}
 
 	private static String token(String userId, String issuer, String secret) {
 		return "Bearer " + Jwts.builder()

@@ -25,6 +25,9 @@ public interface OrderReturnRepository extends JpaRepository<OrderReturn, String
 
 	List<OrderReturn> findByUserIdOrderByCreatedAtDesc(String userId);
 
+	/** URL ảnh đã nằm trong evidenceUrls (chuỗi JSON) của một yêu cầu trả hàng của người mua. */
+	boolean existsByUserIdAndEvidenceUrlsContaining(String userId, String url);
+
 	Optional<OrderReturn> findByIdAndUserId(String id, String userId);
 
 	Optional<OrderReturn> findByIdAndShopId(String id, String shopId);

@@ -31,7 +31,7 @@ VMarket/
 │   ├── product-service/       # Danh mục, sản phẩm, tồn kho (8084, MongoDB)
 │   ├── cart-service/          # Giỏ hàng (8085, Redis)
 │   ├── order-service/         # Đơn hàng, trả hàng (8086, PostgreSQL)
-│   ├── payment-service/       # Thanh toán PayOS/COD (8087, PostgreSQL)
+│   ├── payment-service/       # Thanh toán VNPay/COD (8087, PostgreSQL)
 │   ├── delivery-service/      # Giao hàng, định vị shipper (8088, PostgreSQL)
 │   ├── review-service/        # Đánh giá sản phẩm (8089, PostgreSQL)
 │   ├── notification-service/  # Thông báo, email, FCM (8090, MongoDB)
@@ -81,8 +81,8 @@ hai và password phải dài ít nhất 8 ký tự; không có credential mặc 
 `.env` đã cấu hình, không ghi đè credentials đang sử dụng.
 
 `AUTH_JWT_SECRET` và `INTERNAL_API_KEY` cũng không có giá trị mặc định trong
-`docker-compose.yml`: thiếu thì các service dùng chúng (auth, user, shop, order,
-product, gateway, chatbot) dừng lúc khởi động thay vì chạy bằng secret công khai.
+`docker-compose.yml`: thiếu thì các service dùng chúng (auth, user, shop, product,
+cart, order, payment, delivery, gateway, chatbot) dừng lúc khởi động thay vì chạy bằng secret công khai.
 Nếu `.env` có từ trước, thêm hai biến này theo `.env.example` (tối thiểu 32 ký tự;
 môi trường thật dùng chuỗi ngẫu nhiên).
 

@@ -30,7 +30,7 @@ public class ShopAccessSyncController {
 			@Valid @RequestBody ShopAccessSyncRequest request) {
 		apiKeyGuard.requireValid(apiKey);
 		request.shops().forEach(shop -> service.reconcile(shop.shopId(), shop.sellerId(),
-				shop.active(), shop.updatedAt()));
+				shop.shopName(), shop.active(), shop.updatedAt()));
 		return ResponseEntity.noContent().build();
 	}
 }

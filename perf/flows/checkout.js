@@ -5,7 +5,7 @@
 // reserved stock is released.
 //
 // Money check: the order total must equal the sum of the lines at the catalog
-// prices recorded in the manifest. COD only; PayOS is never called.
+// prices recorded in the manifest. COD only; VNPay is never called.
 import { check } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';

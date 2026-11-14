@@ -25,7 +25,7 @@ public class OrderPaymentLifecycle {
         if (optional.isEmpty()) return;
         var order = optional.get();
         if (order.getStatus() == OrderStatus.WAITING_PAYMENT
-                && "PAYOS".equals(order.getPaymentMethod())) {
+                && "VNPAY".equals(order.getPaymentMethod())) {
             change(order, OrderStatus.PENDING);
         } else if (order.getStatus() == OrderStatus.CANCELLED) {
             // Reconcile success racing cancellation, including cancellation consumed before the

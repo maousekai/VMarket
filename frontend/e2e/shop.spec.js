@@ -19,6 +19,12 @@ async function fillShopForm(page, name) {
     .getByRole('combobox', { name: 'Phường / xã', exact: true })
     .selectOption('Phường Hải Châu')
   await page.getByRole('textbox', { name: 'Số nhà, tên đường', exact: true }).fill('12 Phạm Phán')
+  const bank = page.getByRole('combobox', { name: 'Ngân hàng', exact: true })
+  await bank.click()
+  await bank.fill('vcb')
+  await bank.press('Enter')
+  await expect(bank).toHaveValue(/^Vietcombank/)
+  await page.getByRole('textbox', { name: 'Số tài khoản', exact: true }).fill('0123456789')
 }
 
 test('buyer registers a shop, sees pending status and its status history', async ({ page }) => {

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Navigate, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { AccountAvatar } from './AppHeader'
+import NotificationBell from './NotificationBell'
 import { getApiError } from '../services/api/apiClient'
 import { getMyShop } from '../services/api/shopApi'
+import { useSellerAlerts } from '../hooks/useSellerAlerts'
 import brandBasket from '../assets/account/brand-basket.svg'
 import './account.css'
 import './seller.css'
@@ -15,6 +17,10 @@ function SellerIcon({ name }) {
       'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 4-2.1-.7a7 7 0 0 0-.6-1.4l1-2-2.2-2.2-2 1a7 7 0 0 0-1.4-.6L13 4h-2l-.7 2.1a7 7 0 0 0-1.4.6l-2-1L4.7 7.9l1 2a7 7 0 0 0-.6 1.4L3 12v2l2.1.7a7 7 0 0 0 .6 1.4l-1 2 2.2 2.2 2-1a7 7 0 0 0 1.4.6L11 22h2l.7-2.1a7 7 0 0 0 1.4-.6l2 1 2.2-2.2-1-2a7 7 0 0 0 .6-1.4L21 14v-2Z',
     store: 'M4 4h16l1 6H3l1-6Zm1 8h14v8H5v-8Zm3 2v4h3v-4H8Z',
     home: 'm12 3 9 8h-3v9h-5v-6h-2v6H6v-9H3l9-8Z',
+    orders: 'M7 3h10l1 4H6l1-4Zm-2 6h14v12H5V9Zm4 3v2h6v-2H9Z',
+    returns: 'M12 4V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-9Z',
+    bank: 'M12 2 2 7v2h20V7L12 2ZM4 11v7h3v-7H4Zm6.5 0v7h3v-7h-3ZM17 11v7h3v-7h-3ZM2 20v2h20v-2H2Z',
+    box: 'M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.2 6.3 3.1L12 10.4 5.7 7.3 12 4.2ZM5 9l6 3v7.6l-6-3V9Zm8 10.6V12l6-3v7.6l-6 3Z',
   }
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
@@ -23,9 +29,20 @@ function SellerIcon({ name }) {
   )
 }
 
+/** Cham do kem so viec can xu ly. */
+function NavBadge({ count, label }) {
+  if (!count) return null
+  return (
+    <span className="seller-nav__badge" aria-label={`${count} ${label}`}>
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
 export default function SellerLayout() {
   const { session, userProfile, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const menuRef = useRef(null)
   const menuButtonRef = useRef(null)
   const [open, setOpen] = useState(false)
@@ -35,6 +52,10 @@ export default function SellerLayout() {
   const [gate, setGate] = useState({ state: 'loading', error: '' })
   const [gateAttempt, setGateAttempt] = useState(0)
   const userId = session?.userId
+  const alerts = useSellerAlerts(gate.state === 'ready')
+  const onReturnsView =
+    location.pathname === '/seller/orders' &&
+    new URLSearchParams(location.search).get('view') === 'returns'
   const name = userProfile?.fullName || session?.username || 'Người bán'
 
   // Do not paint the seller shell before we know a shop exists. Otherwise a buyer
@@ -158,6 +179,43 @@ export default function SellerLayout() {
             <span>Tổng quan bán hàng</span>
           </NavLink>
           <NavLink
+            to="/seller/products"
+            className={({ isActive }) => `seller-nav__link${isActive ? ' is-active' : ''}`}
+            onClick={() => setOpen(false)}
+          >
+            <SellerIcon name="box" />
+            <span>Quản lý sản phẩm</span>
+          </NavLink>
+          <NavLink
+            to="/seller/orders"
+            className={({ isActive }) =>
+              `seller-nav__link${isActive && !onReturnsView ? ' is-active' : ''}`
+            }
+            onClick={() => setOpen(false)}
+          >
+            <SellerIcon name="orders" />
+            <span>Đơn hàng</span>
+            <NavBadge count={alerts.orders} label="đơn cần xử lý" />
+          </NavLink>
+          <Link
+            to="/seller/orders?view=returns"
+            className={`seller-nav__link${onReturnsView ? ' is-active' : ''}`}
+            aria-current={onReturnsView ? 'page' : undefined}
+            onClick={() => setOpen(false)}
+          >
+            <SellerIcon name="returns" />
+            <span>Trả hàng</span>
+            <NavBadge count={alerts.returns} label="yêu cầu trả hàng chờ phản hồi" />
+          </Link>
+          <NavLink
+            to="/seller/payment"
+            className={({ isActive }) => `seller-nav__link${isActive ? ' is-active' : ''}`}
+            onClick={() => setOpen(false)}
+          >
+            <SellerIcon name="bank" />
+            <span>Thông tin thanh toán</span>
+          </NavLink>
+          <NavLink
             to="/seller/settings"
             className={({ isActive }) => `seller-nav__link${isActive ? ' is-active' : ''}`}
             onClick={() => setOpen(false)}
@@ -197,6 +255,7 @@ export default function SellerLayout() {
             </button>
             <span className="seller-topbar__eyebrow">Không gian người bán</span>
           </div>
+          <NotificationBell variant="seller" />
           <div className="seller-user" ref={menuRef}>
             <button
               ref={menuButtonRef}

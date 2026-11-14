@@ -17,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.vmarket.order.client.CartServiceClient;
+import com.vmarket.order.service.OrderService;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.config.OrderJwtProperties;
 import com.vmarket.order.entity.Order;
@@ -236,7 +237,45 @@ class OrderApiTest {
     }
 
     @Test
-    void payosDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
+    void placeOrderKeepsCatalogIdsLongerThanUlids() throws Exception {
+        // Product Catalog cấp ObjectId (24 ký tự) cho sản phẩm và UUID (36 ký tự) cho biến
+        // thể; cột VARCHAR(26) cũ làm mọi đơn có biến thể thật lỗi 500 (PBL6-30).
+        String productId = "6aeda9255cb56e8b256e2463";
+        String variantId = "136dd277-76d9-4038-91b5-ab8c18f894a4";
+        CartServiceClient.CartItemView item =
+                new CartServiceClient.CartItemView(
+                        productId,
+                        variantId,
+                        "01JBQ9SHOP0000000000TEST01",
+                        1,
+                        new BigDecimal("150000.00"),
+                        new BigDecimal("150000.00"));
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartView(
+                                ALICE,
+                                List.of(
+                                        new CartServiceClient.CartGroupView(
+                                                "01JBQ9SHOP0000000000TEST01",
+                                                List.of(item),
+                                                new BigDecimal("150000.00"))),
+                                1,
+                                new BigDecimal("150000.00")));
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.items[0].productId").value(productId))
+                .andExpect(jsonPath("$.items[0].variantId").value(variantId));
+    }
+
+    @Test
+    void vnpayDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
         when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
         when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
         when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
@@ -247,7 +286,7 @@ class OrderApiTest {
                                 .content(
                                         "{\"addressId\":\""
                                                 + ADDRESS_ID
-                                                + "\",\"paymentMethod\":\"PAYOS\"}"))
+                                                + "\",\"paymentMethod\":\"VNPAY\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("WAITING_PAYMENT"))
                 .andExpect(jsonPath("$.paymentExpiresAt").value("2026-10-19T12:10:00Z"));
@@ -287,8 +326,18 @@ class OrderApiTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].status").value("PENDING"));
 
+        // Chi tiết trả kèm id từng dòng hàng: buyer cần nó làm orderItemId khi trả hàng.
+        Order own = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0);
+        String orderId = own.getId();
+        mockMvc.perform(get("/api/orders/" + orderId).header(HttpHeaders.AUTHORIZATION, aliceToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder(own.getItems().stream()
+                                .map(i -> i.getId()).toArray())))
+                .andExpect(jsonPath("$.updatedAt").exists())
+                .andExpect(jsonPath("$.deliveredAt").value(org.hamcrest.Matchers.nullValue()));
+
         // Bob đoán đúng id cũng không đọc được (IDOR).
-        String orderId = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0).getId();
         mockMvc.perform(get("/api/orders/" + orderId).header(HttpHeaders.AUTHORIZATION, bobToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("ORDER_NOT_FOUND"));
@@ -563,5 +612,169 @@ class OrderApiTest {
                 .andExpect(jsonPath("$.status").value("PENDING"));
 
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
+
+    private CartServiceClient.CartItemView line(String product, String shop, int qty, String price) {
+        BigDecimal unit = new BigDecimal(price);
+        return new CartServiceClient.CartItemView(
+                product, null, shop, qty, unit, unit.multiply(BigDecimal.valueOf(qty)));
+    }
+
+    @Test
+    void checkoutSplitsSelectedItemsIntoOneOrderPerShop() throws Exception {
+        String shopA = "01JBQ9SHOP0000000000SHOPAA";
+        String shopB = "01JBQ9SHOP0000000000SHOPBB";
+        var a1 = line("01JBQ9PROD0000000000PRODA1", shopA, 1, "100000.00");
+        var a2 = line("01JBQ9PROD0000000000PRODA2", shopA, 2, "50000.00");
+        var b1 = line("01JBQ9PROD0000000000PRODB1", shopB, 1, "70000.00");
+        var notChosen = line("01JBQ9PROD0000000000PRODB2", shopB, 1, "10000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartView(
+                                ALICE,
+                                List.of(
+                                        new CartServiceClient.CartGroupView(
+                                                shopA, List.of(a1, a2), new BigDecimal("200000.00")),
+                                        new CartServiceClient.CartGroupView(
+                                                shopB, List.of(b1, notChosen), new BigDecimal("80000.00"))),
+                                5,
+                                new BigDecimal("280000.00")));
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        String body =
+                "{\"addressId\":\""
+                        + ADDRESS_ID
+                        + "\",\"items\":["
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA1\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA2\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODB1\"}]}";
+
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].items.length()").value(2))
+                .andExpect(jsonPath("$[0].totalAmount").value(200000.00))
+                .andExpect(jsonPath("$[1].items.length()").value(1))
+                .andExpect(jsonPath("$[1].totalAmount").value(70000.00));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+        verify(cartServiceClient, never()).removeCartItem(ALICE, "01JBQ9PROD0000000000PRODB2", null);
+        verify(cartServiceClient).removeCartItem(ALICE, "01JBQ9PROD0000000000PRODB1", null);
+
+        // Gửi lại cùng khoá: không tạo thêm đơn.
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    private CartServiceClient.CartView cartOf(CartServiceClient.CartItemView... items) {
+        BigDecimal total =
+                java.util.Arrays.stream(items)
+                        .map(CartServiceClient.CartItemView::lineTotal)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new CartServiceClient.CartView(
+                ALICE,
+                java.util.Arrays.stream(items)
+                        .map(item -> new CartServiceClient.CartGroupView(item.shopId(), List.of(item), item.lineTotal()))
+                        .toList(),
+                items.length,
+                total);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions checkout(String key, String body)
+            throws Exception {
+        return mockMvc.perform(
+                post("/api/orders/checkout")
+                        .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body));
+    }
+
+    @Test
+    void checkoutRetryReturnsOrdersCreatedByThePartialFirstAttempt() throws Exception {
+        // Lần đầu: đơn shop A tạo xong và dòng giỏ của A đã xoá, shop B lỗi -> giỏ chỉ còn B.
+        var a1 = line("01JBQ9PROD0000000000PRODA1", "01JBQ9SHOP0000000000SHOPAA", 1, "100000.00");
+        var b1 = line("01JBQ9PROD0000000000PRODB1", "01JBQ9SHOP0000000000SHOPBB", 1, "70000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        String body =
+                "{\"addressId\":\"" + ADDRESS_ID + "\",\"items\":["
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA1\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODB1\"}]}";
+
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(a1));
+        String first =
+                checkout("retry-key-1", body)
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.length()").value(1))
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        String orderA = com.jayway.jsonpath.JsonPath.read(first, "$[0].id");
+
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(b1));
+        checkout("retry-key-1", body)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(orderA))
+                .andExpect(jsonPath("$[1].totalAmount").value(70000.00));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    @Test
+    void longCheckoutKeysAreHashedSoSharedPrefixesDoNotCollideAndReplayStillWorks() throws Exception {
+        String prefix = "x".repeat(OrderService.MAX_RAW_CHECKOUT_KEY);
+        String keyOne = prefix + "-attempt-1";
+        String keyTwo = prefix + "-attempt-2";
+        assertThat(OrderService.checkoutKey(keyOne))
+                .isNotEqualTo(OrderService.checkoutKey(keyTwo))
+                .hasSizeLessThanOrEqualTo(OrderService.MAX_RAW_CHECKOUT_KEY);
+        assertThat(OrderService.checkoutKey("short-key")).isEqualTo("short-key");
+
+        var a1 = line("01JBQ9PROD0000000000PRODA1", "01JBQ9SHOP0000000000SHOPAA", 1, "100000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(a1));
+        String body =
+                "{\"addressId\":\"" + ADDRESS_ID
+                        + "\",\"items\":[{\"productId\":\"01JBQ9PROD0000000000PRODA1\"}]}";
+        checkout(keyOne, body).andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1));
+
+        // Khoá khác có cùng tiền tố là một lần checkout khác: tạo đơn mới, không trả đơn cũ.
+        checkout(keyTwo, body).andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+
+        // Giỏ đã trống: gửi lại khoá dài vẫn trả đúng đơn của khoá đó thay vì CART_EMPTY.
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf());
+        checkout(keyOne, body).andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    @Test
+    void checkoutWithNothingSelectedInCartIsRejected() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"addressId\":\""
+                                                + ADDRESS_ID
+                                                + "\",\"items\":[{\"productId\":\"not-in-cart\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("CART_EMPTY"));
     }
 }

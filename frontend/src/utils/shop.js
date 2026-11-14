@@ -60,6 +60,11 @@ export const percentChange = (current, previous) => {
 export const imageUrlOrEmpty = (url) =>
   typeof url === 'string' && /^https?:\/\//i.test(url) ? url : ''
 
+const VIDEO_URL = /\.(mp4|webm|mov)(\?|#|$)/i
+
+/** Minh chung tra hang co the la video (MP4/WebM/MOV); nhan dien theo duoi tep. */
+export const isVideoUrl = (url) => VIDEO_URL.test(url || '')
+
 export const shopAddress = (shop) =>
   [shop.streetAddress, shop.ward, shop.province].filter(Boolean).join(', ')
 

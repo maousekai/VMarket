@@ -41,6 +41,8 @@ class ShopSellerApiTest extends ShopApiTestSupport {
 				// Tên được chuẩn hoá: bỏ khoảng trắng đầu/cuối, gộp khoảng trắng thừa.
 				.andExpect(jsonPath("$.name").value("Tiệm Gốm Hội An"))
 				.andExpect(jsonPath("$.status").value("PENDING"))
+				.andExpect(jsonPath("$.bankCode").value("VCB"))
+				.andExpect(jsonPath("$.bankAccountNumber").value("0123456789"))
 				.andExpect(jsonPath("$.approvedAt").value(nullValue()));
 
 		Shop shop = shopRepository.findByOwnerId(OWNER_A).orElseThrow();
@@ -52,6 +54,77 @@ class ShopSellerApiTest extends ShopApiTestSupport {
 
 		// Nộp hồ sơ không phát sự kiện nào — chỉ duyệt / đình chỉ mới phát (SRS §8.1).
 		verifyNoInteractions(eventPublisher);
+	}
+
+	@Test
+	void dangKy_thieuTaiKhoanNganHang_tra400_BANK_ACCOUNT_REQUIRED() throws Exception {
+		Map<String, Object> body = validShop("Tiệm Gốm Hội An");
+		body.remove("bankAccountNumber");
+
+		mockMvc.perform(post("/api/shops")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(body)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("BANK_ACCOUNT_REQUIRED"));
+
+		assertThat(shopRepository.findByOwnerId(OWNER_A)).isEmpty();
+	}
+
+	@Test
+	void dangKy_soTaiKhoanKhongPhaiSo_tra400() throws Exception {
+		Map<String, Object> body = validShop("Tiệm Gốm Hội An");
+		body.put("bankAccountNumber", "12ab");
+
+		mockMvc.perform(post("/api/shops")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(body)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+	}
+
+	@Test
+	void doiTaiKhoanNganHang_capNhatVaGhiNhatKy_capNhatHoSoKhongXoaTaiKhoan() throws Exception {
+		String shopId = register(OWNER_A, "Tiệm Gốm Hội An");
+
+		mockMvc.perform(put("/api/shops/me/bank-account")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(Map.of("bankCode", "tcb", "bankAccountNumber", " 19036688990011 "))))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.bankCode").value("TCB"))
+				.andExpect(jsonPath("$.bankAccountNumber").value("19036688990011"));
+
+		assertThat(profileChanges.findAll())
+				.extracting(change -> change.getFieldName())
+				.contains("bankCode", "bankAccountNumber");
+
+		// PUT /me thay hồ sơ nhưng không đụng tới tài khoản ngân hàng.
+		Map<String, Object> profile = validShop("Tiệm Gốm Hội An");
+		profile.remove("bankCode");
+		profile.remove("bankAccountNumber");
+		mockMvc.perform(put("/api/shops/me")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(profile)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.bankCode").value("TCB"));
+
+		assertThat(shopRepository.findById(shopId).orElseThrow().getBankAccountNumber())
+				.isEqualTo("19036688990011");
+	}
+
+	@Test
+	void doiTaiKhoanNganHang_thieuNganHang_tra400() throws Exception {
+		register(OWNER_A, "Tiệm Gốm Hội An");
+
+		mockMvc.perform(put("/api/shops/me/bank-account")
+						.header(HttpHeaders.AUTHORIZATION, buyer(OWNER_A))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(json(Map.of("bankCode", "", "bankAccountNumber", "0123456789"))))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
 	}
 
 	@Test
@@ -307,6 +380,7 @@ class ShopSellerApiTest extends ShopApiTestSupport {
 				.andExpect(jsonPath("$.contactEmail").doesNotExist())
 				.andExpect(jsonPath("$.contactPhone").doesNotExist())
 				.andExpect(jsonPath("$.streetAddress").doesNotExist())
+				.andExpect(jsonPath("$.bankAccountNumber").doesNotExist())
 				.andExpect(jsonPath("$.status").doesNotExist());
 	}
 

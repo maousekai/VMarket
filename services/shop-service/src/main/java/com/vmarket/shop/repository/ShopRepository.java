@@ -2,6 +2,8 @@ package com.vmarket.shop.repository;
 
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -17,6 +19,9 @@ import com.vmarket.shop.entity.ShopStatus;
  * điều kiện khi thật sự có bộ lọc.
  */
 public interface ShopRepository extends JpaRepository<Shop, String>, JpaSpecificationExecutor<Shop> {
+
+	/** Gian hàng theo trạng thái — dùng cho đối soát sang product-service. */
+	Page<Shop> findByStatusIn(java.util.Collection<ShopStatus> statuses, Pageable pageable);
 
 	/** Gian hàng của một người — mọi endpoint {@code /me} đi qua đây (chống IDOR). */
 	Optional<Shop> findByOwnerId(String ownerId);

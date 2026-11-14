@@ -83,7 +83,7 @@ class ShopConcurrentUpdateTest {
 
 	private static ShopRequest request(String name) {
 		return new ShopRequest(name, "Gốm thủ công", null, null, null, "lienhe@gomhoian.vn",
-				"0912345678", "Quảng Nam", "Hội An", "Thanh Hà", "12 Phạm Phán");
+				"0912345678", "Quảng Nam", "Hội An", "Thanh Hà", "12 Phạm Phán", "VCB", "0123456789");
 	}
 
 	@Test

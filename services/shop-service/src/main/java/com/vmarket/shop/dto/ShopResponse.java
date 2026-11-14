@@ -41,6 +41,12 @@ public record ShopResponse(
 
 		@Schema(example = "12 Phạm Phán") String streetAddress,
 
+		@Schema(example = "VCB", description = "Mã ngân hàng nhận tiền (VietQR); null với hồ sơ cũ")
+		String bankCode,
+
+		@Schema(example = "0123456789", description = "Số tài khoản nhận tiền; null với hồ sơ cũ")
+		String bankAccountNumber,
+
 		@Schema(example = "PENDING") ShopStatus status,
 
 		@Schema(example = "Ảnh logo không rõ nét",
@@ -78,6 +84,8 @@ public record ShopResponse(
 				s.getDistrict(),
 				s.getWard(),
 				s.getStreetAddress(),
+				s.getBankCode(),
+				s.getBankAccountNumber(),
 				s.getStatus(),
 				s.getStatusReason(),
 				s.getApprovedAt(),
@@ -89,7 +97,8 @@ public record ShopResponse(
 
 	public ShopResponse withOwner(String ownerName, String ownerAvatarUrl) {
 		return new ShopResponse(id, ownerId, name, description, logoUrl, coverUrl, policies,
-				contactEmail, contactPhone, province, district, ward, streetAddress, status,
+				contactEmail, contactPhone, province, district, ward, streetAddress, bankCode,
+				bankAccountNumber, status,
 				statusReason, approvedAt, ownerName, ownerAvatarUrl, createdAt, updatedAt);
 	}
 }

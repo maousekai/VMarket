@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import SearchPage from './SearchPage'
 import { browseProducts, listCategories } from '../services/api/productApi'
 
 vi.mock('../services/api/productApi', () => ({
-  PRODUCT_SORT: { newest: 'NEWEST', bestSelling: 'BEST_SELLING' },
+  PRODUCT_SORT: {
+    newest: 'NEWEST',
+    bestSelling: 'BEST_SELLING',
+    priceAsc: 'PRICE_ASC',
+    priceDesc: 'PRICE_DESC',
+  },
   browseProducts: vi.fn(),
   listCategories: vi.fn(),
 }))
@@ -22,10 +27,19 @@ const renderAt = (path) =>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  listCategories.mockResolvedValue([{ id: 'c1', name: 'Thời trang', active: true }])
+  listCategories.mockResolvedValue([
+    {
+      id: 'c1',
+      name: 'Thời trang',
+      active: true,
+      children: [{ id: 'c1a', name: 'Áo polo', parentId: 'c1', children: [] }],
+    },
+  ])
   browseProducts.mockResolvedValue({
     content: [{ id: 'p1', name: 'Áo dài lụa', minPrice: 1, maxPrice: 1, ratingCount: 0 }],
     totalElements: 1,
+    totalPages: 1,
+    page: 0,
   })
 })
 
@@ -46,10 +60,49 @@ describe('SearchPage', () => {
     expect(browseProducts).toHaveBeenCalledWith(expect.objectContaining({ categoryId: 'c1' }))
   })
 
+  it('shows subcategories and a breadcrumb for the current category', async () => {
+    renderAt('/search?categoryId=c1')
+    expect(await screen.findByRole('button', { name: 'Áo polo' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Đường dẫn' })).toHaveTextContent('Thời trang')
+  })
+
   it('ignores unknown sort values', async () => {
     renderAt('/search?sort=DROP')
     await screen.findByRole('link', { name: 'Áo dài lụa' })
     expect(browseProducts).toHaveBeenCalledWith(expect.objectContaining({ sort: 'NEWEST' }))
+  })
+
+  it('passes price, rating, sort and page filters from the URL', async () => {
+    renderAt('/search?minPrice=100000&maxPrice=500000&rating=4&sort=PRICE_ASC&page=3')
+    await screen.findByRole('link', { name: 'Áo dài lụa' })
+    expect(browseProducts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        minPrice: 100000,
+        maxPrice: 500000,
+        minRating: 4,
+        sort: 'PRICE_ASC',
+        page: 2,
+      }),
+    )
+  })
+
+  it('applies a sort option and a rating filter', async () => {
+    renderAt('/search')
+    await screen.findByRole('link', { name: 'Áo dài lụa' })
+    fireEvent.click(screen.getByRole('button', { name: 'Giá giảm dần' }))
+    await screen.findByRole('button', { name: 'Giá giảm dần', pressed: true })
+    expect(browseProducts).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'PRICE_DESC' }))
+    fireEvent.click(screen.getByRole('button', { name: /Từ 4 sao/ }))
+    await screen.findByRole('button', { name: /Từ 4 sao/, pressed: true })
+    expect(browseProducts).toHaveBeenLastCalledWith(expect.objectContaining({ minRating: 4 }))
+  })
+
+  it('rejects an inverted price range', async () => {
+    renderAt('/search')
+    await screen.findByRole('link', { name: 'Áo dài lụa' })
+    fireEvent.change(screen.getByLabelText('Từ'), { target: { value: '500000' } })
+    fireEvent.change(screen.getByLabelText('Đến'), { target: { value: '1000' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Giá tối thiểu phải nhỏ hơn giá tối đa')
   })
 
   it('shows the empty state', async () => {

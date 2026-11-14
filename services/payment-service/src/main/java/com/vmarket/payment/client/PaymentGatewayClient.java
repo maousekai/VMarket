@@ -2,7 +2,7 @@ package com.vmarket.payment.client;
 
 import java.time.Instant;
 
-public interface PayosClient {
+public interface PaymentGatewayClient {
     enum Status {
         PENDING,
         PROCESSING,
@@ -17,7 +17,7 @@ public interface PayosClient {
         }
     }
 
-    Link create(long orderCode, long amount, Instant expiresAt);
+    Link create(String txnRef, long amount, Instant expiresAt);
 
-    void cancel(long orderCode);
+    void cancel(String txnRef);
 }

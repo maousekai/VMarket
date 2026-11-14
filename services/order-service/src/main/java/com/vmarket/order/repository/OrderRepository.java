@@ -44,6 +44,8 @@ public interface OrderRepository extends JpaRepository<Order, String> {
 	 */
 	Optional<Order> findByUserIdAndIdempotencyKey(String userId, String idempotencyKey);
 
+	List<Order> findByUserIdAndIdempotencyKeyStartingWith(String userId, String keyPrefix);
+
 	/** Dòng item của một gian hàng trong khoảng thời gian — nguồn cho thống kê seller. */
 	@Query("""
 			select o.id as orderId, o.status as status, o.createdAt as createdAt,

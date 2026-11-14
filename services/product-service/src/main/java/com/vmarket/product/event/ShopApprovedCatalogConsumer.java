@@ -17,7 +17,7 @@ public class ShopApprovedCatalogConsumer implements EventConsumer<ShopApproved> 
 	@Override public String eventType() { return EventType.SHOP_APPROVED; }
 	@Override public Class<ShopApproved> payloadType() { return ShopApproved.class; }
 	@Override public void handle(ShopApproved payload, EventEnvelope envelope) {
-		shopAccessService.approve(payload.shopId(), payload.ownerId(),
+		shopAccessService.approve(payload.shopId(), payload.ownerId(), payload.shopName(),
 				Instant.ofEpochMilli(envelope.timestamp()), false);
 	}
 }

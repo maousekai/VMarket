@@ -14,6 +14,13 @@ auth:
 
 app:
   internal-api-key: test-internal-key
+  media:
+    endpoint: http://minio.test:9000
+    public-origin: http://localhost:9000
+    bucket: vmarket-media-test
+    access-key: test-access-key
+    secret-key: test-secret-key
+    region: us-east-1
   events:
     listen: false
   outbox:

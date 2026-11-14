@@ -593,3 +593,31 @@ input::-webkit-credentials-auto-fill-button {
   visibility: hidden;
   pointer-events: none;
 }
+/* Shared quantity stepper (product detail, cart) */
+.quantity-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.quantity-stepper button {
+  width: 34px;
+  border: 0;
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  font-size: 16px;
+}
+.quantity-stepper button:disabled {
+  color: var(--color-border);
+}
+.quantity-stepper input {
+  width: 48px;
+  border: 0;
+  border-inline: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+}

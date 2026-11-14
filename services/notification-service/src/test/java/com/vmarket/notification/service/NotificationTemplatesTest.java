@@ -40,7 +40,7 @@ class NotificationTemplatesTest {
 
 	@Test
 	void onlinePaymentOrderAsksBuyerToPay() {
-		assertThat(templates.orderPlaced(order("PAYOS")).body()).contains("hoàn tất thanh toán");
+		assertThat(templates.orderPlaced(order("VNPAY")).body()).contains("hoàn tất thanh toán");
 	}
 
 	@Test
@@ -87,7 +87,7 @@ class NotificationTemplatesTest {
 		assertThat(templates.paymentFailed("o1", "EXPIRED").body()).endsWith(": phiên thanh toán đã hết hạn.");
 		assertThat(templates.paymentFailed("o1", "CANCELLED").body()).contains("giao dịch đã bị huỷ");
 		assertThat(templates.paymentFailed("o1", "RETRYABLE").body()).contains("thử lại sau");
-		assertThat(templates.paymentFailed("o1", "PAYOS_WEIRD_STATE").body())
+		assertThat(templates.paymentFailed("o1", "VNPAY_WEIRD_STATE").body())
 				.isEqualTo("Thanh toán cho đơn hàng o1 không thành công.");
 		assertThat(templates.paymentFailed("o1", null).body()).doesNotContain("null");
 	}
