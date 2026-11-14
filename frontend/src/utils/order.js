@@ -53,6 +53,9 @@ export const canCancelOrder = (order) => ['PENDING', 'WAITING_PAYMENT'].includes
 
 export const canCompleteOrder = (order) => order?.status === 'DELIVERED'
 
+/** Review Service nhan danh gia cho don da giao hoac da hoan tat (REVIEWABLE_STATUSES). */
+export const canReviewOrder = (order) => ['DELIVERED', 'COMPLETED'].includes(order?.status)
+
 /** Han tra hang (deliveredAt + 7 ngay) hoac null khi chua biet thoi diem giao. */
 export function returnDeadline(order) {
   if (!order?.deliveredAt) return null

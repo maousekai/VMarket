@@ -1,0 +1,420 @@
+/* Review UI (PBL6-35, Figma UC-08 / FR-REV / UC-14) */
+.review-stars {
+  display: inline-flex;
+  gap: 2px;
+  color: var(--color-accent);
+  vertical-align: middle;
+}
+.review-stars .is-empty {
+  color: var(--color-border);
+}
+
+.review-star-input {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+.review-star-input label {
+  position: relative;
+  display: inline-flex;
+  color: var(--color-border);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.review-star-input label.is-on {
+  color: var(--color-accent);
+}
+.review-star-input label:hover {
+  transform: scale(1.08);
+}
+.review-star-input input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.review-star-input label:has(input:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.review-star-input input:disabled {
+  cursor: not-allowed;
+}
+
+/* Hop thoai viet danh gia */
+.review-form {
+  display: grid;
+  gap: 16px;
+}
+.review-form__product {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+.review-form__product img,
+.review-form__product .review-form__thumb {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--color-surface-muted);
+}
+.review-form__product strong {
+  display: block;
+}
+.review-form__product small {
+  color: var(--color-subtle);
+}
+.review-form__rating {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+.review-form__rating p {
+  margin: 0;
+  font-weight: 600;
+}
+.review-form__label {
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: #fff7ed;
+  color: var(--color-accent-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+.review-form textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  resize: vertical;
+}
+.review-form__counter {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-subtle);
+  font-size: 12px;
+  text-align: right;
+}
+.review-form__note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+  font-size: 13px;
+}
+
+/* Nut danh gia tren dong hang cua don */
+.order-item__review {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  grid-column: 1 / -1;
+  justify-self: end;
+  font-size: 13px;
+}
+.order-item__review .account-button {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.order-item__reviewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-subtle);
+}
+
+/* Diem tong hop + loc */
+.rating-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px 32px;
+  align-items: center;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+.rating-summary__score {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 120px;
+}
+.rating-summary__score strong {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--color-accent-strong);
+}
+.rating-summary__score > span:not(.review-stars) {
+  color: var(--color-subtle);
+}
+.rating-summary__score small {
+  color: var(--color-subtle);
+}
+.rating-summary__bars {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.rating-summary__bars li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+.rating-summary__bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+}
+.rating-summary__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+}
+.rating-summary__count {
+  color: var(--color-subtle);
+  text-align: right;
+}
+.review-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+.review-filters button {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.review-filters button[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Danh sach danh gia */
+.pdp-reviews {
+  display: grid;
+  gap: 16px;
+}
+.pdp-reviews h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.review-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.review-list > li + li {
+  border-top: 1px solid var(--color-border);
+}
+.review-item {
+  display: grid;
+  gap: 8px;
+  padding: 16px 0;
+}
+.review-item__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.review-item__head > div {
+  flex: 1;
+  min-width: 0;
+}
+.review-item__avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff7ed;
+  color: var(--color-accent);
+}
+.review-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-subtle);
+  font-size: 12px;
+}
+.review-item__comment {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.review-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.review-images a {
+  display: block;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.review-images img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.review-reply {
+  display: grid;
+  gap: 4px;
+  margin-left: 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  font-size: 14px;
+}
+.review-reply p {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.review-reply small {
+  color: var(--color-subtle);
+}
+.review-empty {
+  margin: 0;
+  padding: 24px 0;
+  color: var(--color-subtle);
+  text-align: center;
+}
+
+/* Kenh nguoi ban (UC-14) */
+.seller-reviews__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.seller-reviews__stat {
+  display: grid;
+  gap: 6px;
+}
+.seller-reviews__stat span {
+  color: var(--color-subtle);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.seller-reviews__stat strong {
+  font-size: 28px;
+}
+.seller-reviews__stat--warn strong {
+  color: var(--color-accent-strong);
+}
+.seller-review-card {
+  display: grid;
+  gap: 10px;
+}
+.seller-review-card__product {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
+  font-size: 14px;
+}
+.seller-review-card__product img,
+.seller-review-card__product .review-form__thumb {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--color-surface-muted);
+}
+.review-badge {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+}
+.review-badge--pending {
+  background: #fff7ed;
+  color: var(--color-accent-strong);
+}
+.review-badge--done {
+  background: #ecfdf5;
+  color: #047857;
+}
+.review-badge--hidden {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.seller-reply-form {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+.seller-reply-form textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  resize: vertical;
+}
+.seller-reply-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .rating-summary {
+    grid-template-columns: 1fr;
+  }
+  .seller-reviews__stats {
+    grid-template-columns: 1fr;
+  }
+}
