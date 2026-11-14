@@ -49,15 +49,18 @@ public class ReviewService {
 	private final ReviewClients clients;
 	private final ReviewOutbox outbox;
 	private final ReviewProperties properties;
+	private final ReturnedOrderService returnedOrders;
 	private final Clock clock;
 	private final TransactionTemplate transactions;
 
 	public ReviewService(ReviewRepository reviews, ReviewClients clients, ReviewOutbox outbox,
-			ReviewProperties properties, Clock clock, PlatformTransactionManager transactionManager) {
+			ReviewProperties properties, ReturnedOrderService returnedOrders, Clock clock,
+			PlatformTransactionManager transactionManager) {
 		this.reviews = reviews;
 		this.clients = clients;
 		this.outbox = outbox;
 		this.properties = properties;
+		this.returnedOrders = returnedOrders;
 		this.clock = clock;
 		this.transactions = new TransactionTemplate(transactionManager);
 	}
@@ -74,6 +77,9 @@ public class ReviewService {
 		if (!REVIEWABLE_STATUSES.contains(order.path("status").asString())) {
 			throw ApiException.unprocessable("ORDER_NOT_COMPLETED", "Chỉ đánh giá được sản phẩm thuộc đơn đã hoàn thành");
 		}
+		if (returnedOrders.isReturned(request.orderId())) {
+			throw orderReturned();
+		}
 		JsonNode item = findItem(order, request.productId());
 		String shopId = item.path("shopId").asString();
 		if (shopId.isBlank()) {
@@ -89,6 +95,10 @@ public class ReviewService {
 			return transactions.execute(status -> {
 				Review review = reviews.saveAndFlush(Review.create(request.orderId(), request.productId(), variantId,
 						shopId, buyerId, request.rating(), comment, images, clock.instant()));
+				// Đơn vừa được chốt trả hàng trong lúc người mua gửi: huỷ thay vì để lại đánh giá hiển thị.
+				if (returnedOrders.isReturned(request.orderId())) {
+					throw orderReturned();
+				}
 				outbox.ratingChanged(review.getId(), review.getProductId());
 				return ReviewResponse.fullView(review);
 			});
@@ -178,6 +188,10 @@ public class ReviewService {
 			}
 		}
 		throw ApiException.unprocessable("PRODUCT_NOT_IN_ORDER", "Sản phẩm không thuộc đơn hàng này");
+	}
+
+	private static ApiException orderReturned() {
+		return ApiException.unprocessable("ORDER_RETURNED", "Đơn hàng đã được trả hàng / hoàn tiền nên không thể đánh giá");
 	}
 
 	private static ApiException alreadyReviewed() {

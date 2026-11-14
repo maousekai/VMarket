@@ -57,6 +57,13 @@ thấy `orderId` nhưng không có `buyerId`; admin và chính người viết t
   khác đoán đúng `orderId` chỉ nhận 404.
 - **"Hoàn thành":** SRS FR-REV-01 yêu cầu đơn "Hoàn thành". Order Service có `DELIVERED` (đã giao) và `COMPLETED`
   (người mua xác nhận đã nhận hàng, hoặc tự chuyển); cả hai đều được đánh giá (`ReviewService.REVIEWABLE_STATUSES`).
+- **Trả hàng / hoàn tiền:** đánh giá chỉ hiển thị từ khi nhận hàng tới trước khi trả hàng. Service nghe
+  `ReturnResolved` (queue `review.events.v1`) — Order Service phát khi yêu cầu trả hàng chuyển `RESOLVED`
+  (đã thu hồi hàng, kích hoạt hoàn tiền; hoặc admin chấp thuận khiếu nại). Khi đó đơn được ghi vào
+  `returned_orders` và mọi đánh giá của đơn chuyển `RETURNED`: không hiển thị công khai, không tính điểm
+  (phát lại `ReviewCreated`), seller không phản hồi được, admin không ẩn / khôi phục được
+  (`409 REVIEW_RETURNED`). Viết đánh giá cho đơn đã trả hàng → `422 ORDER_RETURNED`. Yêu cầu trả hàng còn
+  chờ / đã chấp nhận / bị từ chối thì đánh giá vẫn hiển thị.
 - **Ảnh:** tối đa 5, URL phải thuộc một origin trong `REVIEW_IMAGE_ORIGINS` (khớp chính xác
   scheme + host + port); ngoài localhost bắt buộc https — sai cấu hình thì service không khởi động.
 - **Mỗi sản phẩm trong đơn chỉ đánh giá một lần:** ràng buộc `UNIQUE (order_id, product_id)`
@@ -99,6 +106,8 @@ giá trị tuyệt đối nên consumer xử lý lặp vẫn đúng.
 |---|---|---|
 | 404 | `ORDER_NOT_FOUND` | Đơn không tồn tại hoặc không thuộc người mua |
 | 422 | `ORDER_NOT_COMPLETED` | Đơn chưa ở trạng thái hoàn thành |
+| 422 | `ORDER_RETURNED` | Đơn đã trả hàng / hoàn tiền |
+| 409 | `REVIEW_RETURNED` | Admin ẩn / khôi phục đánh giá của đơn đã trả hàng |
 | 422 | `PRODUCT_NOT_IN_ORDER` | Sản phẩm không có trong đơn |
 | 409 | `REVIEW_ALREADY_EXISTS` | Sản phẩm trong đơn đã được đánh giá |
 | 409 | `REVIEW_HIDDEN` | Seller phản hồi đánh giá đã bị ẩn |

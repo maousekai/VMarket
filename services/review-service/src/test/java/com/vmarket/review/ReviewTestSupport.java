@@ -56,7 +56,8 @@ abstract class ReviewTestSupport {
 
 	@BeforeEach
 	void cleanDatabase() {
-		for (String table : List.of("review_outbox", "product_rating_revisions", "seller_replies", "review_images", "reviews")) {
+		for (String table : List.of("review_outbox", "product_rating_revisions", "seller_replies", "review_images", "reviews",
+				"returned_orders")) {
 			jdbc.update("delete from " + table);
 		}
 	}
