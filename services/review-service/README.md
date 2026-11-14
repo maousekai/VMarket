@@ -49,13 +49,12 @@ thấy `orderId` nhưng không có `buyerId`; admin và chính người viết t
 ## Quy tắc nghiệp vụ
 
 - **Điều kiện đánh giá:** Review Service gọi `GET /api/orders/{orderId}` của Order Service
-  bằng chính token người mua — đơn phải thuộc về họ, ở trạng thái `DELIVERED` (Hoàn thành)
+  bằng chính token người mua — đơn phải thuộc về họ, ở trạng thái `DELIVERED` hoặc `COMPLETED`
   và chứa sản phẩm được đánh giá. `shopId`/`variantId` lấy từ dòng hàng trong đơn, không
   tin dữ liệu client gửi. Quyền sở hữu đơn được kiểm tra trước khi kiểm tra trùng, nên người
   khác đoán đúng `orderId` chỉ nhận 404.
-- **"Hoàn thành" = `DELIVERED`:** SRS FR-REV-01 yêu cầu đơn "Hoàn thành", nhưng Order Service
-  hiện chưa có trạng thái hoàn thành riêng (hay tự chuyển sau N ngày) nên tạm dùng `DELIVERED`
-  (`ReviewService.COMPLETED_STATUS`). Đổi lại khi Order Service bổ sung trạng thái này.
+- **"Hoàn thành":** SRS FR-REV-01 yêu cầu đơn "Hoàn thành". Order Service có `DELIVERED` (đã giao) và `COMPLETED`
+  (người mua xác nhận đã nhận hàng, hoặc tự chuyển); cả hai đều được đánh giá (`ReviewService.REVIEWABLE_STATUSES`).
 - **Ảnh:** tối đa 5, URL phải thuộc một origin trong `REVIEW_IMAGE_ORIGINS` (khớp chính xác
   scheme + host + port); ngoài localhost bắt buộc https — sai cấu hình thì service không khởi động.
 - **Mỗi sản phẩm trong đơn chỉ đánh giá một lần:** ràng buộc `UNIQUE (order_id, product_id)`
