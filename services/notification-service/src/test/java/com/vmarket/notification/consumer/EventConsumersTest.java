@@ -185,6 +185,32 @@ class EventConsumersTest {
 	}
 
 	@Test
+	void returnRequestNotifiesTheShopOwnerWithALinkToReturns() {
+		when(shopOwners.findById("shop-1"))
+				.thenReturn(Optional.of(new ShopOwner("shop-1", "seller-1", "Gốm", 1L, null)));
+
+		new ReturnRequestedConsumer(dispatcher, templates, recipients).handle(new com.vmarket.events.ReturnRequested(
+				"r1", "o1", "shop-1", "buyer-1", "Hàng lỗi", List.of()), envelope);
+
+		ArgumentCaptor<NotificationMessage> message = ArgumentCaptor.forClass(NotificationMessage.class);
+		verify(dispatcher).deliver(eq("seller-1"), message.capture(), eq(envelope));
+		assertThat(message.getValue().type()).isEqualTo(NotificationType.RETURN_REQUESTED);
+		assertThat(message.getValue().link()).isEqualTo("/seller/returns/o1");
+		assertThat(message.getValue().data()).containsEntry("returnId", "r1");
+	}
+
+	@Test
+	void returnRequestForUnknownShopIsSkipped() {
+		when(shopOwners.findById("shop-x")).thenReturn(Optional.empty());
+		when(clients.shopOwner("shop-x")).thenReturn(Optional.empty());
+
+		new ReturnRequestedConsumer(dispatcher, templates, recipients).handle(new com.vmarket.events.ReturnRequested(
+				"r1", "o1", "shop-x", "buyer-1", "Hàng lỗi", List.of()), envelope);
+
+		verifyNoInteractions(dispatcher);
+	}
+
+	@Test
 	void unknownShopOwnerIsFetchedFromShopServiceAndCached() {
 		order("COD");
 		when(clients.shopOwner("shop-unknown"))

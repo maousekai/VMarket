@@ -70,6 +70,9 @@ app:
       - ShopSuspended
       - ProductModerated
       - ReturnResolved
+      # Seller nhan yeu cau tra hang moi (SRS 8.1). Thieu binding nay Order Service khong route duoc
+      # ReturnRequested va outbox chan moi su kien sau cua don (ke ca ReturnResolved).
+      - ReturnRequested
   notification:
     # Khoa API noi bo: goi order-service (nguoi mua / gian hang cua don),
     # auth-service (email nguoi nhan) va shop-service (chu gian hang).
