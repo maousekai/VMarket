@@ -1,10 +1,23 @@
-import { Navigate, Routes, Route, Outlet } from 'react-router-dom'
+import { Navigate, Routes, Route, Outlet, useParams } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
+import { CartProvider } from './cart/CartProvider'
+import CartPage from './pages/CartPage'
+import CheckoutPage from './pages/CheckoutPage'
+import OrderResultPage from './pages/OrderResultPage'
+import VnpayReturnPage from './pages/VnpayReturnPage'
+import OrdersPage from './pages/OrdersPage'
+import OrderDetailPage from './pages/OrderDetailPage'
+import PaymentPage from './pages/PaymentPage'
+import PaymentHistoryPage from './pages/PaymentHistoryPage'
+import PaymentDetailPage from './pages/PaymentDetailPage'
+import NotificationsPage from './pages/NotificationsPage'
+import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import AppHeader from './components/AppHeader'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
 import HomePage from './pages/HomePage'
 import SearchPage from './pages/SearchPage'
+import ProductDetailPage from './pages/ProductDetailPage'
 import AboutPage from './pages/AboutPage'
 import NotFoundPage from './pages/NotFoundPage'
 import LoginPage from './pages/LoginPage'
@@ -21,11 +34,21 @@ import { adminSections } from './pages/adminSections'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import SellerPage from './pages/SellerPage'
 import SellerRegisterPage from './pages/SellerRegisterPage'
+import SellerPaymentInfoPage from './pages/SellerPaymentInfoPage'
 import SellerSettingsPage from './pages/SellerSettingsPage'
 import SellerDashboardPage from './pages/SellerDashboardPage'
+import SellerProductsPage from './pages/SellerProductsPage'
+import SellerProductFormPage from './pages/SellerProductFormPage'
+import SellerOrdersPage from './pages/SellerOrdersPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
 import RoleAreaPage from './pages/RoleAreaPage'
+
+/** Link trong email thong bao (/orders/:id) -> trang chi tiet don cua nguoi mua. */
+function LegacyOrderRedirect() {
+  const { orderId } = useParams()
+  return <Navigate to={`/profile/orders/${encodeURIComponent(orderId)}`} replace />
+}
 
 function ApplicationLayout() {
   return (
@@ -40,52 +63,81 @@ function ApplicationLayout() {
 export default function App() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/verify-email" element={<VerifyEmailPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route element={<RouteGuard roles={['ADMIN']} />}>
-          <Route path="/admin" element={<AdminLayout />}>
-            {adminSections.map(({ Component, ...section }) => {
-              const element = Component ? <Component /> : <AdminPlaceholderPage section={section} />
-              return section.path === '' ? (
-                <Route key="overview" index element={element} />
-              ) : (
-                <Route key={section.path} path={section.path} element={element} />
-              )
-            })}
-            <Route path="*" element={<AdminNotFoundPage />} />
+      <CartProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route element={<RouteGuard roles={['ADMIN']} />}>
+            <Route path="/admin" element={<AdminLayout />}>
+              {adminSections.map(({ Component, ...section }) => {
+                const element = Component ? (
+                  <Component />
+                ) : (
+                  <AdminPlaceholderPage section={section} />
+                )
+                return section.path === '' ? (
+                  <Route key="overview" index element={element} />
+                ) : (
+                  <Route key={section.path} path={section.path} element={element} />
+                )
+              })}
+              <Route path="*" element={<AdminNotFoundPage />} />
+            </Route>
           </Route>
-        </Route>
-        {/* The seller shell has its own top bar; keep it outside ApplicationLayout so the
+          {/* The seller shell has its own top bar; keep it outside ApplicationLayout so the
             storefront header is not rendered above the seller header. */}
-        <Route element={<RouteGuard />}>
-          <Route path="/seller" element={<SellerLayout />}>
-            <Route index element={<SellerPage />} />
-            <Route path="dashboard" element={<SellerDashboardPage />} />
-            <Route path="settings" element={<SellerSettingsPage />} />
-          </Route>
-        </Route>
-        <Route element={<ApplicationLayout />}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/about" element={<AboutPage />} />
           <Route element={<RouteGuard />}>
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/profile/addresses" element={<AddressBookPage />} />
-            <Route path="/profile/password" element={<ChangePasswordPage />} />
-            <Route path="/seller/register" element={<SellerRegisterPage />} />
-            <Route path="/seller/intro" element={<Navigate to="/seller" replace />} />
+            <Route path="/seller" element={<SellerLayout />}>
+              <Route index element={<SellerPage />} />
+              <Route path="dashboard" element={<SellerDashboardPage />} />
+              <Route path="products" element={<SellerProductsPage />} />
+              <Route path="products/new" element={<SellerProductFormPage />} />
+              <Route path="products/:productId/edit" element={<SellerProductFormPage />} />
+              <Route path="orders" element={<SellerOrdersPage />} />
+              <Route path="orders/:orderId" element={<Navigate to="/seller/orders" replace />} />
+              <Route path="payment" element={<SellerPaymentInfoPage />} />
+              <Route path="settings" element={<SellerSettingsPage />} />
+            </Route>
           </Route>
-          <Route path="/shops/:shopId" element={<ShopPublicPage />} />
-          <Route element={<RouteGuard roles={['SHIPPER']} />}>
-            <Route path="/shipper" element={<RoleAreaPage role="SHIPPER" />} />
+          <Route element={<ApplicationLayout />}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/products/:productId" element={<ProductDetailPage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route element={<RouteGuard />}>
+              <Route path="/cart" element={<CartPage />} />
+              <Route path="/checkout" element={<CheckoutPage />} />
+              <Route path="/checkout/success" element={<OrderResultPage />} />
+              <Route path="/checkout/success/:orderId" element={<OrderResultPage />} />
+              <Route path="/payment/vnpay-return" element={<VnpayReturnPage />} />
+              <Route path="/payment/:orderId" element={<PaymentPage />} />
+              <Route path="/profile/payments" element={<PaymentHistoryPage />} />
+              <Route path="/profile/payments/:paymentId" element={<PaymentDetailPage />} />
+              <Route path="/profile/notifications" element={<NotificationsPage />} />
+              <Route
+                path="/profile/notifications/settings"
+                element={<NotificationSettingsPage />}
+              />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/profile/orders" element={<OrdersPage />} />
+              <Route path="/profile/orders/:orderId" element={<OrderDetailPage />} />
+              <Route path="/orders/:orderId" element={<LegacyOrderRedirect />} />
+              <Route path="/profile/addresses" element={<AddressBookPage />} />
+              <Route path="/profile/password" element={<ChangePasswordPage />} />
+              <Route path="/seller/register" element={<SellerRegisterPage />} />
+              <Route path="/seller/intro" element={<Navigate to="/seller" replace />} />
+            </Route>
+            <Route path="/shops/:shopId" element={<ShopPublicPage />} />
+            <Route element={<RouteGuard roles={['SHIPPER']} />}>
+              <Route path="/shipper" element={<RoleAreaPage role="SHIPPER" />} />
+            </Route>
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
-          <Route path="*" element={<NotFoundPage />} />
-        </Route>
-      </Routes>
+        </Routes>
+      </CartProvider>
     </AuthProvider>
   )
 }

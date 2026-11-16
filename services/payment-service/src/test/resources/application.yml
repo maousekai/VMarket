@@ -16,7 +16,7 @@ auth:
 app:
   jobs:
     enabled: false
-  payos:
-    checksum-key: test-checksum-key
+  vnpay:
+    hash-secret: test-hash-secret
   events:
     listen: false

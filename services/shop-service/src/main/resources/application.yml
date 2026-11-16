@@ -53,6 +53,13 @@ management:
 # (whitelist tuong ung o SecurityConfig.PUBLIC_PATHS).
 
 app:
+  # Doi soat quyen dang ban sang product-service (gian hang duyet truoc khi product-service
+  # co queue / su kien bi mat). Chay luc khoi dong va moi INTERVAL.
+  catalog-sync:
+    enabled: ${CATALOG_SYNC_ENABLED:true}
+    interval: ${CATALOG_SYNC_INTERVAL:PT15M}
+    # Doi soat lan dau ngay sau khi khoi dong de bu ban ghi product-service con thieu (vd ten shop).
+    initial-delay: ${CATALOG_SYNC_INITIAL_DELAY:PT1M}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:3000}
   # Khoa API noi bo /internal/** (PBL6-23): notification-service tra chu gian hang.

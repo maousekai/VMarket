@@ -43,7 +43,7 @@ class JwtAuthenticationFilterTest {
 				"/api/auth/sessions",
 				"/api/auth/sessions/**",
 				"/api/auth/health",
-				"/api/payments/webhooks/payos",
+				"/api/payments/webhooks/vnpay",
 				"/api/ai/chat/messages",
 				"/api/ai/chat/health",
 				"/actuator/**"));
@@ -76,9 +76,9 @@ class JwtAuthenticationFilterTest {
 	}
 
 	@Test
-	void payosWebhookIsPublicButNeighbouringPaymentsAreProtected() throws Exception {
+	void vnpayIpnIsPublicButNeighbouringPaymentsAreProtected() throws Exception {
 		var webhook = new MockHttpServletResponse();
-		filter.doFilter(request("POST", "/api/payments/webhooks/payos", null), webhook, new MockFilterChain());
+		filter.doFilter(request("GET", "/api/payments/webhooks/vnpay", null), webhook, new MockFilterChain());
 		assertThat(webhook.getStatus()).isEqualTo(200);
 		var payment = new MockHttpServletResponse();
 		filter.doFilter(request("POST", "/api/payments", null), payment, new MockFilterChain());

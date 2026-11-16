@@ -11,7 +11,7 @@ import java.time.OffsetDateTime;
 
 class PaymentMigrationTest {
     @Test
-    void pendingPayloadsAndOldPaymentDeadlinesSurviveUpgrade() {
+    void pendingPayloadsOldPaymentDeadlinesAndPayosMethodSurviveUpgrade() {
         String url = "jdbc:h2:mem:payment-upgrade;MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
         Flyway.configure().dataSource(url, "sa", "").target("1").load().migrate();
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(url, "sa", ""));
@@ -23,6 +23,8 @@ class PaymentMigrationTest {
                 "insert into event_outbox (id,event_type,payload,created_at) values"
                     + " ('old-event','PaymentSucceeded','{\"orderId\":\"old-order\"}',CURRENT_TIMESTAMP)");
         Flyway.configure().dataSource(url, "sa", "").load().migrate();
+        assertThat(jdbc.queryForObject("select method from payment_transactions", String.class))
+                .isEqualTo("VNPAY");
         assertThat(jdbc.queryForObject("select payload from event_outbox", String.class))
                 .isEqualTo("{\"orderId\":\"old-order\"}");
         assertThat(jdbc.queryForObject("select aggregate_id from event_outbox", String.class))

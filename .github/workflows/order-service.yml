@@ -16,6 +16,8 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/order-service/**"
+      # PBL6-30: anh minh chung tra hang dung thu vien upload dung chung
+      - "services/shared-media/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
       - "services/shared-events/**"
       - "services/pom.xml"
@@ -28,6 +30,7 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/order-service/**"
+      - "services/shared-media/**"
       - "services/shared-events/**"
       - "services/pom.xml"
       - "services/shared-events/**"

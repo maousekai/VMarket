@@ -2,6 +2,8 @@ package com.vmarket.order.exception;
 
 import java.util.List;
 
+import jakarta.persistence.OptimisticLockException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -9,6 +11,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.vmarket.order.dto.ErrorResponse;
@@ -57,11 +61,42 @@ public class GlobalExceptionHandler {
 				.body(ErrorResponse.of("METHOD_NOT_ALLOWED", "Phương thức HTTP không được hỗ trợ cho địa chỉ này"));
 	}
 
+	/** Upload ảnh minh chứng thiếu part {@code file}. */
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	public ResponseEntity<ErrorResponse> handleMissingPart(MissingServletRequestPartException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("MEDIA_FILE_REQUIRED", "Vui lòng chọn file ảnh"));
+	}
+
+	/** File vượt giới hạn multipart của service (6 MB). */
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("MEDIA_FILE_TOO_LARGE", "File ảnh vượt quá dung lượng cho phép"));
+	}
+
 	/** Path không tồn tại — chỉ xảy ra với request đã qua được security. */
 	@ExceptionHandler(NoResourceFoundException.class)
 	public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
 		return ResponseEntity.status(HttpStatus.NOT_FOUND)
 				.body(ErrorResponse.of("NOT_FOUND", "Không tìm thấy tài nguyên"));
+	}
+
+	/**
+	 * Xung đột Optimistic Locking (PBL6-53): hai thao tác cùng sửa một đơn hàng song song.
+	 * Request tới sau bị từ chối với 409 CONCURRENT_MODIFICATION để client tải lại dữ liệu mới nhất,
+	 * thay vì âm thầm ghi đè dữ liệu của nhau.
+	 */
+	@ExceptionHandler({
+			ObjectOptimisticLockingFailureException.class,
+			OptimisticLockException.class
+	})
+	public ResponseEntity<ErrorResponse> handleOptimisticLock(Exception ex) {
+		log.warn("Hai thao tác cùng sửa một đơn hàng song song (PBL6-53): {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(ErrorResponse.of(
+						"CONCURRENT_MODIFICATION",
+						"Đơn hàng vừa được cập nhật bởi một thao tác khác, vui lòng tải lại rồi thử lại"));
 	}
 
 	@ExceptionHandler(Exception.class)

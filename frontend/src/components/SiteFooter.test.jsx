@@ -20,7 +20,7 @@ describe('SiteFooter', () => {
       'href',
       '/seller/register',
     )
-    expect(within(footer).getByText('PayOS')).toBeInTheDocument()
+    expect(within(footer).getByText('VNPay')).toBeInTheDocument()
     expect(within(footer).getByText('COD')).toBeInTheDocument()
     const districts = within(footer).getByRole('heading', {
       name: 'Khu vực phục vụ',

@@ -46,8 +46,8 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("3");
-		assertThat(flyway.info().applied()).hasSize(3);
+		assertThat(current.getVersion().getVersion()).isEqualTo("4");
+		assertThat(flyway.info().applied()).hasSize(4);
 	}
 
 	@Test
@@ -56,7 +56,7 @@ class FlywayMigrationTest {
 			for (String column : new String[] { "owner_id", "name", "name_key", "description", "logo_url",
 					"cover_url", "policies", "contact_email", "contact_phone", "province", "district", "ward",
 					"street_address", "status", "status_reason", "approved_at", "version", "created_at",
-					"updated_at" }) {
+					"updated_at", "bank_code", "bank_account_number" }) {
 				assertThat(columnExists(c, "shops", column)).as("shops.%s", column).isTrue();
 			}
 			for (String column : new String[] { "shop_id", "from_status", "to_status", "reason", "changed_by",

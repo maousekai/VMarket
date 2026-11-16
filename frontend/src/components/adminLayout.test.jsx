@@ -116,9 +116,9 @@ describe('Admin sidebar', () => {
 
   it('navigates when a section is chosen and moves the highlight', () => {
     view('/admin/users')
-    fireEvent.click(nav().getByRole('link', { name: 'Giám sát đơn hàng' }))
-    expect(screen.getByRole('heading', { name: 'Giám sát đơn hàng' })).toBeTruthy()
-    expect(current()).toEqual(['Giám sát đơn hàng'])
+    fireEvent.click(nav().getByRole('link', { name: 'Điều phối Shipper' }))
+    expect(screen.getByRole('heading', { name: 'Điều phối Shipper' })).toBeTruthy()
+    expect(current()).toEqual(['Điều phối Shipper'])
     fireEvent.click(nav().getByRole('link', { name: 'Quản lý người dùng' }))
     expect(screen.getByText('trang Quản lý người dùng')).toBeTruthy()
     expect(current()).toEqual(['Quản lý người dùng'])

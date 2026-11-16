@@ -15,6 +15,8 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -77,6 +79,22 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler({ ConstraintViolationException.class, MissingRequestHeaderException.class })
 	public ResponseEntity<Map<String, Object>> handleRequestValidation(Exception ex, HttpServletRequest request) {
 		return error(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Dữ liệu yêu cầu không hợp lệ",
+				request.getRequestURI(), Map.of());
+	}
+
+	/** Upload ảnh sản phẩm thiếu part {@code file}. */
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	public ResponseEntity<Map<String, Object>> handleMissingPart(MissingServletRequestPartException ex,
+			HttpServletRequest request) {
+		return error(HttpStatus.BAD_REQUEST, "MEDIA_FILE_REQUIRED", "Vui lòng chọn file ảnh",
+				request.getRequestURI(), Map.of());
+	}
+
+	/** File vượt giới hạn multipart của service (6 MB). */
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<Map<String, Object>> handleUploadTooLarge(MaxUploadSizeExceededException ex,
+			HttpServletRequest request) {
+		return error(HttpStatus.BAD_REQUEST, "MEDIA_FILE_TOO_LARGE", "File ảnh vượt quá dung lượng cho phép",
 				request.getRequestURI(), Map.of());
 	}
 

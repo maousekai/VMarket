@@ -9,11 +9,11 @@ const promises = [
   `Giao hàng nội thành ${ACTIVE_CITY.name}`,
   'Theo dõi đơn hàng thời gian thực',
   'Đổi trả trong 7 ngày',
-  'Thanh toán PayOS hoặc khi nhận hàng',
+  'Thanh toán VNPay hoặc khi nhận hàng',
 ]
 
 const payments = [
-  { label: 'PayOS', tone: 'payos' },
+  { label: 'VNPay', tone: 'vnpay' },
   { label: 'VietQR', tone: 'vietqr' },
   { label: 'COD', tone: 'cod' },
 ]

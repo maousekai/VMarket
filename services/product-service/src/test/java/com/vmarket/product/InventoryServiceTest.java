@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.vmarket.product.dto.InventoryRequest;
@@ -30,6 +33,7 @@ import com.vmarket.product.model.ProductVariant;
 import com.vmarket.product.model.ReservationStatus;
 import com.vmarket.product.model.ReturnRestock;
 import com.vmarket.events.StockItem;
+import com.vmarket.events.StockReserved;
 import com.vmarket.product.repository.InventoryReservationRepository;
 import com.vmarket.product.repository.ProductRepository;
 import com.vmarket.product.repository.ReturnRestockRepository;
@@ -128,6 +132,96 @@ class InventoryServiceTest {
 	}
 
 	@Test
+	void sameOrderWithDifferentItemsConflictsWithoutWriting() {
+		InventoryReservation reservation = reservation(ReservationStatus.RESERVED, 3);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.of(reservation));
+
+		assertThatThrownBy(() -> service.reserve(request(4)))
+				.isInstanceOfSatisfying(ApiException.class, error -> {
+					assertThat(error.getCode()).isEqualTo("INVENTORY_CONFLICT");
+					assertThat(error.getStatus().value()).isEqualTo(409);
+				});
+
+		assertThat(reservation.getStatus()).isEqualTo(ReservationStatus.RESERVED);
+		assertThat(reservation.getItems()).singleElement()
+				.satisfies(item -> assertThat(item.getQuantity()).isEqualTo(3));
+		verify(reservationRepository, never()).save(any());
+		verifyNoInteractions(productRepository, publisher);
+	}
+
+	@Test
+	void oneInsufficientProductRejectsTheWholeReservationWithoutWriting() {
+		Product first = product(10, 2);
+		Product second = product(1, 0);
+		second.setId("product-2");
+		second.getVariants().get(0).setId("variant-2");
+		String firstBefore = first.toString();
+		String secondBefore = second.toString();
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+		when(productRepository.findAllById(any())).thenReturn(List.of(first, second));
+		var request = new InventoryRequest("order-1", List.of(
+				new InventoryRequest.InventoryItem("product-1", "variant-1", 3),
+				new InventoryRequest.InventoryItem("product-2", "variant-2", 2)));
+
+		assertThatThrownBy(() -> service.reserve(request))
+				.isInstanceOfSatisfying(ApiException.class, error -> {
+					assertThat(error.getCode()).isEqualTo("INSUFFICIENT_STOCK");
+					assertThat(error.getStatus().value()).isEqualTo(409);
+				});
+
+		assertThat(first.toString()).isEqualTo(firstBefore);
+		assertThat(second.toString()).isEqualTo(secondBefore);
+		verify(productRepository, never()).save(any());
+		verify(productRepository, never()).saveAll(any());
+		verify(reservationRepository, never()).save(any());
+		verifyNoInteractions(publisher);
+	}
+
+	@Test
+	void duplicateItemsAreMergedBeforeSavingAndPublishing() {
+		Product product = product(10, 1);
+		when(reservationRepository.findByOrderId("order-1")).thenReturn(Optional.empty());
+		when(productRepository.findAllById(any())).thenReturn(List.of(product));
+		when(reservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+		when(productRepository.saveAll(any())).thenAnswer(inv -> new ArrayList<>(inv.getArgument(0)));
+		var request = new InventoryRequest("order-1", List.of(
+				new InventoryRequest.InventoryItem("product-1", "variant-1", 2),
+				new InventoryRequest.InventoryItem("product-1", "variant-1", 3)));
+
+		var response = service.reserve(request);
+
+		assertThat(response.status()).isEqualTo(ReservationStatus.RESERVED);
+		assertThat(response.items()).containsExactly(
+				new InventoryRequest.InventoryItem("product-1", "variant-1", 5));
+		assertThat(product.getVariants().get(0).getStock()).isEqualTo(10);
+		assertThat(product.getVariants().get(0).getReservedStock()).isEqualTo(6);
+		var saved = ArgumentCaptor.forClass(InventoryReservation.class);
+		verify(reservationRepository).save(saved.capture());
+		assertThat(saved.getValue().getItems()).singleElement().satisfies(item -> {
+			assertThat(item.getProductId()).isEqualTo("product-1");
+			assertThat(item.getVariantId()).isEqualTo("variant-1");
+			assertThat(item.getQuantity()).isEqualTo(5);
+		});
+		verify(productRepository).saveAll(any());
+		verify(publisher).publishStockReserved(new StockReserved("order-1",
+				List.of(new StockItem("product-1", "variant-1", 5))));
+	}
+
+	@Test
+	void duplicateQuantityOverflowIsRejectedBeforeRepositoryAccess() {
+		var request = new InventoryRequest("order-1", List.of(
+				new InventoryRequest.InventoryItem("product-1", "variant-1", Integer.MAX_VALUE),
+				new InventoryRequest.InventoryItem("product-1", "variant-1", 1)));
+
+		assertThatThrownBy(() -> service.reserve(request))
+				.isInstanceOfSatisfying(ApiException.class, error -> {
+					assertThat(error.getCode()).isEqualTo("INVALID_INVENTORY_REQUEST");
+					assertThat(error.getStatus().value()).isEqualTo(400);
+				});
+		verifyNoInteractions(productRepository, reservationRepository, returnRestockRepository, publisher);
+	}
+
+	@Test
 	void confirmDeductsPhysicalAndReservedStockOnce() {
 		Product product = product(10, 3);
 		InventoryReservation reservation = reservation(ReservationStatus.RESERVED, 3);
@@ -212,7 +306,13 @@ class InventoryServiceTest {
 
 		assertThatThrownBy(() -> service.restockReturn("return-1", "order-1",
 				List.of(new StockItem("product-1", "variant-1", 2))))
-				.isInstanceOf(ApiException.class).hasMessageContaining("vượt số lượng");
+				.isInstanceOfSatisfying(ApiException.class, error -> {
+					assertThat(error.getCode()).isEqualTo("INVALID_RETURN_QUANTITY");
+					assertThat(error.getStatus().value()).isEqualTo(409);
+				});
+		verify(returnRestockRepository, never()).save(any());
+		verify(reservationRepository, never()).save(any());
+		verifyNoInteractions(productRepository, publisher);
 	}
 
 	@Test
@@ -235,6 +335,13 @@ class InventoryServiceTest {
 		when(productRepository.saveAll(any())).thenAnswer(invocation -> new ArrayList<>(invocation.getArgument(0)));
 		assertThat(service.reserve(request(3)).status()).isEqualTo(ReservationStatus.CONFIRMED);
 		assertThat(product.getVariants().get(0).getStock()).isEqualTo(7);
+		assertThat(product.getVariants().get(0).getReservedStock()).isZero();
+		assertThat(product.getVariants().get(0).getSoldCount()).isEqualTo(3);
+		assertThat(product.getSoldCount()).isEqualTo(3);
+		assertThat(pending.getStatus()).isEqualTo(ReservationStatus.CONFIRMED);
+		verify(productRepository, times(2)).saveAll(any());
+		verify(publisher).publishStockReserved(new StockReserved("order-1",
+				List.of(new StockItem("product-1", "variant-1", 3))));
 	}
 
 	@Test
@@ -245,7 +352,10 @@ class InventoryServiceTest {
 		when(reservationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 		service.releaseOrDefer("order-1");
 		assertThat(service.reserve(request(3)).status()).isEqualTo(ReservationStatus.RELEASED);
+		assertThat(pending.getStatus()).isEqualTo(ReservationStatus.RELEASED);
 		verify(productRepository, never()).findAllById(any());
+		verify(productRepository, never()).saveAll(any());
+		verifyNoInteractions(publisher);
 	}
 
 	@Test
@@ -259,7 +369,7 @@ class InventoryServiceTest {
 			return pending[0];
 		});
 		when(returnRestockRepository.findAllByOrderIdAndPendingTrue("order-1"))
-				.thenAnswer(invocation -> List.of(pending[0]));
+				.thenAnswer(invocation -> pending[0].isPending() ? List.of(pending[0]) : List.of());
 		when(returnRestockRepository.findAllByOrderId("order-1")).thenAnswer(invocation -> List.of(pending[0]));
 		Product product = product(10, 3);
 		when(productRepository.findAllById(any())).thenReturn(List.of(product));
@@ -272,8 +382,16 @@ class InventoryServiceTest {
 		service.confirm("order-1");
 
 		assertThat(product.getVariants().get(0).getStock()).isEqualTo(9);
+		assertThat(product.getVariants().get(0).getReservedStock()).isZero();
+		assertThat(product.getVariants().get(0).getSoldCount()).isEqualTo(1);
+		assertThat(product.getSoldCount()).isEqualTo(1);
 		assertThat(pending[0].getProcessedAt()).isNotNull();
 		assertThat(pending[0].isPending()).isFalse();
+		assertThat(service.confirm("order-1").status()).isEqualTo(ReservationStatus.CONFIRMED);
+		assertThat(product.getVariants().get(0).getStock()).isEqualTo(9);
+		assertThat(product.getSoldCount()).isEqualTo(1);
+		verify(productRepository, times(2)).saveAll(any());
+		verify(returnRestockRepository, times(2)).save(any());
 		verify(publisher).publishStockReleased(any());
 	}
 

@@ -41,13 +41,15 @@ public class NotificationDispatcher {
 	private final NotificationRepository notifications;
 	private final PushService pushService;
 	private final EmailService emailService;
+	private final NotificationPreferenceService preferences;
 	private final Clock clock;
 
 	public NotificationDispatcher(NotificationRepository notifications, PushService pushService,
-			EmailService emailService, Clock clock) {
+			EmailService emailService, NotificationPreferenceService preferences, Clock clock) {
 		this.notifications = notifications;
 		this.pushService = pushService;
 		this.emailService = emailService;
+		this.preferences = preferences;
 		this.clock = clock;
 	}
 
@@ -88,10 +90,11 @@ public class NotificationDispatcher {
 		}
 		String dedupKey = dedupKey(recipientId, message, envelope);
 		boolean created = saveInApp(recipientId, dedupKey, message, envelope);
-		if (created && message.push()) {
+		// Thông báo trong ứng dụng luôn được lưu; email / push theo tuỳ chọn của người nhận.
+		if (created && message.push() && preferences.allowsPush(recipientId, message.type())) {
 			pushService.sendToUser(recipientId, message.title(), message.body(), pushData(message));
 		}
-		if (message.email() != null) {
+		if (message.email() != null && preferences.allowsEmail(recipientId, message.type())) {
 			emailService.send(recipientId, dedupKey, message, envelope.eventId());
 		}
 	}

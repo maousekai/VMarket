@@ -252,7 +252,15 @@ export default function ShopPublicPage() {
                     <ProductImage product={product} />
                   </div>
                   <div className="shop-product-card__body">
-                    <h3>{product.name}</h3>
+                    <h3>
+                      {/* The link stretches over the whole card so the card is one click target. */}
+                      <Link
+                        className="shop-product-card__link"
+                        to={`/products/${encodeURIComponent(product.id)}`}
+                      >
+                        {product.name}
+                      </Link>
+                    </h3>
                     <strong>{priceLabel(product)}</strong>
                     <p>
                       {product.soldCount > 0 ? `Đã bán ${product.soldCount}` : 'Sản phẩm mới'}

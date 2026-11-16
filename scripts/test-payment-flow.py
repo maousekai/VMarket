@@ -1,7 +1,8 @@
 """Real Order/Payment/Product + PostgreSQL, RabbitMQ, MongoDB race regression.
 
-Requires Docker, Java 17 and built service jars. Only Cart, User and PayOS HTTP
-are stubbed. All resources have random names/ports; existing databases are never
+Requires Docker, Java 17 and built service jars. Only Cart and User HTTP
+are stubbed (VNPay needs no stub: the payment URL is built locally and the IPN is
+signed here with HMAC-SHA512). All resources have random names/ports; existing databases are never
 used. Run from any directory: python scripts/test-payment-flow.py --build.
 Logs and result.json remain in the printed temporary directory for inspection.
 """
@@ -22,6 +23,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from urllib.parse import quote_plus, urlencode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -29,7 +31,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET = secrets.token_hex(32)
-CHECKSUM = secrets.token_hex(24)
+HASH_SECRET = secrets.token_hex(24)
 BUYER = "01JBQ9YDX7K3M8N5P2R4T6V8W0"
 PRODUCT = "01JBQ9YDX7K3M8N5P2R4T6V8W1"
 VARIANT = "01JBQ9YDX7K3M8N5P2R4T6V8W2"
@@ -73,8 +75,10 @@ def http(method, url, body=None, token=None, expected=200, headers=None):
 
 
 def sign(data):
-    text = "&".join(f"{key}={data[key]}" for key in sorted(data))
-    return hmac.new(CHECKSUM.encode(), text.encode(), hashlib.sha256).hexdigest()
+    """VNPay 2.1.0: sorted params, empty values skipped, URL-encoded, HMAC-SHA512 hex."""
+    text = "&".join(f"{quote_plus(key)}={quote_plus(str(data[key]))}" for key in sorted(data)
+                    if data[key] != "" and key not in ("vnp_SecureHash", "vnp_SecureHashType"))
+    return hmac.new(HASH_SECRET.encode(), text.encode(), hashlib.sha512).hexdigest()
 
 
 def jwt(role, subject=BUYER):
@@ -87,8 +91,6 @@ def jwt(role, subject=BUYER):
 
 class Dependencies(BaseHTTPRequestHandler):
     """These boundary stubs never implement Order, Payment or Inventory logic."""
-    links = {}
-
     def log_message(self, *_):
         pass
 
@@ -106,27 +108,11 @@ class Dependencies(BaseHTTPRequestHandler):
         elif "/addresses/" in self.path:
             self.reply(dict(id=ADDRESS, recipientName="Race Test", phone="0900000000", province="Da Nang",
                             district="Hai Chau", ward="Test", streetAddress="Fixture address"))
-        elif self.path.startswith("/v2/payment-requests/"):
-            data = self.links[int(self.path.rsplit("/", 1)[1])]
-            self.reply(dict(code="00", data=data, signature=sign(data)))
         else:
             self.reply({}, 404)
 
     def do_DELETE(self):
         self.reply(None, 204)
-
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        if self.path.endswith("/cancel"):
-            code = int(self.path.split("/")[-2])
-            if self.links[code]["status"] != "PAID":
-                self.links[code]["status"] = "CANCELLED"
-            self.reply(dict(code="00"))
-        else:
-            code = body["orderCode"]
-            data = self.links.setdefault(code, dict(orderCode=code, amount=body["amount"],
-                        paymentLinkId=f"flow-{code}", status="PENDING", checkoutUrl=f"http://localhost/pay/{code}", qrCode="fixture"))
-            self.reply(dict(code="00", data=data, signature=sign(data)))
 
 
 class Suite:
@@ -226,8 +212,8 @@ class Suite:
                                         "app.cart-service.internal-api-key": SECRET, "app.user-service.base-url": stub})
         datasource["spring.datasource.url"] = datasource["spring.datasource.url"].replace("vmarket_order", "vmarket_payment")
         self.payment = self.start_service("payment-service", {**datasource, "app.order-service.base-url": self.order,
-            "app.payos.enabled": "true", "app.payos.client-id": "fixture", "app.payos.api-key": "fixture",
-            "app.payos.checksum-key": CHECKSUM, "app.payos.base-url": stub})
+            "app.vnpay.enabled": "true", "app.vnpay.tmn-code": "FLOWTEST",
+            "app.vnpay.hash-secret": HASH_SECRET})
         self.product = self.start_service("product-service", {
             "spring.mongodb.uri": f"mongodb://127.0.0.1:{mp[27017]}/vmarket_product?replicaSet=rs0&directConnection=true",
             "app.catalog-migration.enabled": "false"})
@@ -237,7 +223,7 @@ class Suite:
             variants=[dict(_id=VARIANT, sku="fixture", attributes={}, price=3000, currency="VND", stock=20,
                            reservedStock=0, soldCount=0, deleted=False)])) + ")")
 
-    def create(self, method="PAYOS"):
+    def create(self, method="VNPAY"):
         order = http("POST", self.order + "/api/orders", dict(addressId=ADDRESS, paymentMethod=method), self.token, 201)
         oid = order["id"]
         wait_for("stock reserved", lambda: http("GET", self.order + "/api/orders/" + oid, token=self.token)["stockReserved"])
@@ -248,12 +234,15 @@ class Suite:
         return oid, ids.pop()
 
     def send_webhook(self, pid):
-        Dependencies.links[pid]["status"] = "PAID"
-        data = dict(orderCode=pid, amount=3000, currency="VND", paymentLinkId=f"flow-{pid}",
-                    reference=f"bank-{pid}", code="00", transactionDateTime=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-        body = dict(data=data, signature=sign(data))
+        txn_ref = self.sql("vmarket_payment", f"select payment_link_id from payment_transactions where id={pid}")
+        data = {"vnp_TmnCode": "FLOWTEST", "vnp_TxnRef": txn_ref, "vnp_Amount": "300000", "vnp_ResponseCode": "00",
+                "vnp_TransactionStatus": "00", "vnp_TransactionNo": f"bank-{pid}",
+                "vnp_PayDate": time.strftime("%Y%m%d%H%M%S", time.gmtime(time.time() + 7 * 3600))}
+        data["vnp_SecureHash"] = sign(data)
+        url = self.payment + "/api/payments/webhooks/vnpay?" + urlencode(data)
         with concurrent.futures.ThreadPoolExecutor(4) as pool:
-            list(pool.map(lambda _: http("POST", self.payment + "/api/payments/webhooks/payos", body), range(4)))
+            replies = list(pool.map(lambda _: http("GET", url), range(4)))
+        assert all(r["RspCode"] in ("00", "02") for r in replies), replies
 
     @contextlib.contextmanager
     def cancellation_barrier(self, oid):
@@ -287,7 +276,7 @@ class Suite:
         assert (variant["stock"], variant["reservedStock"], variant["soldCount"]) == (20, 0, 0), variant
         for _ in range(2):
             self.publish("PaymentSucceeded", dict(orderId=oid))
-            self.publish("OrderStatusChanged", dict(orderId=oid, previousStatus="CANCELLED", status="CANCELLED", paymentMethod="PAYOS"))
+            self.publish("OrderStatusChanged", dict(orderId=oid, previousStatus="CANCELLED", status="CANCELLED", paymentMethod="VNPAY"))
         # Observe committed work and ACKs, not a fixed sleep, before checking duplicates.
         wait_for("event consumers drained", self.drained)
         assert self.sql("vmarket_payment", f"select count(*) from refund_requests where payment_id={pid}") == "1"
@@ -313,7 +302,7 @@ class Suite:
                     gate.set()
                     pending.result(timeout=30)
             self.assert_final(oid, pid)
-            self.passed.append(f"{first} first; 8 concurrent creates, 4 webhook replays, duplicate broker events, final order/payment/inventory/refund")
+            self.passed.append(f"{first} first; 8 concurrent creates, 4 IPN replays, duplicate broker events, final order/payment/inventory/refund")
         refunds = http("GET", self.payment + "/api/payments/admin/refunds", token=self.admin)
         rid = refunds[0]["id"]
         url = self.payment + f"/api/payments/admin/refunds/{rid}/confirm"
@@ -327,7 +316,7 @@ class Suite:
 
     def recovery(self, oid):
         first, second = str(uuid.uuid4()), str(uuid.uuid4())
-        payload = json.dumps(dict(orderId=oid, previousStatus="CANCELLED", status="CANCELLED", paymentMethod="PAYOS"))
+        payload = json.dumps(dict(orderId=oid, previousStatus="CANCELLED", status="CANCELLED", paymentMethod="VNPAY"))
         self.sql("vmarket_order", "insert into event_outbox (id,event_type,payload,created_at,aggregate_id,state,retry_attempts) values "
                  f"('{first}','OrderStatusChanged','{payload}',current_timestamp - interval '1 minute','{oid}','DEAD',10),"
                  f"('{second}','OrderStatusChanged','{payload}',current_timestamp,'{oid}','PENDING',0)")
@@ -387,7 +376,7 @@ def main():
         subprocess.run([wrapper, "-B", "--no-transfer-progress", "-pl", "order-service,payment-service,product-service", "-am", "package", "-DskipTests"], cwd=ROOT / "services", check=True)
     suite = Suite()
     print(f"Payment flow logs: {suite.output}", flush=True)
-    result = dict(passed=suite.passed, success=False, dependencies="real PostgreSQL/RabbitMQ/MongoDB; Cart/User/PayOS HTTP stubs")
+    result = dict(passed=suite.passed, success=False, dependencies="real PostgreSQL/RabbitMQ/MongoDB; Cart/User HTTP stubs; VNPay IPN signed locally")
     try:
         suite.setup()
         suite.races()

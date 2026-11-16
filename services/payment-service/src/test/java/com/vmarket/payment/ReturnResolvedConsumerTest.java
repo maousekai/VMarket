@@ -48,7 +48,7 @@ class ReturnResolvedConsumerTest {
         tx.setOrderId(ORDER_ID);
         tx.setBuyerId(BUYER_ID);
         tx.setAmount(500000L); // 500,000 VND
-        tx.setMethod("PAYOS");
+        tx.setMethod("VNPAY");
         tx.setStatus("SUCCEEDED");
         tx.setCreatedAt(Instant.parse("2026-11-01T10:00:00Z"));
         tx.setPaidAt(Instant.parse("2026-11-01T10:05:00Z"));

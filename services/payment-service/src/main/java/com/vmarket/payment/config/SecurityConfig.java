@@ -23,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
  * access token qua {@link JwtAuthenticationFilter}.
  *
  * <p>API giao dịch yêu cầu JWT, API đối soát/hoàn tiền yêu cầu Admin. Webhook công khai xác thực
- * bằng chữ ký PayOS trong tầng nghiệp vụ.
+ * bằng chữ ký VNPay trong tầng nghiệp vụ.
  */
 @Configuration
 public class SecurityConfig {
@@ -32,7 +32,7 @@ public class SecurityConfig {
         // Health nghiệp vụ: frontend và monitoring gọi để biết service còn sống,
         // cả hai đều chưa có token.
         "/api/payments/health",
-        "/api/payments/webhooks/payos",
+        "/api/payments/webhooks/vnpay",
         // Spring Security lọc cả dispatch ERROR -> nếu không mở /error thì lỗi
         // trong handler bị biến thành 403 rỗng thay vì trả đúng body lỗi.
         "/error",

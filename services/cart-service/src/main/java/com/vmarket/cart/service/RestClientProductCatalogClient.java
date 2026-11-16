@@ -9,6 +9,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import com.vmarket.cart.config.ProductCatalogProperties;
+import com.vmarket.cart.dto.ProductDetailPayload;
 import com.vmarket.cart.dto.ProductSnapshot;
 import com.vmarket.cart.exception.ProductCatalogUnavailableException;
 
@@ -16,6 +17,10 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Gọi product-service qua REST ({@code GET /api/products/{productId}}).
+ *
+ * <p>Body thật có dạng {@code {product:{...,variants:[...]}, similarProducts:[...]}}
+ * ({@link ProductDetailPayload}); client chuyển nó sang {@link ProductSnapshot} để
+ * {@code CheckoutService} không phụ thuộc hình dạng API bên ngoài.
  *
  * <p>Gửi kèm {@code X-Internal-Api-Key} — cùng quy ước internal API key của
  * docker-compose (user-service cũng dùng). 404 nghĩa là sản phẩm đã bị xoá →
@@ -39,12 +44,12 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 
 	@Override
 	public Optional<ProductSnapshot> findProduct(String productId) {
-		ProductSnapshot snapshot;
+		ProductDetailPayload payload;
 		try {
-			snapshot = restClient.get()
+			payload = restClient.get()
 					.uri("/api/products/{productId}", productId)
 					.retrieve()
-					.body(ProductSnapshot.class);
+					.body(ProductDetailPayload.class);
 		} catch (HttpStatusCodeException ex) {
 			HttpStatusCode status = ex.getStatusCode();
 			if (status.value() == 404) {
@@ -69,6 +74,7 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 					"Phản hồi product-service không đọc được", ex);
 		}
 
+		ProductSnapshot snapshot = payload == null ? null : payload.toSnapshot();
 		if (snapshot == null) {
 			// 200 nhưng không có nội dung: KHÔNG phải "sản phẩm đã bị xoá" (đó là 404),
 			// mà là phản hồi sai hợp đồng — coi như chưa kiểm tra được, không phải NOT_FOUND.

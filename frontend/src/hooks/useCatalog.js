@@ -3,6 +3,7 @@ import useRemoteData from './useRemoteData'
 import { browseProducts, listCategories, PRODUCT_SORT } from '../services/api/productApi'
 import { getForYou } from '../services/api/recommendationApi'
 import { getPublicShop } from '../services/api/shopApi'
+import { sortTree } from '../utils/category'
 
 const HOME_PRODUCT_COUNT = 8
 const FEATURED_SHOP_COUNT = 8
@@ -59,12 +60,26 @@ export function useFeaturedShops() {
   return useRemoteData(load, 'featured-shops')
 }
 
-/** Ket qua tim theo tu khoa/danh muc tu Product Service (tam thoi, truoc khi co Search Service). */
-export function useProductSearch({ keyword, categoryId, sort }) {
-  const key = JSON.stringify([keyword, categoryId, sort])
+/** Cay danh muc dang hien thi (nhieu cap), da sap theo sortOrder. */
+export function useCategoryTree() {
+  const load = useCallback(async () => {
+    const tree = await listCategories()
+    return sortTree(Array.isArray(tree) ? tree : [])
+  }, [])
+  return useRemoteData(load, 'category-tree')
+}
+
+export const SEARCH_PAGE_SIZE = 20
+
+/**
+ * Ket qua duyet / loc tu Product Service (tam thoi, truoc khi co Search Service).
+ * `filters` = {keyword, categoryId, minPrice, maxPrice, minRating, sort, page}.
+ */
+export function useProductSearch(filters) {
+  const key = JSON.stringify(filters)
   const load = useCallback(
-    () => browseProducts({ keyword, categoryId, sort, size: 20 }),
-    [keyword, categoryId, sort],
+    () => browseProducts({ ...JSON.parse(key), size: SEARCH_PAGE_SIZE }),
+    [key],
   )
   return useRemoteData(load, key)
 }

@@ -13,7 +13,16 @@ public enum ImageKind {
 	LOGO("logo gian hàng", 2 * 1024 * 1024, 512, 512, "png"),
 
 	/** Ảnh bìa: vừa trong 1600×900, JPEG, tối đa 5 MB. */
-	COVER("ảnh bìa", 5 * 1024 * 1024, 1600, 900, "jpg");
+	COVER("ảnh bìa", 5 * 1024 * 1024, 1600, 900, "jpg"),
+
+	/**
+	 * Ảnh sản phẩm: vừa trong 1200×1200, JPEG, tối đa 5 MB. Không cắt vuông — giữ
+	 * nguyên khung hình người bán chụp; thẻ sản phẩm tự cắt bằng CSS khi hiển thị.
+	 */
+	PRODUCT("ảnh sản phẩm", 5 * 1024 * 1024, 1200, 1200, "jpg"),
+
+	/** Ảnh minh chứng trả hàng: vừa trong 1600×1600, JPEG, tối đa 5 MB. */
+	EVIDENCE("ảnh minh chứng", 5 * 1024 * 1024, 1600, 1600, "jpg");
 
 	private static final long MAX_PIXELS = 25_000_000L;
 
@@ -51,8 +60,9 @@ public enum ImageKind {
 		return extension;
 	}
 
+	/** Cắt vuông và giữ PNG (trong suốt) — chỉ cho avatar và logo. */
 	public boolean square() {
-		return this != COVER;
+		return this == AVATAR || this == LOGO;
 	}
 
 	public static long maxPixels() {

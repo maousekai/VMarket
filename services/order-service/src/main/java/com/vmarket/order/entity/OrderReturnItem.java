@@ -29,10 +29,10 @@ public class OrderReturnItem extends BaseEntity {
 	@Column(name = "order_item_id", nullable = false, length = ID_LENGTH)
 	private String orderItemId;
 
-	@Column(name = "product_id", nullable = false, length = ID_LENGTH)
+	@Column(name = "product_id", nullable = false, length = CATALOG_ID_LENGTH)
 	private String productId;
 
-	@Column(name = "variant_id", length = ID_LENGTH)
+	@Column(name = "variant_id", length = CATALOG_ID_LENGTH)
 	private String variantId;
 
 	@Column(nullable = false)

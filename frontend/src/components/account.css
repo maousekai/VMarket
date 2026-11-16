@@ -668,10 +668,13 @@
   }
   .account-side-nav {
     display: flex;
+    overflow-x: auto;
   }
   .account-side-nav a {
-    flex: 1;
+    flex: 1 0 auto;
+    padding: 12px 14px;
     text-align: center;
+    white-space: nowrap;
   }
   .account-state,
   .profile-card {

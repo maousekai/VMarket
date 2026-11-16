@@ -45,6 +45,27 @@ class ImageProcessorTest {
 	}
 
 	@Test
+	void product_giuKhungHinhVaThuNhoVeToiDa1200Jpeg() throws IOException {
+		ProcessedImage result = processor.process(jpeg(2400, 1800), ImageKind.PRODUCT);
+
+		assertThat(result.contentType()).isEqualTo("image/jpeg");
+		assertThat(result.extension()).isEqualTo("jpg");
+		BufferedImage output = decode(result.bytes());
+		assertThat(output.getWidth()).isEqualTo(1200);
+		assertThat(output.getHeight()).isEqualTo(900);
+	}
+
+	@Test
+	void evidence_anhDocDuocThuNhoTheoChieuCao() throws IOException {
+		ProcessedImage result = processor.process(jpeg(1000, 3200), ImageKind.EVIDENCE);
+
+		assertThat(result.contentType()).isEqualTo("image/jpeg");
+		BufferedImage output = decode(result.bytes());
+		assertThat(output.getHeight()).isEqualTo(1600);
+		assertThat(output.getWidth()).isEqualTo(500);
+	}
+
+	@Test
 	void cover_anhNhoHonKhongBiPhongTo() throws IOException {
 		ProcessedImage result = processor.process(jpeg(800, 400), ImageKind.COVER);
 

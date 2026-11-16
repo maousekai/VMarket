@@ -54,7 +54,7 @@ Admin có thể đổi shipper tại ASSIGNED/PICKED_UP/IN_TRANSIT/FAILED/RETURN
 
 Các request chuyển trạng thái, phân công, hoàn hàng và retry phải gửi `expectedVersion` lấy từ assignment mới nhất. Ví dụ retry: `{"expectedVersion":5}`. `version` chỉ tăng cho thao tác nghiệp vụ, không tăng khi ping GPS. Yêu cầu cũ sau một lần giao lại bị từ chối `409 STALE_DELIVERY`; vì vậy replay FAILED cũ không bị tính thành thất bại của lần giao mới.
 
-COD lấy từ số tiền Order trả về, không nhận giá tiền do người gọi cung cấp. DELIVERED phải xác nhận đúng số tiền; đơn PAYOS phải xác nhận 0. `CodCollected(orderId,buyerId,amount,reference)` phát một lần trong giao dịch nghiệp vụ; reference là assignmentId, để Payment chống trùng khi hàng đợi gửi lại.
+COD lấy từ số tiền Order trả về, không nhận giá tiền do người gọi cung cấp. DELIVERED phải xác nhận đúng số tiền; đơn VNPAY phải xác nhận 0. `CodCollected(orderId,buyerId,amount,reference)` phát một lần trong giao dịch nghiệp vụ; reference là assignmentId, để Payment chống trùng khi hàng đợi gửi lại.
 
 `DeliveryAssigned` và `DeliveryStatusChanged(orderId,status,version)` được lưu cùng trạng thái trong SQL outbox. Order chỉ áp dụng phiên bản mới hơn, không quay ngược đơn terminal; outbox Order phát OrderStatusChanged sau giao dịch. Chỉ xoá outbox khi RabbitMQ xác nhận ACK và không trả về thông điệp không có route. Consumer phải chấp nhận gửi lại. Nhóm vận hành theo dõi/replay dead-letter khi có lỗi kéo dài.
 
