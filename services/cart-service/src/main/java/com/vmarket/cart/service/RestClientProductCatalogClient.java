@@ -8,6 +8,9 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 import com.vmarket.cart.config.ProductCatalogProperties;
 import com.vmarket.cart.dto.ProductSnapshot;
 import com.vmarket.cart.exception.ProductCatalogUnavailableException;
@@ -28,23 +31,28 @@ public class RestClientProductCatalogClient implements ProductCatalogClient {
 	private static final String INTERNAL_API_KEY_HEADER = "X-Internal-Api-Key";
 
 	private final RestClient restClient;
+	private final ObjectMapper objectMapper;
 
 	public RestClientProductCatalogClient(RestClient.Builder restClientBuilder,
-			ProductCatalogProperties properties) {
+			ProductCatalogProperties properties, ObjectMapper objectMapper) {
 		this.restClient = restClientBuilder
 				.baseUrl(properties.getBaseUrl())
 				.defaultHeader(INTERNAL_API_KEY_HEADER, properties.getApiKey())
 				.build();
+		this.objectMapper = objectMapper;
 	}
 
 	@Override
 	public Optional<ProductSnapshot> findProduct(String productId) {
 		ProductSnapshot snapshot;
 		try {
-			snapshot = restClient.get()
+			JsonNode body = restClient.get()
 					.uri("/api/products/{productId}", productId)
 					.retrieve()
-					.body(ProductSnapshot.class);
+					.body(JsonNode.class);
+			JsonNode product = body != null && body.hasNonNull("product") ? body.get("product") : body;
+			snapshot = product == null || product.isNull() ? null
+					: objectMapper.convertValue(product, ProductSnapshot.class);
 		} catch (HttpStatusCodeException ex) {
 			HttpStatusCode status = ex.getStatusCode();
 			if (status.value() == 404) {

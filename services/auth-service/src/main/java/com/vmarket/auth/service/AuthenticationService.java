@@ -114,7 +114,8 @@ public class AuthenticationService {
 		Instant now = Instant.now();
 
 		if (token.getRevokedAt() != null) {
-			boolean withinGrace = token.getReplacedBy() != null
+			boolean wasRotated = token.getReplacedBy() != null;
+			boolean withinGrace = wasRotated
 					&& token.getRevokedAt().isAfter(now.minus(ROTATION_GRACE));
 			if (withinGrace) {
 				// Thua một request /refresh khác đang chạy song song với CÙNG token cũ
@@ -124,6 +125,12 @@ public class AuthenticationService {
 				// request thắng cuộc — xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống).
 				throw new ApiException("REFRESH_TOKEN_ROTATION_CONFLICT", HttpStatus.UNAUTHORIZED,
 						"Refresh token đã được dùng, hãy dùng token mới nhất");
+			}
+			if (!wasRotated) {
+				// Explicit logout/revoke-others is not evidence of token theft. A revoked
+				// device must not be able to revoke the user's remaining sessions.
+				throw new ApiException("REFRESH_TOKEN_REVOKED", HttpStatus.UNAUTHORIZED,
+						"Phiên đã bị thu hồi, vui lòng đăng nhập lại");
 			}
 			int revoked = refreshTokenRepository.revokeAllActiveByUserId(token.getUserId(), now);
 			log.warn("Dùng lại refresh token đã thu hồi (userId={}), thu hồi {} phiên còn lại",

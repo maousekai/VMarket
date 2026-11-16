@@ -3,12 +3,13 @@ package com.vmarket.cart.dto;
 import java.math.BigDecimal;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
- * Snapshot mới nhất của một sản phẩm lấy từ product-service qua API đồng bộ
- * (FR-CART-03). Hình dạng này là hợp đồng giữa cart-service và
- * {@code GET /api/products/{productId}} của product-service (PBL6-15).
+ * Snapshot chuẩn hóa mới nhất của sản phẩm dùng bởi cart-service (FR-CART-03).
+ * {@code RestClientProductCatalogClient} unwraps the product-service detail envelope
+ * and maps its {@code id} fields into this DTO's {@code productId}/{@code variantId}.
  *
  * <p>{@code @JsonIgnoreProperties(ignoreUnknown = true)} để product-service bổ sung
  * trường mới không làm cart-service đọc lỗi.
@@ -21,16 +22,20 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ProductSnapshot(
+		@JsonAlias("id")
 		String productId,
 		String shopId,
 		BigDecimal price,
+		@JsonAlias("availableStock")
 		Integer stock,
 		List<VariantSnapshot> variants) {
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record VariantSnapshot(
+			@JsonAlias("id")
 			String variantId,
 			BigDecimal price,
+			@JsonAlias("availableStock")
 			Integer stock) {
 	}
 }
