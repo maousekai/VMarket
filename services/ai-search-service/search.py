@@ -17,6 +17,7 @@ from semantic import EmbeddingBusy, content_hash, product_text, validated_vector
 TEXT_FIELDS = ('textVector', 'textHash', 'textFingerprint', 'textState', 'textAttempts',
                'textNextAttempt', 'textError', 'textIndexedAt')
 IMAGE_FIELDS = ('images', 'imageState', 'imageAttempts', 'imageNextAttempt', 'imageError', 'imageIndexedAt')
+META_TTL_SECONDS = 5
 
 
 def normalize(text):
@@ -97,6 +98,8 @@ def hybrid_body(params, terms, settings, vector, fingerprint, threshold):
     body = keyword_body(params, terms, settings)
     lexical = keyword_body({**params, 'sort': 'NEWEST'}, terms, settings)['query']
     lexical = {'script_score': {'query': lexical, 'script': {'source': '_score / (1 + _score)'}}}
+    # shortcut: brute-force cosine over every visible ready doc (textVector index=False, 1 ES processor);
+    # fine for the demo catalog (~100s of products), switch to an indexed dense_vector + kNN before ~10k.
     semantic = {'script_score': {'query': {'bool': {'filter': [*filters(params),
         {'term': {'textState': 'ready'}}, {'term': {'textFingerprint': fingerprint}}, {'exists': {'field': 'textVector'}}]}},
         'script': {'source': "(cosineSimilarity(params.vector, 'textVector') + 1) / 2", 'params': {'vector': vector}},
@@ -153,6 +156,16 @@ class SearchStore:
         self.target = target or settings.alias
         self.managed_alias = target is None
         self.semantic_used = self.semantic_fallback = 0
+        self._meta = None
+
+    def cached_meta(self, client=None):
+        # shortcut: up to META_TTL_SECONDS stale after an alias swap/recalibration (one 503 window per maintenance).
+        cached = self._meta
+        if cached and time.monotonic() - cached[0] < META_TTL_SECONDS:
+            return cached[1]
+        value = self.meta(client)
+        self._meta = (time.monotonic(), value)
+        return value
 
     def meta(self, client=None):
         client = client or self.client
@@ -177,22 +190,30 @@ class SearchStore:
         return name, meta
 
     def keyword(self, params, terms=(), vector=None, fingerprint=None, threshold=None):
-        deadline = time.monotonic() + 0.4
+        started = time.monotonic()
+        deadline = started + self.settings.dependency_timeout
         def bounded():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise SearchError(503, 'SEARCH_UNAVAILABLE', 'Search deadline exceeded')
             return self.client.options(request_timeout=remaining)
-        name, meta = self.meta(client=bounded())
-        threshold = text_threshold(meta, fingerprint) if threshold is None else threshold
-        semantic = vector is not None and threshold is not None and meta.get('textFingerprint') == fingerprint
-        if semantic:
-            vector = validated_vector(vector, meta['textDimensions'])
-            body = hybrid_body(params, terms, self.settings, vector, fingerprint, threshold)
-        else:
-            body = keyword_body(params, terms, self.settings)
-        body['timeout'] = str(max(1, int((deadline - time.monotonic()) * 1000))) + 'ms'
-        result = bounded().search(index=name, body=body, allow_partial_search_results=False)
+        for attempt in range(2):
+            name, meta = self.cached_meta(client=bounded())
+            limit = text_threshold(meta, fingerprint) if threshold is None else threshold
+            semantic = vector is not None and limit is not None and meta.get('textFingerprint') == fingerprint
+            if semantic:
+                body = hybrid_body(params, terms, self.settings, validated_vector(vector, meta['textDimensions']),
+                                   fingerprint, limit)
+            else:
+                body = keyword_body(params, terms, self.settings)
+            body['timeout'] = str(max(1, int((deadline - time.monotonic()) * 1000))) + 'ms'
+            try:
+                result = bounded().search(index=name, body=body, allow_partial_search_results=False)
+                break
+            except NotFoundError:
+                if attempt:
+                    raise
+                self._meta = None  # Cached index retired by an alias swap; re-resolve once.
         shards = result.get('_shards', {})
         if (time.monotonic() > deadline or result.get('timed_out') is not False
                 or shards.get('failed') != 0 or shards.get('successful') != shards.get('total')
@@ -200,7 +221,7 @@ class SearchStore:
             raise SearchError(503, 'SEARCH_UNAVAILABLE', 'Incomplete search response')
         if semantic: self.semantic_used += 1
         else: self.semantic_fallback += 1
-        logging.info('text_search_complete semantic=%s duration_ms=%d', semantic, int((time.monotonic() - deadline + 0.4) * 1000))
+        logging.info('text_search_complete semantic=%s duration_ms=%d', semantic, int((time.monotonic() - started) * 1000))
         total = result["hits"]["total"]["value"]
         return {"keyword": params["keyword"], "results": [public_hit(h) for h in result["hits"]["hits"]],
                 "page": params["page"], "size": params["size"], "totalElements": total, "totalPages": math.ceil(total / params["size"])}
@@ -247,9 +268,10 @@ class SearchStore:
 
     def apply_snapshot(self, snapshot, event_at, fingerprint):
         name, meta = self.meta()
+        source_index = self.target if self.managed_alias else name
         for _ in range(RETRY_ATTEMPTS):
             try:
-                old = self.client.get(index=name, id=snapshot.id)
+                old = self.client.get(index=source_index, id=snapshot.id)
             except NotFoundError:
                 old = None
             document = metadata_document(snapshot, old["_source"] if old else None, fingerprint, event_at,
@@ -257,8 +279,11 @@ class SearchStore:
             if document is None:
                 return
             options = {"if_seq_no": old["_seq_no"], "if_primary_term": old["_primary_term"]} if old else {"op_type": "create"}
+            # Read and write through the alias: after a concurrent alias swap the seq_no guard conflicts
+            # and the retry re-reads the new index instead of landing the write in the retired one.
+            target = {"index": self.target, "require_alias": True} if self.managed_alias else {"index": name}
             try:
-                self.client.index(index=name, id=snapshot.id, document=document, **options)
+                self.client.index(id=snapshot.id, document=document, **target, **options)
                 return
             except ConflictError:
                 continue
@@ -319,7 +344,7 @@ class SearchStore:
         return True
 
     def process_text_job(self, encoder):
-        name, meta = self.meta()
+        name, meta = self.cached_meta()
         if (not self.settings.text_configured or meta.get('searchSchema') != 2
                 or meta.get('textFingerprint') != encoder.fingerprint):
             return False

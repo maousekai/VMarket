@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
+import httpx
 from elasticsearch import NotFoundError
 
 import manage
@@ -34,3 +35,22 @@ class CatalogSyncChecks(unittest.TestCase):
         encoder.assert_not_called()
         store.client.indices.create.assert_not_called()
         self.assertEqual(store.apply_snapshot.call_args.args[2], 'existing-image')
+        store.client.close.assert_called_once()
+
+    def test_transient_failure_is_retried_and_permanent_failure_is_not(self):
+        store = Mock()
+        store.meta.return_value = ('existing', {'encoderFingerprint': 'image'})
+        snapshots = Mock(side_effect=[httpx.ConnectError('product starting'), [snapshot()]])
+        with patch('manage.SearchStore', return_value=store), patch('manage.topology'), \
+                patch('manage.snapshots', snapshots), patch('manage.time.sleep') as sleep:
+            manage.sync_catalog(Settings())
+        self.assertEqual(snapshots.call_count, 2)
+        sleep.assert_called_once_with(1)
+        store.apply_snapshot.assert_called_once()
+
+        snapshots = Mock(side_effect=ValueError('Duplicate outward ID'))
+        with patch('manage.SearchStore', return_value=store), patch('manage.topology'), \
+                patch('manage.snapshots', snapshots), patch('manage.time.sleep'):
+            with self.assertRaises(ValueError):
+                manage.sync_catalog(Settings())
+        self.assertEqual(snapshots.call_count, 1)

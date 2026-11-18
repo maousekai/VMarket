@@ -26,7 +26,6 @@ class SemanticElasticsearchChecks(es_tests.ElasticsearchChecks):
         cls.client.indices.put_alias(index=cls.name, name=cls.alias, is_write_index=True)
 
     def ready(self, product_id, vector):
-        hit = self.client.get(index=self.name, id=product_id)
         self.client.update(index=self.name, id=product_id, doc={'textVector': vector, 'textState': 'ready'})
 
     def hybrid(self, **params):
@@ -190,3 +189,9 @@ class SemanticElasticsearchChecks(es_tests.ElasticsearchChecks):
         finally:
             self.client.indices.delete(index=legacy, ignore_unavailable=True)
             self.client.indices.delete(index=target, ignore_unavailable=True)
+
+
+# Reuse the base fixtures only: the inherited lexical tests already run in test_elasticsearch.
+for _name in unittest.TestLoader().getTestCaseNames(es_tests.ElasticsearchChecks):
+    if _name not in SemanticElasticsearchChecks.__dict__:
+        setattr(SemanticElasticsearchChecks, _name, None)

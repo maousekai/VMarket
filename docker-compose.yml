@@ -98,7 +98,6 @@ x-service-urls: &service-urls
   DELIVERY_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8088
   REVIEW_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8089
   NOTIFICATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8090
-  AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
   RECOMMENDATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8101
   CHATBOT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8102
 
@@ -210,8 +209,12 @@ services:
       timeout: 10s
       retries: 10
 
-  # Elasticsearch belongs to the main Search stack; persistent data stays in its existing volume.
+  # AI Search stack (Elasticsearch + ai-search-*, ~2.5GB) chi chay khi bat profile "search":
+  #   docker compose --profile search up -d ai-search-service api-gateway
+  # Dieu kien truoc: tai model vao services/ai-search-service/models (manage.py weights /
+  # text-weights, xem README cua service); thieu model thi ai-search-text dung lai.
   elasticsearch:
+    profiles: ["search"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
     container_name: VMarket-elasticsearch
     environment:
@@ -237,6 +240,7 @@ services:
 
   ai-search-service:
     <<: *search-image
+    profiles: ["search"]
     container_name: VMarket-ai-search-service
     networks: [vmarket-network]
     mem_limit: 512m
@@ -287,6 +291,7 @@ services:
   # One-shot safe catch-up from Product's authenticated snapshots; never invents calibration.
   ai-search-init:
     <<: *search-image
+    profiles: ["search"]
     container_name: VMarket-ai-search-init
     networks: [vmarket-network]
     mem_limit: 512m
@@ -322,6 +327,7 @@ services:
   # Private FR-SRCH-06 component of AI Search; same image, no published port.
   ai-search-text:
     <<: *search-image
+    profiles: ["search"]
     container_name: VMarket-ai-search-text
     networks: [vmarket-network]
     mem_limit: 1g
@@ -341,7 +347,7 @@ services:
       TEXT_EMBEDDING_PATH: /app/models/multilingual-e5-small
       HF_HUB_OFFLINE: '1'
       TRANSFORMERS_OFFLINE: '1'
-    command: ['uvicorn', 'text_encoder:app', '--host', '0.0.0.0', '--port', '8103', '--workers', '1', '--no-access-log']
+    command: ['uvicorn', '--factory', 'text_encoder:create_encoder_app', '--host', '0.0.0.0', '--port', '8103', '--workers', '1', '--no-access-log']
     healthcheck:
       test: ['CMD', 'python', '-c', "import os, urllib.request; r=urllib.request.Request('http://localhost:8103/internal/health', headers={'X-Internal-Api-Key':os.environ['INTERNAL_API_KEY']}); urllib.request.urlopen(r, timeout=3)"]
       interval: 20s

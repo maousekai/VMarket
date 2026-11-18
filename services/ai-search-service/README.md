@@ -27,11 +27,11 @@ Cache text weights once before starting the native companion. From the repositor
 in PowerShell, after configuring the service `.env`:
 
 ```powershell
-docker compose build ai-search-service
-docker compose run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py weights
-docker compose run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py text-weights
-# Main Compose starts only Search and its real dependencies; no overlay/profile required.
-docker compose up -d ai-search-service api-gateway
+docker compose --profile search build ai-search-service
+docker compose --profile search run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py weights
+docker compose --profile search run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py text-weights
+# Search is opt-in (profile "search", ~2.5GB); a plain `docker compose up -d` never starts it.
+docker compose --profile search up -d ai-search-service api-gateway
 docker compose exec ai-search-service python manage.py text-probe
 ```
 
@@ -93,7 +93,7 @@ model, revision, dimension, API key and `ALLOW_EXTERNAL_EMBEDDING_TEXT=true`; th
 explicitly permits query and product text transmission. Ollama uses its private
 OpenAI-compatible `/v1/embeddings` URL and an operator-pinned model revision. Neither
 provider starts or receives traffic automatically when native inference fails.
-For cloud/Ollama, start the dependencies first and use `docker compose up -d --no-deps
+For cloud/Ollama, start the dependencies first and use `docker compose --profile search up -d --no-deps
 ai-search-service` to omit the native companion. Model/provider changes require matching calibration and rebuild.
 
 Health adds `semantic=ready|degraded|unavailable`. Outstanding/failed text jobs and recent
@@ -105,7 +105,8 @@ Offline and real ES checks run through the existing unit/integration discovery c
 The focused system test is `tests/system/test_semantic_pipeline.py`; it requires explicit
 `SEARCH_SYSTEM_URL`, optional `SEARCH_GATEWAY_URL`, a `fr-srch06-test-` index alias/queue,
 private encoder and real ES/Rabbit settings, and reachability from Search to the runner's
-authenticated snapshot stub on port 8084. It never starts Docker or downloads models.
+authenticated snapshot stub (port of `PRODUCT_SERVICE_URL`, loopback unless
+`SEARCH_STUB_BIND=0.0.0.0` when Search runs in a container). It never starts Docker or downloads models.
 `SEARCH_SEMANTIC_LOAD_SECONDS=5` enables two short 200-user probes with one-second think
 time and catalog text mutations every two seconds; these diagnose capacity, not full-stack
 qualification. Results go to `.local/text-system-quality.json` and `.local/text-system-load.json`.
@@ -170,7 +171,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests/unit -v
 # Switch to repo root; named services start only the required infrastructure:
 Push-Location ../..
-docker compose up -d elasticsearch minio rabbitmq
+docker compose --profile search up -d elasticsearch minio rabbitmq
 Pop-Location
 .\.venv\Scripts\python.exe -m unittest discover -s tests/integration -v
 .\.venv\Scripts\python.exe -m pip install -r requirements-local.txt

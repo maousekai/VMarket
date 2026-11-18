@@ -50,6 +50,9 @@ class TextEmbeddings:
         self.fingerprint = fingerprint(settings)
         self.client = httpx.AsyncClient(trust_env=False, follow_redirects=False, transport=transport,
                                         limits=httpx.Limits(max_connections=8, max_keepalive_connections=2))
+        # One pooled client for the catalog worker instead of a new connection per product.
+        self.catalog_client = httpx.Client(trust_env=False, follow_redirects=False,
+                                           timeout=settings.text_catalog_timeout)
         self.cache = OrderedDict()
         self.counts = Counter()
         self.last_failure = None
@@ -122,19 +125,18 @@ class TextEmbeddings:
     def embed_catalog(self, text):
         body, headers = self.request(text, "catalog")
         started = time.monotonic()
-        with httpx.Client(trust_env=False, follow_redirects=False, timeout=self.settings.text_catalog_timeout) as client:
-            with client.stream("POST", self.settings.text_url.rstrip('/') + "/embeddings", json=body, headers=headers) as response:
-                if response.status_code in (429, 503):
-                    raise EmbeddingBusy()
-                response.raise_for_status()
-                raw = bytearray()
-                for chunk in response.iter_bytes():
-                    if len(raw) + len(chunk) > 262144 or time.monotonic() - started > self.settings.text_catalog_timeout:
-                        raise ValueError("Embedding response limit exceeded")
-                    raw.extend(chunk)
-                vector = self.response(raw)
-                self.last_success = time.monotonic()
-                return vector
+        with self.catalog_client.stream("POST", self.settings.text_url.rstrip('/') + "/embeddings", json=body, headers=headers) as response:
+            if response.status_code in (429, 503):
+                raise EmbeddingBusy()
+            response.raise_for_status()
+            raw = bytearray()
+            for chunk in response.iter_bytes():
+                if len(raw) + len(chunk) > 262144 or time.monotonic() - started > self.settings.text_catalog_timeout:
+                    raise ValueError("Embedding response limit exceeded")
+                raw.extend(chunk)
+            vector = self.response(raw)
+            self.last_success = time.monotonic()
+            return vector
 
     async def probe(self):
         if not self.settings.text_configured:
@@ -155,3 +157,4 @@ class TextEmbeddings:
 
     async def close(self):
         await self.client.aclose()
+        self.catalog_client.close()

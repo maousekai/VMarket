@@ -10,10 +10,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from starlette.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from schemas import SearchError, error_response
 from semantic import EmbeddingBusy, fingerprint, validated_vector
 from settings import Settings
+
+HTTP_CODES = {401: 'UNAUTHORIZED', 404: 'NOT_FOUND', 405: 'METHOD_NOT_ALLOWED'}
+
+
+def failure(request, status, code, message):
+    return error_response(SearchError(status, code, message), request.url.path)
 
 
 class NativeEncoder:
@@ -121,6 +128,10 @@ def create_encoder_app(settings=None, encoder=None):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None,
                   dependencies=[Depends(authenticate)])
 
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request, error):
+        return failure(request, error.status_code, HTTP_CODES.get(error.status_code, 'HTTP_ERROR'), str(error.detail))
+
     @app.get('/internal/health')
     async def health():
         return {'status': 'UP', 'fingerprint': fingerprint(settings)}
@@ -139,7 +150,7 @@ def create_encoder_app(settings=None, encoder=None):
                 raw = bytearray()
                 async for chunk in request.stream():
                     if len(raw) + len(chunk) > 60000:
-                        return JSONResponse({'error': 'Input too large'}, status_code=413)
+                        return failure(request, 413, 'INPUT_TOO_LARGE', 'Input too large')
                     raw.extend(chunk)
             body = json.loads(raw)
             if (role not in ('query', 'catalog') or body.get('model') != settings.text_model
@@ -155,22 +166,19 @@ def create_encoder_app(settings=None, encoder=None):
             while not pending.done():
                 await asyncio.wait({pending}, timeout=0.01)
                 if await request.is_disconnected():
-                    return JSONResponse({'error': 'Caller disconnected'}, status_code=499)
+                    return failure(request, 499, 'CALLER_DISCONNECTED', 'Caller disconnected')
             vector = await pending
             return {'model': settings.text_model, 'fingerprint': fingerprint(settings),
                     'data': [{'object': 'embedding', 'index': 0, 'embedding': vector}]}
         except EmbeddingBusy:
-            return JSONResponse({'error': 'Encoder busy'}, status_code=429)
+            return failure(request, 429, 'ENCODER_BUSY', 'Encoder busy')
         except TimeoutError:
-            return JSONResponse({'error': 'Encoder deadline exceeded'}, status_code=503)
+            return failure(request, 503, 'ENCODER_DEADLINE', 'Encoder deadline exceeded')
         except (ValueError, KeyError, TypeError, AttributeError):
-            return JSONResponse({'error': 'Invalid embedding request'}, status_code=400)
+            return failure(request, 400, 'INVALID_EMBEDDING_REQUEST', 'Invalid embedding request')
         finally:
             if pending is not None:
                 if not pending.done(): pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
 
     return app
-
-
-app = create_encoder_app()

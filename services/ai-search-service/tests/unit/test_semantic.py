@@ -149,11 +149,13 @@ class ClientChecks(unittest.IsolatedAsyncioTestCase):
         app = create_encoder_app(settings, Encoder())
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-                self.assertEqual((await client.get('/internal/health')).status_code, 401)
+                denied = await client.get('/internal/health')
+                self.assertEqual((denied.status_code, denied.json()['error']['code']), (401, 'UNAUTHORIZED'))
                 headers = {'X-Internal-Api-Key': 'private', 'X-Embedding-Role': 'query', 'X-Embedding-Fingerprint': fingerprint(settings),
                            'X-Embedding-Deadline-Ms': str(int((time.time() + 1) * 1000))}
                 self.assertEqual((await client.post('/v1/embeddings', headers=headers, content=b'x' * 60001)).status_code, 413)
-                self.assertEqual((await client.post('/v1/embeddings', headers=headers, json={'input': ['query: a', 'query: b']})).status_code, 400)
+                invalid = await client.post('/v1/embeddings', headers=headers, json={'input': ['query: a', 'query: b']})
+                self.assertEqual((invalid.status_code, invalid.json()['error']['code']), (400, 'INVALID_EMBEDDING_REQUEST'))
                 response = await client.post('/v1/embeddings', headers=headers, json={'model': settings.text_model, 'input': ['query: a']})
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()['data'][0]['embedding'], [1, 0])

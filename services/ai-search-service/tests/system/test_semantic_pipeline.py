@@ -13,6 +13,7 @@ import unittest
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pika
@@ -66,7 +67,9 @@ class SemanticPipeline(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(raw)
             def log_message(self, *_): pass
-        server = ThreadingHTTPServer(('0.0.0.0', 8084), Handler)
+        # Loopback by default; set SEARCH_STUB_BIND=0.0.0.0 when Search runs in a container.
+        bind = (os.environ.get('SEARCH_STUB_BIND', '127.0.0.1'), urlsplit(settings.product_url).port or 8084)
+        server = ThreadingHTTPServer(bind, Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         client = Elasticsearch(settings.es_url, request_timeout=5, max_retries=0)

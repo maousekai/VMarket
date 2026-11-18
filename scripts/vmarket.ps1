@@ -1,7 +1,7 @@
 # VMarket - script quan ly du an cho Windows
 # Cach dung: scripts\vmarket.cmd <lenh>
 #   infra          : bat ha tang nhe (PostgreSQL + MongoDB + Redis + RabbitMQ, ~1.5GB RAM)
-#   infra-search   : bat AI Search + Gateway va cac phu thuoc trong Compose chinh
+#   infra-search   : bat AI Search (profile search, ~2.5GB) + Gateway va cac phu thuoc
 #   infra-monitoring : bat them Loki + Promtail + Prometheus + Grafana (profile monitoring, +~0.9GB)
 #   infra-down     : tat ha tang
 #   build          : build toan bo backend (Maven multi-module, bo qua test)
@@ -46,7 +46,7 @@ switch ($Cmd) {
   }
   "infra-search" {
     Write-Output ">> Bat AI Search + Gateway va cac phu thuoc..."
-    docker compose -f "$root\docker-compose.yml" up -d ai-search-service api-gateway
+    docker compose -f "$root\docker-compose.yml" --profile search up -d ai-search-service api-gateway
   }
   "infra-monitoring" {
     Write-Output ">> Bat ha tang + logging/monitoring (Grafana: http://localhost:3001)..."
@@ -54,7 +54,7 @@ switch ($Cmd) {
   }
   "infra-down" {
     # Kem ca profile, neu khong container cua profile do se bi bo lai.
-    docker compose -f "$root\docker-compose.yml" --profile monitoring down
+    docker compose -f "$root\docker-compose.yml" --profile search --profile monitoring down
   }
   "build" {
     Write-Output ">> Build toan bo backend..."

@@ -14,9 +14,9 @@ import pika
 from elasticsearch import NotFoundError
 from dotenv import dotenv_values
 
-from contract import IMAGE_PATH, INDEX_PREFIX, MAX_PAGE_SIZE, SEARCH_PATH, SNAPSHOTS_PATH
+from contract import IMAGE_PATH, INDEX_PREFIX, MAX_PAGE_SIZE, RETRY_ATTEMPTS, SEARCH_PATH, SNAPSHOTS_PATH
 from diagnostics import log_failure
-from event_consumer import connection_parameters, declare_topology, validate_event
+from event_consumer import connection_parameters, declare_topology, transient, validate_event
 from images import ImageEncoder, WEIGHTS_URL, decoded_image, s3_client
 from llm import Expander
 from schemas import MAX_FILE, Snapshot
@@ -43,9 +43,29 @@ def topology(settings, require_stopped=False):
 
 
 def sync_catalog(settings):
+    # Idempotent catch-up, so a transient ES/Product/Rabbit failure is retried instead of
+    # failing the one-shot ai-search-init container and blocking Search startup.
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            return sync_catalog_once(settings)
+        except Exception as error:
+            if not transient(error) or attempt == RETRY_ATTEMPTS - 1:
+                raise
+            log_failure('sync_catalog_retry', error)
+            time.sleep(2 ** attempt)
+
+
+def sync_catalog_once(settings):
     # Bind durable events before export so concurrent catalog changes are replayed by workers.
     topology(settings)
     store = SearchStore(settings)
+    try:
+        _sync_catalog(settings, store)
+    finally:
+        store.client.close()
+
+
+def _sync_catalog(settings, store):
     try:
         _, meta = store.meta()
     except NotFoundError:
@@ -63,7 +83,6 @@ def sync_catalog(settings):
         store.apply_snapshot(snapshot, int(time.time() * 1000), meta.get('encoderFingerprint'))
         count += 1
     store.client.indices.refresh(index=settings.alias)
-    store.client.close()
     print(f'Synchronized {count} Product snapshots; existing index/calibration preserved')
 
 
@@ -311,6 +330,13 @@ def seed(settings, args):
 
 def retry_images(settings, product_id):
     store = SearchStore(settings)
+    try:
+        _retry_images(store, product_id)
+    finally:
+        store.client.close()
+
+
+def _retry_images(store, product_id):
     name, _ = store.meta()
     hit = store.client.get(index=name, id=product_id)
     source = hit["_source"]
@@ -323,6 +349,13 @@ def retry_images(settings, product_id):
 
 def retry_text(settings, product_id):
     store = SearchStore(settings)
+    try:
+        _retry_text(settings, store, product_id)
+    finally:
+        store.client.close()
+
+
+def _retry_text(settings, store, product_id):
     name, meta = store.meta()
     if meta.get('textFingerprint') != text_fingerprint(settings):
         raise ValueError('Text model/index mismatch; rebuild required')

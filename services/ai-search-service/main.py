@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import tempfile
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -23,6 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("elastic_transport.transport").setLevel(logging.WARNING)
 logging.getLogger("pika").setLevel(logging.WARNING)
+HEALTH_CACHE_SECONDS = 5
 
 
 def create_app(settings=None, store=None, encoder=None, expander=None, run_workers=True, text_embeddings=None):
@@ -74,16 +76,34 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
             log_failure("search_dependency_failed", error)
             raise SearchError(503, "SEARCH_UNAVAILABLE", "Search dependency unavailable") from None
 
+    async def within(awaitable, seconds, fallback):
+        # Each enrichment has its own deadline: a slow LLM must not discard a finished embedding.
+        try:
+            async with asyncio.timeout(seconds):
+                return await awaitable
+        except TimeoutError:
+            return fallback
+
+    async def embed_if_usable(keyword):
+        # Only pay for CPU inference when the index can actually use the vector.
+        if not settings.text_configured:
+            return None
+        try:
+            _, meta = await asyncio.to_thread(store.cached_meta)
+        except Exception:
+            return None  # store.keyword reports the real dependency failure.
+        if text_threshold(meta, text_embeddings.fingerprint) is None:
+            return None
+        return await text_embeddings.query(keyword)
+
     @app.get(SEARCH_PATH)
     async def keyword_search(request: Request):
         params = parse_query(request.query_params, "keyword")
+        keyword = params['keyword']
+        terms, vector = await asyncio.gather(within(expander.expand_query(keyword), settings.llm_timeout_ms / 1000, []),
+                                             within(embed_if_usable(keyword), settings.text_query_ms / 1000, None))
         try:
-            async with asyncio.timeout(0.5):
-                terms, vector = await asyncio.gather(expander.expand_query(params['keyword']), text_embeddings.query(params['keyword']))
-        except TimeoutError:
-            terms, vector = [], None
-        try:
-            async with asyncio.timeout(0.4):
+            async with asyncio.timeout(settings.dependency_timeout):
                 if vector is None:
                     return await dependency_call(store.keyword, params, terms)
                 return await dependency_call(store.keyword, params, terms, vector, text_embeddings.fingerprint)
@@ -127,8 +147,19 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
             else:
                 release(native)
 
+    health_cache = {}
+
     @app.get(HEALTH_PATH)
     async def health():
+        # Public endpoint: probe ES/encoder at most once per HEALTH_CACHE_SECONDS whatever the request rate.
+        cached = health_cache.get('value')
+        if cached and time.monotonic() - cached[0] < HEALTH_CACHE_SECONDS:
+            return cached[1]
+        value = await check_health()
+        health_cache['value'] = (time.monotonic(), value)
+        return value
+
+    async def check_health():
         text = image = "unavailable"
         semantic = 'unavailable'
         try:
