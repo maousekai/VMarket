@@ -173,7 +173,7 @@ class ClientChecks(unittest.IsolatedAsyncioTestCase):
 
     async def test_client_prefix_cache_validation_and_fallback(self):
         from semantic import TextEmbeddings, fingerprint
-        settings = replace(Settings(), text_dims=2)
+        settings = replace(Settings(), text_dims=2, text_enabled=True)
         calls = []
         async def handler(request):
             body = json.loads(request.content)
@@ -232,3 +232,37 @@ class ClientChecks(unittest.IsolatedAsyncioTestCase):
             release.set()
             runner.cancel()
             await asyncio.gather(first, runner, return_exceptions=True)
+
+
+class TextCalibrationChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_recall_wins_within_false_acceptance_limit_and_held_out_gates(self):
+        from text_maintenance import calibrate_text
+
+        class Store:
+            semantic_used = 0
+            client = Mock(search=Mock(return_value={'hits': {'hits': [{'_score': 1.5}, {'_score': 1.9}]}}))
+            def meta(self): return 'index', {}
+            def keyword(self, params, vector=None, fingerprint=None, threshold=None):
+                if vector is None:
+                    return {'results': []}  # every intent query is a lexical miss
+                self.semantic_used += 1
+                kind, i = params['keyword'][1], int(params['keyword'][2:])
+                # 0.5: 100% recall, 10% false acceptance; 0.9: 50% recall, 0% false acceptance.
+                if kind == 'p':
+                    found = threshold <= 0.5 or (threshold <= 0.9 and i < 5)
+                    return {'results': [{'id': f'A{i}'}] if found else []}
+                return {'results': [{'id': 'X'}] if threshold <= -1 or (threshold <= 0.5 and i == 0) else []}
+
+        class Encoder:
+            fingerprint = 'text-fp'
+            def __init__(self, _): pass
+            async def query(self, text): return [1.0]
+            async def close(self): pass
+
+        split = lambda prefix: ([{'keyword': f'{prefix}p{i}', 'acceptableProductIds': [f'A{i}']} for i in range(10)]
+                                + [{'keyword': f'{prefix}n{i}', 'acceptableProductIds': []} for i in range(10)])
+        with patch('text_maintenance.TextEmbeddings', Encoder):
+            report = await calibrate_text(Store(), Settings(), {'calibration': split('c'), 'heldOut': split('h')})
+        self.assertEqual(report['threshold'], 0.5)
+        self.assertEqual((report['heldOut']['recallAt5'], report['heldOut']['falseAcceptance']), (1.0, 0.1))
+        self.assertTrue(report['validated'])

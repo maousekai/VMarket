@@ -209,10 +209,10 @@ services:
       timeout: 10s
       retries: 10
 
-  # AI Search stack (Elasticsearch + ai-search-*, ~2.5GB) chi chay khi bat profile "search":
+  # AI Search stack (Elasticsearch + ai-search-*, ~1.5GB; +1GB khi bat text) chi chay voi profile "search":
   #   docker compose --profile search up -d ai-search-service api-gateway
-  # Dieu kien truoc: tai model vao services/ai-search-service/models (manage.py weights /
-  # text-weights, xem README cua service); thieu model thi ai-search-text dung lai.
+  # Tim kiem tu khoa khong can model. Image search can `manage.py weights` + reindex co
+  # calibration; text (ai-search-text, +1GB) la opt-in, xem README cua service.
   elasticsearch:
     profiles: ["search"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
@@ -277,8 +277,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      ai-search-text:
-        condition: service_started
       ai-search-init:
         condition: service_completed_successfully
     healthcheck:
@@ -325,6 +323,7 @@ services:
     command: ['python', 'manage.py', 'sync-catalog']
 
   # Private FR-SRCH-06 component of AI Search; same image, no published port.
+  # Opt-in with TEXT_EMBEDDING_ENABLED=true: start it explicitly (`up -d ai-search-text`).
   ai-search-text:
     <<: *search-image
     profiles: ["search"]

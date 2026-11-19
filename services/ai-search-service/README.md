@@ -23,15 +23,21 @@ semantic matches to lexical matches. Unavailable embeddings or calibration prese
 lexical search; incomplete/timed-out Elasticsearch searches return 503, never partial counts.
 The private `/v1/embeddings` endpoint requires `X-Internal-Api-Key` and has no gateway route.
 
-Cache text weights once before starting the native companion. From the repository root
-in PowerShell, after configuring the service `.env`:
+Keyword search needs no model files: on an empty Elasticsearch volume `ai-search-init`
+creates a `searchSchema` 1 index even when image weights are missing (image jobs then
+wait for a calibrated reindex). Text semantics are opt-in: `TEXT_EMBEDDING_ENABLED`
+defaults to `false`, so the default index stays readable by builds without FR-SRCH-06.
+From the repository root in PowerShell, after configuring the service `.env`:
 
 ```powershell
 docker compose --profile search build ai-search-service
-docker compose --profile search run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py weights
-docker compose --profile search run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py text-weights
-# Search is opt-in (profile "search", ~2.5GB); a plain `docker compose up -d` never starts it.
+# Search is opt-in (profile "search", ~1.5GB); a plain `docker compose up -d` never starts it.
 docker compose --profile search up -d ai-search-service api-gateway
+# Image search: cache verified weights, then rebuild with calibration (see Local verification).
+docker compose --profile search run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py weights
+# Text semantics (+1GB): cache text weights, set TEXT_EMBEDDING_ENABLED=true, start the companion.
+docker compose --profile search run --rm --no-deps --volume "$($PWD.Path)/services/ai-search-service/models:/app/models:rw" ai-search-service python manage.py text-weights
+docker compose --profile search up -d ai-search-text ai-search-service
 docker compose exec ai-search-service python manage.py text-probe
 ```
 
@@ -67,8 +73,9 @@ alternating admissions while both have work. Query queueing/transport must fit 3
 Startup verifies local model files and warms inference before readiness. No runtime downloads occur.
 
 Existing strict legacy indexes continue keyword/image operations and event ACKs
-without receiving text fields. To enable semantics, stop Search and pause all catalog
-writers, then run the existing maintenance rebuild with both image and text calibration:
+without receiving text fields. To enable semantics, set `TEXT_EMBEDDING_ENABLED=true`,
+stop Search and pause all catalog writers, then run the existing maintenance rebuild with
+both image and text calibration (with text disabled the same rebuild stays image-only):
 
 ```powershell
 # From services/ai-search-service with dependencies and companion reachable:
@@ -84,7 +91,8 @@ disposable fixtures. Quality reports are diagnostic: a failed gate exits nonzero
 rebuild preserves the active alias. Validated text calibration is reused only with the
 same fingerprint. Backend, revision, dimensions or preprocessing changes require rebuild.
 Rebuild verifies vectors, preserves image calibration and checks catalog revisions again
-before alias switching. Catalog overload leaves durable text intent pending without
+before alias switching. Catalog overload or an unreachable encoder (connection loss while
+it restarts) leaves durable text intent pending without
 exhausting retries; processing failures have three persisted attempts and manual recovery.
 
 Use `TEXT_EMBEDDING_*` settings from the env examples independently of `EMBEDDING_*`
@@ -250,6 +258,14 @@ unchanged and retain the candidate for diagnosis. Retry with a fresh target. Lat
 rebuilds can omit `--calibration` only when the existing encoder fingerprint matches,
 calibration is explicitly validated, and its threshold is finite and in [-1,1].
 Never roll an alias back after new events have been acknowledged; rebuild.
+
+Rollback to a build without FR-SRCH-06 (it reads only `searchSchema` 1): **before**
+reverting the code, pause catalog writers, set `TEXT_EMBEDDING_ENABLED=false` and run
+`manage.py reindex --maintenance --target vmarket-products-v1-rollback-<suffix>` on the
+current build. It rebuilds a schema 1 index from the latest Product snapshots, reuses the
+validated image calibration, rechecks revisions and only then moves the alias. Verify
+`searchSchema` is 1 in the alias mapping `_meta`, then deploy the older build and resume
+writers. Text vectors stay in the retired index for diagnosis.
 Without valid matching calibration, image search returns 503. There is no arbitrary
 0.70 default or automatic catalog bootstrap during requests.
 

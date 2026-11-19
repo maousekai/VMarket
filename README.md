@@ -93,8 +93,10 @@ docker compose up -d postgres mongo mongo-init-replica redis rabbitmq minio
 # Chỉ định lẻ khi cần
 docker compose up -d postgres redis
 
-# AI Search + Gateway; Compose starts only their required dependencies
-docker compose up -d --build ai-search-service api-gateway
+# AI Search + Gateway; Compose starts only their required dependencies.
+# Keyword search chạy được khi chưa có model; image search cần weights + reindex có calibration,
+# text semantic là opt-in (TEXT_EMBEDDING_ENABLED) — xem services/ai-search-service/README.md
+docker compose --profile search up -d --build ai-search-service api-gateway
 
 # Loki + Promtail + Prometheus + Grafana (~0.9GB) chỉ bật khi cần xem log/dashboard
 docker compose --profile monitoring up -d

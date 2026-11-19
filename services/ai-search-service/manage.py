@@ -72,7 +72,11 @@ def _sync_catalog(settings, store):
         if store.client.indices.exists(index=settings.alias):
             raise ValueError('Search alias is occupied; use explicit maintenance recovery') from None
         encoder = ImageEncoder(settings)
-        encoder.load()
+        try:
+            encoder.load()
+        except (OSError, ValueError) as error:
+            # Keyword search must not wait for image weights; image jobs stay pending until a calibrated reindex.
+            log_failure('bootstrap_without_image_weights', error)
         definition = index_definition(encoder.fingerprint, settings,
             text_fingerprint(settings) if settings.text_enabled else None)
         definition['aliases'] = {settings.alias: {'is_write_index': True}}
@@ -263,7 +267,8 @@ def reindex(settings, args):
             meta['textCalibration'] = report
         else:
             if text_threshold(previous_meta or {}, text_fingerprint(settings)) is None:
-                raise ValueError('Matching validated text calibration required; provide --text-calibration')
+                raise ValueError('TEXT_EMBEDDING_ENABLED=true needs a matching validated text calibration; '
+                                 'provide --text-calibration or set TEXT_EMBEDDING_ENABLED=false for an image-only rebuild')
             meta['textCalibration'] = previous_meta['textCalibration']
     # Recheck after calibration; quiescence remains an operator prerequisite.
     current = {s.id: s.productVersion for s in snapshots(settings)}

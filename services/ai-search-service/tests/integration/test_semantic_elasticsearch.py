@@ -3,7 +3,10 @@ import unittest
 import uuid
 from dataclasses import replace
 
+import httpx
+
 import test_elasticsearch as es_tests
+from contract import RETRY_ATTEMPTS
 from test_elasticsearch import product
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -103,6 +106,48 @@ class SemanticElasticsearchChecks(es_tests.ElasticsearchChecks):
             self.assertEqual(self.client.get(index=self.name, id='a')['_source']['textAttempts'], attempt)
             self.client.update(index=self.name, id='a', doc={'textNextAttempt': 0}, refresh=True)
         self.assertEqual(self.client.get(index=self.name, id='a')['_source']['textState'], 'failed')
+
+    def test_encoder_connection_loss_stays_pending_until_recovery(self):
+        self.apply(product('a'))
+        outer = self
+        class Down:
+            fingerprint = outer.fp
+            def embed_catalog(self, text): raise httpx.ConnectError('encoder restarting')
+        for _ in range(RETRY_ATTEMPTS + 2):
+            SearchStore(self.settings, self.client).process_text_job(Down())
+            source = self.client.get(index=self.name, id='a')['_source']
+            self.assertEqual((source['textState'], source['textAttempts']), ('pending', 0))
+            self.client.update(index=self.name, id='a', doc={'textNextAttempt': 0}, refresh=True)
+        class Up(Down):
+            def embed_catalog(self, text): return [1] + [0] * 383
+        SearchStore(self.settings, self.client).process_text_job(Up())
+        self.assertEqual(self.client.get(index=self.name, id='a')['_source']['textState'], 'ready')
+
+    def test_rollback_rebuild_returns_alias_to_schema_one_with_latest_versions(self):
+        from manage import reindex
+        _, meta = self.store.meta()
+        self.client.indices.put_mapping(index=self.name, _meta={**meta, 'calibration': {
+            'fingerprint': 'test-fp', 'validated': True, 'threshold': 0.8}})
+        self.apply(product('kept', 3))
+        target = 'vmarket-products-v1-test-rollback-' + uuid.uuid4().hex
+        class Image:
+            fingerprint = 'test-fp'
+            def load(self): pass
+        try:
+            with patch('manage.ImageEncoder', return_value=Image()), patch('manage.topology'), \
+                    patch('manage.snapshots', side_effect=lambda _: iter([product('kept', 3)])):
+                reindex(replace(self.settings, text_enabled=False),
+                        SimpleNamespace(maintenance=True, target=target, calibration=None, text_calibration=None))
+            self.assertEqual(set(self.client.indices.get_alias(name=self.alias)), {target})
+            mapping = self.client.indices.get_mapping(index=target)[target]['mappings']
+            # The pre-FR-SRCH-06 reader accepts only searchSchema 1.
+            self.assertEqual(mapping['_meta']['searchSchema'], 1)
+            self.assertNotIn('textVector', mapping['properties'])
+            self.assertEqual(self.client.get(index=target, id='kept')['_source']['productVersion'], 3)
+        finally:
+            self.client.indices.update_aliases(actions=[{'remove': {'index': target, 'alias': self.alias, 'must_exist': False}},
+                {'add': {'index': self.name, 'alias': self.alias, 'is_write_index': True}}])
+            self.client.indices.delete(index=target, ignore_unavailable=True)
 
     def test_metadata_change_during_inference_preserves_job_outcome(self):
         outer = self

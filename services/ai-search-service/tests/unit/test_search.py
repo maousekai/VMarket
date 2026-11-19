@@ -269,7 +269,7 @@ class LLMChecks(unittest.IsolatedAsyncioTestCase):
             return ["late"]
         expander = Mock(expand_query=slow)
         embeddings = Mock(fingerprint=fp, query=AsyncMock(return_value=[1.0] + [0.0] * 383))
-        app = create_app(replace(Settings(), llm_timeout_ms=20), store, Mock(), expander, run_workers=False,
+        app = create_app(replace(Settings(), llm_timeout_ms=20, text_enabled=True), store, Mock(), expander, run_workers=False,
                          text_embeddings=embeddings)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             self.assertEqual((await client.get("/api/ai/search?keyword=ao")).status_code, 200)

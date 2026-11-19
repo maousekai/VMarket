@@ -128,8 +128,13 @@ async def calibrate_text(store, settings, manifest):
 
         evaluated = [(threshold, evaluate(groups['calibration'], threshold)) for threshold in sorted(choices)]
         eligible = [(t, r) for t, r in evaluated if r['falseAcceptance'] <= 0.1]
-        candidates = eligible or evaluated
-        threshold, calibration = max(candidates, key=lambda item: (-item[1]['falseAcceptance'], item[1]['baselineMissRecallAt5'], item[1]['recallAt5'], item[0]))
+        if eligible:
+            # Within the false-acceptance limit, recall decides; held-out evaluation below is the real gate.
+            key = lambda item: (min(item[1]['recallAt5'], item[1]['baselineMissRecallAt5']), item[1]['recallAt5'],
+                                -item[1]['falseAcceptance'], item[0])
+        else:
+            key = lambda item: (-item[1]['falseAcceptance'], item[1]['baselineMissRecallAt5'], item[1]['recallAt5'], item[0])
+        threshold, calibration = max(eligible or evaluated, key=key)
         held = evaluate(groups['heldOut'], threshold)
         validated = bool(eligible) and held['recallAt5'] >= 0.8 and held['baselineMissRecallAt5'] >= 0.8 and held['falseAcceptance'] <= 0.1
         return {'fingerprint': encoder.fingerprint, 'threshold': threshold, 'validated': validated,

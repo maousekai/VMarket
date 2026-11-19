@@ -63,7 +63,8 @@ class Settings:
     embedding_model: str = env_field("EMBEDDING_MODEL", "mobilenet_v3_small")
     weights: str = env_field("EMBEDDING_WEIGHTS_PATH", str(ROOT / "models/mobilenet_v3_small.pth"))
     weights_sha256: str = env_field("EMBEDDING_WEIGHTS_SHA256", "")
-    text_enabled: bool = env_field("TEXT_EMBEDDING_ENABLED", True, boolean)
+    # Opt-in: a fresh index stays searchSchema 1 (readable by older builds) until text is calibrated.
+    text_enabled: bool = env_field("TEXT_EMBEDDING_ENABLED", False, boolean)
     text_provider: str = env_field("TEXT_EMBEDDING_PROVIDER", "native")
     text_url: str = env_field("TEXT_EMBEDDING_URL", "http://127.0.0.1:8103/v1")
     text_model: str = env_field("TEXT_EMBEDDING_MODEL", "intfloat/multilingual-e5-small")

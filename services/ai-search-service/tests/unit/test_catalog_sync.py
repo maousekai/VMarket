@@ -23,7 +23,22 @@ class CatalogSyncChecks(unittest.TestCase):
         self.assertNotIn('calibration', options['body']['mappings']['_meta'])
         self.assertNotIn('textCalibration', options['body']['mappings']['_meta'])
         self.assertIn(Settings().alias, options['body']['aliases'])
+        # Default stays readable by builds without FR-SRCH-06 (rollback safety).
+        self.assertEqual(options['body']['mappings']['_meta']['searchSchema'], 1)
         store.apply_snapshot.assert_called_once()
+
+    def test_missing_image_weights_still_bootstrap_keyword_index(self):
+        store = Mock()
+        store.meta.side_effect = NotFoundError('missing', Mock(status=404), {})
+        store.client.indices.exists.return_value = False
+        encoder = Mock(fingerprint=None)
+        encoder.load.side_effect = FileNotFoundError('mobilenet_v3_small.pth')
+        with patch('manage.SearchStore', return_value=store), patch('manage.topology'), \
+                patch('manage.ImageEncoder', return_value=encoder), patch('manage.snapshots', return_value=[snapshot()]):
+            manage.sync_catalog(Settings())
+        meta = store.client.indices.create.call_args.kwargs['body']['mappings']['_meta']
+        self.assertEqual((meta['searchSchema'], meta['encoderFingerprint']), (1, None))
+        self.assertIsNone(store.apply_snapshot.call_args.args[2])
 
     def test_existing_alias_and_model_metadata_are_preserved(self):
         store = Mock()

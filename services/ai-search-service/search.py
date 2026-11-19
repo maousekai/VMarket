@@ -18,6 +18,10 @@ TEXT_FIELDS = ('textVector', 'textHash', 'textFingerprint', 'textState', 'textAt
                'textNextAttempt', 'textError', 'textIndexedAt')
 IMAGE_FIELDS = ('images', 'imageState', 'imageAttempts', 'imageNextAttempt', 'imageError', 'imageIndexedAt')
 META_TTL_SECONDS = 5
+# shortcut: fixed retry delay while the encoder is unreachable; add exponential backoff if outages get long.
+TEXT_UNAVAILABLE_BACKOFF_SECONDS = 5
+# Connection-level only: a read timeout still spends an attempt so a stuck job cannot spin forever.
+ENCODER_UNREACHABLE = (httpx.NetworkError, httpx.ConnectTimeout, httpx.RemoteProtocolError)
 
 
 def normalize(text):
@@ -365,8 +369,10 @@ class SearchStore:
             vector = encoder.embed_catalog(product_text(source))
             source.update(textVector=validated_vector(vector, meta['textDimensions']), textState='ready',
                           textError=None, textIndexedAt=int(time.time() * 1000))
-        except EmbeddingBusy:
-            source.update(textAttempts=source['textAttempts'] - 1, textNextAttempt=int((time.time() + 1) * 1000))
+        except (EmbeddingBusy, *ENCODER_UNREACHABLE) as error:
+            # Overload or encoder (re)starting: not a product failure, so no attempt is spent.
+            delay = 1 if isinstance(error, EmbeddingBusy) else TEXT_UNAVAILABLE_BACKOFF_SECONDS
+            source.update(textAttempts=source['textAttempts'] - 1, textNextAttempt=int((time.time() + delay) * 1000))
         except Exception as error:
             log_failure('catalog_text_failed', error)
             source.update(textState='failed' if source['textAttempts'] >= RETRY_ATTEMPTS else 'pending',
