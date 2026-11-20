@@ -243,7 +243,7 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 
 		releaseReturn.countDown();
 		returning.get(20, TimeUnit.SECONDS);
-		assertThat(reviewing.get(20, TimeUnit.SECONDS)).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+		assertThat(reviewing.get(20, TimeUnit.SECONDS)).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 		assertThat(jdbc.queryForObject("select count(*) from reviews", Long.class)).isZero();
 	}
 
@@ -286,7 +286,7 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 		returning.get(20, TimeUnit.SECONDS);
 
 		// Dù bên nào giành khoá trước, không có đánh giá nào còn hiển thị.
-		assertThat(reviewStatus).isIn(HttpStatus.CREATED, HttpStatus.UNPROCESSABLE_ENTITY);
+		assertThat(reviewStatus).isIn(HttpStatus.CREATED, HttpStatus.UNPROCESSABLE_CONTENT);
 		assertThat(jdbc.queryForObject("select count(*) from reviews where status = 'VISIBLE'", Long.class)).isZero();
 	}
 
