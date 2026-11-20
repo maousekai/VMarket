@@ -143,6 +143,8 @@ app:
     # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi
     # nhau trực tiếp qua URL nội bộ (BACKEND_SERVICES_HOST), kèm X-Internal-Api-Key.
     internal-deny-paths:
+      - /internal/**
+      - /api/*/internal/**
       - /api/products/internal/**
       - /api/shops/internal/**
       - /api/users/internal/**

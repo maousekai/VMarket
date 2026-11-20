@@ -34,9 +34,11 @@ import lombok.extern.slf4j.Slf4j;
  *       chữ ký HS256 bằng khoá dùng chung với auth-service, kiểm {@code iss} và
  *       {@code exp}; principal là {@code sub} (userId). Đây là đường của mọi
  *       request từ browser (đi qua API Gateway).</li>
- *   <li><b>Cuộc gọi nội bộ</b> — {@code X-Internal-Api-Key} đúng khoá cấu hình thì
- *       tin {@code X-User-Id} đi kèm (đường của order-service khi đọc/xoá giỏ lúc
- *       đặt hàng). Khoá nằm ở biến môi trường phía server, không có trong frontend.</li>
+ *   <li><b>Cuộc gọi nội bộ</b> — chỉ trên {@code /internal/**}: {@code X-Internal-Api-Key}
+ *       đúng khoá cấu hình thì tin {@code X-User-Id} đi kèm (đường của order-service
+ *       khi đọc/xoá giỏ lúc đặt hàng). Trên route công khai {@code /api/cart/**} khoá
+ *       bị bỏ qua (PBL6-50). Khoá nằm ở biến môi trường phía server, không có trong
+ *       frontend.</li>
  * </ol>
  *
  * <p><b>Vì sao không tin thẳng header {@code X-User-Id}.</b> Gateway (PBL6-38) có
@@ -62,8 +64,11 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 	/** Claim vai trò: mảng chuỗi {@code ["BUYER","ADMIN"]} khớp {@code RoleName} của auth-service. */
 	private static final String ROLES_CLAIM = "roles";
 
-	/** Quyền của cuộc gọi nội bộ (chưa cần dùng, đặt sẵn để phân biệt nguồn gọi). */
+	/** Quyền của cuộc gọi nội bộ — {@code SecurityConfig} đòi quyền này cho {@code /internal/**}. */
 	public static final String INTERNAL_AUTHORITY = "ROLE_INTERNAL";
+
+	/** Tiền tố route nội bộ — nơi duy nhất chấp nhận khoá {@code X-Internal-Api-Key}. */
+	public static final String INTERNAL_PREFIX = "/internal";
 
 	private final SecretKey key;
 	private final byte[] internalApiKey;
@@ -83,7 +88,9 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 			String token = extractBearer(request);
 			if (token != null) {
 				authenticateWithToken(token);
-			} else {
+			} else if (isInternalPath(request)) {
+				// Khoá nội bộ CHỈ có hiệu lực trên /internal/** (PBL6-50): route công
+				// khai /api/cart/** luôn đòi access token, kể cả khi khoá bị lộ.
 				authenticateInternalCall(request);
 			}
 		}
@@ -136,6 +143,19 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 			return;
 		}
 		setAuthentication(userId, List.of(new SimpleGrantedAuthority(INTERNAL_AUTHORITY)));
+	}
+
+	/**
+	 * Path nội bộ. Dùng {@code getServletPath()} (đã giải mã, chuẩn hoá, bỏ
+	 * {@code ;param}) — cùng cách Spring Security khớp {@code /internal/**} — để hai
+	 * nơi không hiểu khác nhau về một path lạ.
+	 */
+	static boolean isInternalPath(HttpServletRequest request) {
+		String path = request.getServletPath();
+		if (request.getPathInfo() != null) {
+			path = path + request.getPathInfo();
+		}
+		return path.equals(INTERNAL_PREFIX) || path.startsWith(INTERNAL_PREFIX + "/");
 	}
 
 	private void setAuthentication(String userId, List<SimpleGrantedAuthority> authorities) {

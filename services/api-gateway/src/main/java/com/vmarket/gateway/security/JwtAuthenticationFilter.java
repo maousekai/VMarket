@@ -67,6 +67,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	public static final String HEADER_USER_EMAIL = "X-User-Email";
 	public static final String HEADER_USER_USERNAME = "X-User-Username";
 	public static final String HEADER_USER_EMAIL_VERIFIED = "X-User-Email-Verified";
+	/** Khoá nội bộ giữa các service (viết thường để so khớp không phân biệt hoa thường). */
+	static final String HEADER_INTERNAL_API_KEY = "x-internal-api-key";
 
 	private static final String BEARER_PREFIX = "Bearer ";
 
@@ -123,9 +125,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * bao giờ đi qua cổng công khai (PBL6-15 Review 3, defense-in-depth).
 	 */
 	private boolean isInternalApiRequest(HttpServletRequest request) {
-		String path = request.getRequestURI();
+		String raw = request.getRequestURI();
+		// Bỏ tham số ma trận (";a=b") trước khi so: route predicate của gateway bỏ qua
+		// chúng, nên "/api/products;x/internal/..." vẫn được định tuyến — không được để
+		// nó lọt qua danh sách chặn (PBL6-50).
+		String path = raw.replaceAll(";[^/]*", "");
 		for (String pattern : securityProperties.getInternalDenyPaths()) {
-			if (pathMatcher.match(pattern, path)) {
+			if (pathMatcher.match(pattern, path) || pathMatcher.match(pattern, raw)) {
 				return true;
 			}
 		}
@@ -258,8 +264,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			return Collections.enumeration(names);
 		}
 
+		/**
+		 * Header do gateway quản lý, client không được tự gửi: {@code X-User-*}
+		 * (danh tính) và {@code X-Internal-Api-Key} (khoá service-to-service, PBL6-50 —
+		 * nếu lọt qua, ai biết khoá có thể mạo danh người dùng ở service đích).
+		 */
 		private static boolean isIdentityHeader(String name) {
-			return name != null && name.toLowerCase(java.util.Locale.ROOT).startsWith("x-user-");
+			if (name == null) {
+				return false;
+			}
+			String lower = name.toLowerCase(java.util.Locale.ROOT);
+			return lower.startsWith("x-user-") || lower.equals(HEADER_INTERNAL_API_KEY);
 		}
 	}
 }

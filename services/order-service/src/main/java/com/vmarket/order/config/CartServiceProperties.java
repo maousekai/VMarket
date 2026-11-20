@@ -14,7 +14,7 @@ import lombok.Setter;
 /**
  * Kết nối tới cart-service ({@code app.cart-service.*}).
  *
- * <p>Order-service đọc giỏ hàng qua API {@code /api/cart/**} của cart-service khi
+ * <p>Order-service đọc giỏ hàng qua API {@code /internal/cart/**} của cart-service khi
  * đặt hàng (FR-ORDER-01) và xoá giỏ sau khi tạo đơn thành công.
  *
  * <p><b>Cần khoá nội bộ.</b> Từ PBL6-16 (soát xét PR #23), cart-service TỰ verify
