@@ -209,4 +209,35 @@ describe('ChatWidget', () => {
     expect(sendChatMessage).toHaveBeenCalledTimes(2)
     expect(within(panel).getAllByText('Chính sách đổi trả như thế nào?')).toHaveLength(1)
   })
+
+  it('drops a reply that arrives after the account changed', async () => {
+    let resolveReply
+    sendChatMessage.mockReturnValue(new Promise((resolve) => (resolveReply = resolve)))
+    const tree = (auth) => (
+      <AuthContext.Provider value={auth}>
+        <MemoryRouter initialEntries={['/products/p1']}>
+          <ChatWidget />
+        </MemoryRouter>
+      </AuthContext.Provider>
+    )
+    const { rerender } = render(tree(buyer))
+    const panel = openPanel()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Đơn hàng của tôi đang ở đâu?' }))
+    expect(await within(panel).findByText('Trợ lý đang trả lời…')).toBeInTheDocument()
+
+    const other = { session: { userId: 'u2', roles: ['BUYER'] }, bootstrapState: 'ready' }
+    rerender(tree(other))
+    resolveReply(reply({ conversationId: CONVERSATION, intent: 'order_lookup', reply: 'Đơn #A1' }))
+
+    const current = screen.getByRole('dialog', { name: 'Trợ lý VMarket' })
+    await waitFor(() =>
+      expect(within(current).queryByText('Trợ lý đang trả lời…')).not.toBeInTheDocument(),
+    )
+    expect(within(current).queryByText('Đơn #A1')).not.toBeInTheDocument()
+    expect(
+      within(current).queryByText('Đơn hàng của tôi đang ở đâu?', { selector: 'p' }),
+    ).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('vmarket.chat.u2')).toBeNull()
+    expect(within(current).getByRole('button', { name: 'Gửi' })).toBeInTheDocument()
+  })
 })

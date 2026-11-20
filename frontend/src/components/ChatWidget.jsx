@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { getApiError } from '../services/api/apiClient'
@@ -190,6 +190,10 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(null)
   const returnTo = `${location.pathname}${location.search}`
+  // Phien dang hien thi. Moi yeu cau ghi nho phien da tao ra no; phan hoi ve sau khi phien doi
+  // (dang xuat / doi tai khoan o tab khac) bi bo, khong hien hay luu vao phien moi.
+  const sessionRef = useRef(userId)
+  const isStale = (startedFor) => sessionRef.current !== startedFor
 
   // Doi tai khoan / dang xuat: khong de lo hoi thoai cua nguoi truoc.
   if (owner !== userId) {
@@ -198,18 +202,27 @@ export default function ChatWidget() {
     setMessages([])
     setLoadedFor(null)
     setFailed(null)
+    setSending(false)
     setView('chat')
   }
 
+  // Layout effect: cap nhat ngay khi commit, truoc khi phan hoi nao cua phien cu kip chay tiep.
+  useLayoutEffect(() => {
+    sessionRef.current = userId
+  }, [userId])
+
   const openConversation = useCallback(async (id) => {
+    const startedFor = sessionRef.current
     setView('chat')
     setFailed(null)
     setLoadedFor(id)
     try {
       const page = await listConversationMessages(id)
+      if (sessionRef.current !== startedFor) return
       setConversationId(id)
       setMessages((page.messages || []).map(fromServer))
     } catch (failure) {
+      if (sessionRef.current !== startedFor) return
       // Hoi thoai khong con (hoac cua nguoi khac): bat dau hoi thoai moi.
       if (getApiError(failure).status === 404) {
         setConversationId(null)
@@ -243,6 +256,7 @@ export default function ChatWidget() {
   async function send(text) {
     const message = text.trim()
     if (!message || sending) return
+    const startedFor = sessionRef.current
     setSending(true)
     setFailed(null)
     setInput('')
@@ -250,6 +264,7 @@ export default function ChatWidget() {
     setMessages((current) => [...current, { id: pendingId, role: 'user', content: message }])
     try {
       const reply = await sendChatMessage({ message, conversationId })
+      if (isStale(startedFor)) return
       if (reply.conversationId) {
         setConversationId(reply.conversationId)
         setLoadedFor(reply.conversationId)
@@ -267,6 +282,7 @@ export default function ChatWidget() {
         },
       ])
     } catch (failure) {
+      if (isStale(startedFor)) return
       const problem = getApiError(failure)
       if (problem.code === 'CONVERSATION_NOT_FOUND') {
         setConversationId(null)
@@ -282,7 +298,7 @@ export default function ChatWidget() {
         retry: message,
       })
     } finally {
-      setSending(false)
+      if (!isStale(startedFor)) setSending(false)
     }
   }
 
