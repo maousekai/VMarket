@@ -156,11 +156,28 @@ app:
     #       methods: [POST]
     #       roles: [ADMIN]
     role-required-paths: []
-  # Rate limit co ban (fixed-window theo IP). Xem RateLimitProperties.
+  # Rate limit (fixed-window theo client IP). Xem RateLimitProperties.
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     capacity: ${APP_RATE_LIMIT_CAPACITY:200}
     window-seconds: ${APP_RATE_LIMIT_WINDOW_SECONDS:60}
+    # memory = dem trong RAM tung instance; redis = dem chung giua cac instance
+    # (Redis loi thi tam dem trong RAM).
+    store: ${APP_RATE_LIMIT_STORE:memory}
+    # Proxy duoc tin de doc X-Forwarded-For: IP, CIDR hoac ten host, cach nhau
+    # dau phay. De trong = khong tin XFF tu dau ca (dung getRemoteAddr()).
+    trusted-proxies: ${APP_RATE_LIMIT_TRUSTED_PROXIES:}
+
+# Redis cho rate limit (chi dung khi app.rate-limit.store=redis). Timeout ngan de
+# Redis cham/sap khong keo request; khi loi gateway tu chuyen sang dem trong RAM.
+spring.data.redis:
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  timeout: 200ms
+  connect-timeout: 500ms
+
+# Redis chi la bo dem rate limit co phuong an du phong -> khong de no lam health DOWN.
+management.health.redis.enabled: false
 
 info:
   app:

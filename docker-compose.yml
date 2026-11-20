@@ -739,6 +739,14 @@ services:
       APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
       APP_RATE_LIMIT_CAPACITY: ${APP_RATE_LIMIT_CAPACITY:-200}
       APP_RATE_LIMIT_WINDOW_SECONDS: ${APP_RATE_LIMIT_WINDOW_SECONDS:-60}
+      # Bo dem dung chung qua Redis (Redis loi -> tam dem trong RAM cua gateway).
+      APP_RATE_LIMIT_STORE: ${APP_RATE_LIMIT_STORE:-redis}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # Chi tin X-Forwarded-For tu nginx cua container frontend (tra DNS theo ten
+      # service vi IP container doi moi lan khoi dong lai). Request goi thang cong
+      # gateway thi dem theo IP ket noi, XFF tu gui bi bo qua.
+      APP_RATE_LIMIT_TRUSTED_PROXIES: ${APP_RATE_LIMIT_TRUSTED_PROXIES:-frontend}
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     # host-gateway: giu host.docker.internal hoat dong ca tren Linux
