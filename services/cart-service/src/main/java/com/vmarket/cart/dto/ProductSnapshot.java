@@ -25,6 +25,23 @@ public record ProductSnapshot(
 		Integer stock,
 		List<VariantSnapshot> variants) {
 
+	/**
+	 * Giá hiện tại của dòng hàng: theo biến thể nếu có {@code variantId}, ngược lại là
+	 * giá của sản phẩm (chỉ có khi sản phẩm có đúng một biến thể).
+	 *
+	 * @return {@code null} khi biến thể không tồn tại hoặc không xác định được giá
+	 */
+	public BigDecimal priceFor(String variantId) {
+		if (variantId == null) {
+			return price;
+		}
+		return variants == null ? null : variants.stream()
+				.filter(v -> variantId.equals(v.variantId()))
+				.map(VariantSnapshot::price)
+				.findFirst()
+				.orElse(null);
+	}
+
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record VariantSnapshot(
 			String variantId,

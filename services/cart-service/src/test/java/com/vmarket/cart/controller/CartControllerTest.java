@@ -208,6 +208,22 @@ class CartControllerTest {
 				.andExpect(jsonPath("$.totalAmount").value(200000));
 	}
 
+	/** PBL6-48: client cũ còn gửi unitPrice (kể cả 0) → request vẫn hợp lệ, giá bị bỏ qua. */
+	@Test
+	void themItem_giaDoClientGui_biBoQua() throws Exception {
+		when(cartService.addItem(eq("user-1"), any())).thenReturn(sampleCart());
+
+		mockMvc.perform(post("/api/cart/items")
+						.header(HttpHeaders.AUTHORIZATION, tokenFor("user-1"))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"productId":"p1","shopId":"shop-1","quantity":2,"unitPrice":0}
+								"""))
+				.andExpect(status().isCreated());
+
+		verify(cartService).addItem("user-1", new com.vmarket.cart.dto.AddCartItemRequest("p1", null, "shop-1", 2));
+	}
+
 	@Test
 	void capNhatItemKhongTonTai_tra404() throws Exception {
 		when(cartService.updateQuantity("user-1", "missing", null, 1))

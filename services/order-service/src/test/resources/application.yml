@@ -44,6 +44,8 @@ app:
     base-url: http://user-service.test:8082
   shop-service:
     base-url: http://shop-service.test:8083
+  product-service:
+    base-url: http://product-service.test:8084
 
 auth:
   jwt:

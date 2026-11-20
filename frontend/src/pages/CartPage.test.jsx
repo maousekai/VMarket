@@ -280,7 +280,7 @@ describe('AddToCartActions', () => {
   const product = { id: 'p1', shopId: 's1' }
   const variant = { id: 'v1', price: 249000 }
 
-  it('adds the selected variant with its current price', async () => {
+  it('adds the selected variant without sending a price', async () => {
     addCartItem.mockResolvedValue(cartOf(polo))
     renderWithCart(<AddToCartActions product={product} variant={variant} quantity={2} />, {
       path: '/products/p1',
@@ -292,7 +292,6 @@ describe('AddToCartActions', () => {
       variantId: 'v1',
       shopId: 's1',
       quantity: 2,
-      unitPrice: 249000,
     })
   })
 

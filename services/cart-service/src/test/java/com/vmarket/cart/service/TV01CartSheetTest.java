@@ -48,6 +48,7 @@ class TV01CartSheetTest {
 	private StringRedisTemplate redis;
 	private ValueOperations<String, String> ops;
 	private CartService service;
+	private FakeProductCatalog catalog;
 
 	@BeforeEach
 	@SuppressWarnings("unchecked")
@@ -59,7 +60,8 @@ class TV01CartSheetTest {
 		when(ops.get(anyString())).thenAnswer(inv -> store.get(inv.getArgument(0)));
 		doAnswer(inv -> store.put(inv.getArgument(0), inv.getArgument(1)))
 				.when(ops).set(anyString(), anyString(), any(Duration.class));
-		service = new CartService(redis, mapper, new CartProperties());
+		catalog = new FakeProductCatalog();
+		service = new CartService(redis, mapper, new CartProperties(), catalog);
 	}
 
 	@AfterEach
@@ -224,8 +226,9 @@ class TV01CartSheetTest {
 		return new CartService.StoredItem(product, variant, SHOP, quantity, new BigDecimal("100000"), T0, T0);
 	}
 
-	private static AddCartItemRequest add(String product, String variant, String shop, int qty, String price) {
-		return new AddCartItemRequest(product, variant, shop, qty, new BigDecimal(price));
+	private AddCartItemRequest add(String product, String variant, String shop, int qty, String price) {
+		catalog.list(product, variant, shop, new BigDecimal(price));
+		return new AddCartItemRequest(product, variant, shop, qty);
 	}
 
 	private static String limitProduct(int i) { return "product-limit-%03d".formatted(i); }
