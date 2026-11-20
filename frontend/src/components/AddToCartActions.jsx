@@ -7,6 +7,9 @@ import { getApiError } from '../services/api/apiClient'
 const messages = {
   CART_ITEM_LIMIT_EXCEEDED: 'Giỏ hàng đã đủ 50 sản phẩm. Hãy thanh toán hoặc xoá bớt.',
   CART_QUANTITY_LIMIT_EXCEEDED: 'Mỗi sản phẩm chỉ được tối đa 999 trong giỏ.',
+  PRODUCT_NOT_FOUND: 'Sản phẩm hoặc phân loại này không còn bán.',
+  VARIANT_REQUIRED: 'Hãy chọn phân loại sản phẩm trước khi thêm vào giỏ.',
+  PRODUCT_CATALOG_UNAVAILABLE: 'Chưa lấy được giá sản phẩm, vui lòng thử lại sau ít phút.',
 }
 
 /** "Thêm vào giỏ" / "Mua ngay" cho trang chi tiết; khách chưa đăng nhập được đưa tới /login. */
@@ -34,7 +37,6 @@ export default function AddToCartActions({ product, variant, quantity, soldOut }
         variantId: variant.id,
         shopId: product.shopId,
         quantity,
-        unitPrice: variant.price,
       })
       if (buyNow) {
         navigate('/cart', { state: { select: `${product.id}::${variant.id}` } })

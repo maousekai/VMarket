@@ -88,6 +88,9 @@ app:
     base-url: ${USER_SERVICE_URL:http://localhost:8082}
   shop-service:
     base-url: ${SHOP_SERVICE_URL:http://localhost:8083}
+  # Gia hien tai cua san pham luc dat hang (PBL6-48): khong tin gia luu trong gio.
+  product-service:
+    base-url: ${PRODUCT_SERVICE_URL:http://localhost:8084}
 
 # JWT - order-service chi VERIFY token do auth-service ky (HS256, khoa doi xung nen
 # hai ben phai dung CHUNG mot chuoi bi mat). Vi vay dung chung prefix `auth.jwt` va

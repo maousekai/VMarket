@@ -1,8 +1,9 @@
 import apiClient from './apiClient'
 
 // Cart Service (PBL6-16): gio nam tren server (Redis) theo userId trong token, nen web va
-// mobile cung doc mot gio. Gia (unitPrice) la gia luc them vao gio; /validate doi chieu lai
-// voi Product Service truoc khi thanh toan.
+// mobile cung doc mot gio. Gia (unitPrice) do Cart Service lay tu Product Service luc them
+// vao gio (client khong gui gia, PBL6-48); /validate doi chieu lai va cap nhat gia moi truoc
+// khi thanh toan.
 
 export const CART_LIMITS = Object.freeze({ maxQuantity: 999, maxLines: 50 })
 
@@ -11,14 +12,13 @@ const variantParams = (variantId) => (variantId ? { params: { variantId } } : un
 
 export const getCart = async () => (await apiClient.get('/api/cart')).data
 
-export const addCartItem = async ({ productId, variantId, shopId, quantity, unitPrice }) =>
+export const addCartItem = async ({ productId, variantId, shopId, quantity }) =>
   (
     await apiClient.post('/api/cart/items', {
       productId,
       variantId: variantId || null,
       shopId,
       quantity,
-      unitPrice,
     })
   ).data
 

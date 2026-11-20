@@ -162,6 +162,22 @@ export default function CheckoutPage() {
       })
     } catch (failure) {
       const apiError = getApiError(failure)
+      if (apiError.code === 'PRICE_CHANGED' || apiError.code === 'PRODUCT_UNAVAILABLE') {
+        // Gia/san pham doi giua luc kiem tra va luc dat (PBL6-48): /validate cap nhat gio sang
+        // gia moi, nguoi mua xem lai trong gio roi dat lai.
+        await validateCart().catch(() => {})
+        await Promise.allSettled([cart.refresh()])
+        navigate('/cart', {
+          replace: true,
+          state: {
+            message:
+              apiError.code === 'PRICE_CHANGED'
+                ? 'Giá sản phẩm vừa thay đổi. Giỏ hàng đã cập nhật giá mới, vui lòng kiểm tra lại rồi đặt hàng.'
+                : 'Có sản phẩm không còn bán, vui lòng kiểm tra lại giỏ hàng.',
+          },
+        })
+        return
+      }
       idempotency.current.reuse = apiError.retryable
       setError(apiError.message)
       setSubmitting('')

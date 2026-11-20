@@ -72,6 +72,8 @@ class CheckoutServiceTest {
 		assertThat(response.ok()).isFalse();
 		assertThat(response.issues().get(0).type()).isEqualTo(CheckoutService.TYPE_PRICE_CHANGED);
 		assertThat(response.issues().get(0).currentPrice()).isEqualByComparingTo("89000");
+		// PBL6-48: giỏ được cập nhật sang giá hiện tại để người mua đặt lại được
+		org.mockito.Mockito.verify(cartService).refreshPrice("user-1", "p1", null, new BigDecimal("89000"));
 	}
 
 	@Test
