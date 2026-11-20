@@ -1,7 +1,7 @@
 # VMarket - script quan ly du an cho Windows
 # Cach dung: scripts\vmarket.cmd <lenh>
 #   infra          : bat ha tang nhe (PostgreSQL + MongoDB + Redis + RabbitMQ, ~1.5GB RAM)
-#   infra-search   : bat them Elasticsearch (profile search, +~1GB - chi khi lam AI Search)
+#   infra-search   : bat AI Search (profile search, ~2.5GB) + Gateway va cac phu thuoc
 #   infra-monitoring : bat them Loki + Promtail + Prometheus + Grafana (profile monitoring, +~0.9GB)
 #   infra-down     : tat ha tang
 #   build          : build toan bo backend (Maven multi-module, bo qua test)
@@ -41,12 +41,12 @@ function Start-Service($name) {
 switch ($Cmd) {
   "infra" {
     Write-Output ">> Bat ha tang nhe (postgres, mongo, redis, rabbitmq)..."
-    docker compose -f "$root\docker-compose.yml" up -d
+    docker compose -f "$root\docker-compose.yml" up -d postgres mongo mongo-init-replica redis rabbitmq minio
     docker compose -f "$root\docker-compose.yml" ps --format "table {{.Name}}\t{{.Status}}"
   }
   "infra-search" {
-    Write-Output ">> Bat ha tang + Elasticsearch..."
-    docker compose -f "$root\docker-compose.yml" --profile search up -d
+    Write-Output ">> Bat AI Search + Gateway va cac phu thuoc..."
+    docker compose -f "$root\docker-compose.yml" --profile search up -d ai-search-service api-gateway
   }
   "infra-monitoring" {
     Write-Output ">> Bat ha tang + logging/monitoring (Grafana: http://localhost:3001)..."
@@ -85,7 +85,7 @@ switch ($Cmd) {
   default {
     Write-Output "VMarket - cac lenh:"
     Write-Output "  vmarket infra            bat ha tang nhe (PG+Mongo+Redis+RabbitMQ)"
-    Write-Output "  vmarket infra-search     bat them Elasticsearch"
+    Write-Output "  vmarket infra-search     bat AI Search + Gateway va cac phu thuoc"
     Write-Output "  vmarket infra-monitoring bat them Loki + Prometheus + Grafana (log/dashboard)"
     Write-Output "  vmarket infra-down       tat ha tang"
     Write-Output "  vmarket build            build toan bo backend"

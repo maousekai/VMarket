@@ -66,6 +66,8 @@ class Workers:
         self.stop = threading.Event()
         self.synchronized = False
         self.metadata_lag_ms = self.image_lag_ms = None
+        self.text_lag_ms = None
+        self.text_embeddings = None
         self.dead_letters = 0
         self.quarantined = 0
         self.metadata_backlog = None
@@ -196,10 +198,38 @@ class Workers:
                 self.stop.wait(2)
 
     def start(self):
-        for function in (self.consume, self.images):
+        functions = [self.consume, self.images]
+        if self.text_embeddings and self.settings.text_configured:
+            functions.append(self.texts)
+        for function in functions:
             thread = threading.Thread(target=function, daemon=True, name=function.__name__)
             thread.start()
             self.threads.append(thread)
+
+    def texts(self):
+        next_lag = 0
+        while not self.stop.is_set():
+            try:
+                worked = self.store.process_text_job(self.text_embeddings)
+                # Lag needs 2 ES calls; refresh it only after work or every SYNC_CHECK_SECONDS when idle.
+                if worked or time.monotonic() >= next_lag:
+                    self.text_lag_ms = self.measure_text_lag()
+                    next_lag = time.monotonic() + SYNC_CHECK_SECONDS
+                self.stop.wait(0.1 if worked else 1)
+            except Exception as error:
+                self.text_lag_ms = None
+                log_failure('text_worker_unavailable', error)
+                self.stop.wait(2)
+
+    def measure_text_lag(self):
+        name, meta = self.store.meta()
+        if meta.get('searchSchema') != 2:
+            return None
+        result = self.store.client.search(index=name, body={'size': 0,
+            'query': {'terms': {'textState': ['pending', 'failed']}},
+            'aggs': {'oldest': {'min': {'field': 'eventAt'}}}})
+        oldest = result['aggregations']['oldest']['value']
+        return max(0, int(time.time() * 1000 - oldest)) if oldest is not None else 0
 
     def close(self):
         self.stop.set()

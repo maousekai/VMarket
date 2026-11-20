@@ -1,7 +1,9 @@
 import json
+import threading
 import time
 import unittest
 from concurrent.futures import Future
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -113,7 +115,29 @@ class RecoveryChecks(unittest.TestCase):
             workers.close()
 
 
+class TextWorkerChecks(unittest.TestCase):
+    def test_idle_text_worker_backs_off_and_unconfigured_text_starts_no_thread(self):
+        store = Mock(settings=Settings())
+        store.process_text_job.return_value = False
+        store.meta.return_value = ("index", {})
+        workers = Workers(store, Mock())
+        workers.text_embeddings = Mock()
+        thread = threading.Thread(target=workers.texts)
+        thread.start()
+        time.sleep(0.5)
+        workers.stop.set()
+        thread.join(2)
+        self.assertEqual(store.process_text_job.call_count, 1)
+
+        disabled = Workers(Mock(settings=replace(Settings(), text_enabled=False)), Mock())
+        disabled.text_embeddings = Mock()
+        with patch("event_consumer.threading.Thread") as started:
+            disabled.start()
+        self.assertEqual([call.kwargs["name"] for call in started.call_args_list], ["consume", "images"])
+
+
 class HealthChecks(unittest.IsolatedAsyncioTestCase):
+    @patch("main.HEALTH_CACHE_SECONDS", 0)
     async def test_health_requires_fresh_drained_metadata_and_no_failures(self):
         store = Mock(settings=Settings())
         store.meta.return_value = ("index", {})

@@ -35,7 +35,7 @@ VMarket/
 │   ├── delivery-service/      # Giao hàng, định vị shipper (8088, PostgreSQL)
 │   ├── review-service/        # Đánh giá sản phẩm (8089, PostgreSQL)
 │   ├── notification-service/  # Thông báo, email, FCM (8090, MongoDB)
-│   ├── ai-search-service/     # FR-SRCH-01–05 (8100, FastAPI + Elasticsearch + CPU PyTorch)
+│   ├── ai-search-service/     # FR-SRCH-01–06 (8100, FastAPI + Elasticsearch + CPU PyTorch)
 │   ├── recommendation-service/# Gợi ý sản phẩm (8101, FastAPI + PostgreSQL + Redis)
 │   └── chatbot-service/       # Chatbot RAG (8102, FastAPI + MongoDB)
 ├── frontend/                  # Web end-user (React + Vite, cổng 5173)
@@ -93,8 +93,10 @@ docker compose up -d postgres mongo mongo-init-replica redis rabbitmq minio
 # Chỉ định lẻ khi cần
 docker compose up -d postgres redis
 
-# AI Search: Elasticsearch + MinIO-compatible storage + RabbitMQ
-docker compose --profile search up -d elasticsearch minio rabbitmq
+# AI Search + Gateway; Compose starts only their required dependencies.
+# Keyword search chạy được khi chưa có model; image search cần weights + reindex có calibration,
+# text semantic là opt-in (TEXT_EMBEDDING_ENABLED) — xem services/ai-search-service/README.md
+docker compose --profile search up -d --build ai-search-service api-gateway
 
 # Loki + Promtail + Prometheus + Grafana (~0.9GB) chỉ bật khi cần xem log/dashboard
 docker compose --profile monitoring up -d
@@ -221,8 +223,13 @@ Product Catalog, RabbitMQ, Elasticsearch và MinIO-compatible storage.
 Embedding mặc định dùng CPU PyTorch MobileNetV3 Small. LLM mở rộng từ khóa dùng
 provider tương thích OpenAI do operator chọn trong `.env`; thiếu URL/model/key
 hoặc chưa cho phép gửi từ khóa ra ngoài thì tìm kiếm từ khóa vẫn chạy bằng
-Elasticsearch. Ollama native/container là tùy chọn cho LLM. Phạm vi chỉ
-**FR-SRCH-01–05**, không cần Recommendation Service hoặc FR-SRCH-06.
+Elasticsearch. FR-SRCH-06 bổ sung text embedding bằng multilingual-e5-small trong
+container nội bộ `ai-search-text`, dùng chung image/code với Search. Elasticsearch,
+Search API, text encoder và bước đồng bộ catalog ban đầu đều ở `docker-compose.yml`;
+Gateway gọi `http://ai-search-service:8100`, không cần file Compose bổ sung.
+`ai-search-init` đồng bộ snapshot Product thật vào index khi khởi động, giữ nguyên
+index/calibration hiện có. Thiếu calibration hợp lệ thì Search tiếp tục tìm từ khóa.
+Không cần Recommendation Service. Ollama native/container vẫn là tùy chọn cho LLM.
 
 Image search cần weights đã xác minh và calibration hợp lệ trước khi chạy.
 Giới hạn/error/path dùng [contract chung](docs/search-contract.json); các thay đổi
@@ -253,7 +260,7 @@ Version Spring Boot / Spring Cloud / Lombok quản lý tập trung ở `services
 
 ```bash
 scripts\vmarket.cmd infra                  # bật hạ tầng nhẹ
-scripts\vmarket.cmd infra-search           # bật profile Search (Elasticsearch + MinIO)
+scripts\vmarket.cmd infra-search           # chạy Search + Gateway và các dependency cần thiết
 scripts\vmarket.cmd core                   # chạy gateway + auth + user
 scripts\vmarket.cmd service order-service  # chạy 1 service bất kỳ
 scripts\vmarket.cmd fe                     # chạy frontend
@@ -370,7 +377,7 @@ Trang chủ gọi `GET /api/auth/health` **qua gateway** — hiển thị "kết
 - [Template Dockerfile + CI/CD cho service mới](docs/templates/README.md)
 - [README Auth Service](services/auth-service/README.md)
 - [README Shop Service](services/shop-service/README.md)
-- [README AI Search Service — FR-SRCH-01–05](services/ai-search-service/README.md)
+- [README AI Search Service — FR-SRCH-01–06](services/ai-search-service/README.md)
 - [OpenAPI AI Search](docs/openapi/ai-search-service.yaml)
 - [Worklog PBL6-21 — nội dung PR và kiểm chứng](worklogs/PBL6-21.md)
 - [Kết quả và giới hạn kiểm chứng AI Search](services/ai-search-service/VERIFICATION.md)
