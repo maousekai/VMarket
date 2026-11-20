@@ -19,7 +19,7 @@ import com.vmarket.order.exception.ApiException;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Gọi API {@code /api/cart/**} của cart-service khi đặt hàng (FR-ORDER-01).
+ * Gọi API {@code /internal/cart/**} của cart-service khi đặt hàng (FR-ORDER-01).
  *
  * <p><b>Danh tính:</b> từ PBL6-16 (soát xét PR #23), cart-service TỰ verify JWT và
  * chỉ tin header {@code X-User-Id} khi request kèm khoá nội bộ
@@ -72,12 +72,12 @@ public class CartServiceClient {
 	public CartView getCart(String userId) {
 		try {
 			CartView cart = restClient.get()
-					.uri("/api/cart")
+					.uri("/internal/cart")
 					.header(HEADER_USER_ID, userId)
 					.retrieve()
 					.body(CartView.class);
 			if (cart == null) {
-				log.error("cart-service trả body rỗng cho GET /api/cart");
+				log.error("cart-service trả body rỗng cho GET /internal/cart");
 				throw upstreamError();
 			}
 			return cart;
@@ -112,7 +112,7 @@ public class CartServiceClient {
 	public boolean clearCart(String userId) {
 		try {
 			restClient.delete()
-					.uri("/api/cart")
+					.uri("/internal/cart")
 					.header(HEADER_USER_ID, userId)
 					.retrieve()
 					.toBodilessEntity();
@@ -135,7 +135,7 @@ public class CartServiceClient {
 	/**
 	 * Xoá một item cụ thể khỏi giỏ sau khi tạo đơn thành công (FR-CART-01, P2 review PR #25).
 	 *
-	 * <p>Chạy SAU khi đơn đã commit. Gọi {@code DELETE /api/cart/items/{productId}?variantId=...}.
+	 * <p>Chạy SAU khi đơn đã commit. Gọi {@code DELETE /internal/cart/items/{productId}?variantId=...}.
 	 * Thất bại ở đây không được phép làm hỏng đơn.
 	 *
 	 * @return {@code true} nếu cart-service xác nhận đã xoá (2xx)
@@ -144,7 +144,7 @@ public class CartServiceClient {
 		try {
 			restClient.delete()
 					.uri(uriBuilder -> {
-						var builder = uriBuilder.path("/api/cart/items/{productId}");
+						var builder = uriBuilder.path("/internal/cart/items/{productId}");
 						if (variantId != null && !variantId.isBlank()) {
 							builder.queryParam("variantId", variantId);
 						}
@@ -229,7 +229,7 @@ public class CartServiceClient {
 	record ErrorDetail(String code, String message) {
 	}
 
-	/** Hình dạng response {@code GET /api/cart} của cart-service — nhóm theo shop. */
+	/** Hình dạng response {@code GET /internal/cart} của cart-service — nhóm theo shop. */
 	public record CartView(
 			String userId,
 			List<CartGroupView> groups,

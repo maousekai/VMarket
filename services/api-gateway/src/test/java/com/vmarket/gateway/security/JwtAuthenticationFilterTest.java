@@ -245,6 +245,28 @@ class JwtAuthenticationFilterTest {
 				.isEqualTo("BUYER,SELLER");
 	}
 
+	/** PBL6-50: khoá nội bộ do client gửi không bao giờ tới được service đích. */
+	@Test
+	void clientSuppliedInternalApiKey_isStrippedOnPublicAndProtectedRoutes() throws Exception {
+		String valid = token(Instant.now(), Instant.now().plusSeconds(60));
+		for (MockHttpServletRequest req : java.util.List.of(
+				request("GET", "/api/cart", "Bearer " + valid),
+				request("POST", "/api/auth/login", null))) {
+			req.addHeader("X-Internal-Api-Key", "leaked-internal-key");
+			req.addHeader("x-internal-api-key", "leaked-internal-key-lowercase");
+			AtomicReference<HttpServletRequest> downstream = new AtomicReference<>();
+
+			filter.doFilter(req, new MockHttpServletResponse(), (r, s) -> downstream.set((HttpServletRequest) r));
+
+			HttpServletRequest forwarded = downstream.get();
+			assertThat(forwarded).as(req.getRequestURI()).isNotNull();
+			assertThat(forwarded.getHeader("X-Internal-Api-Key")).isNull();
+			assertThat(forwarded.getHeaders("X-INTERNAL-API-KEY").hasMoreElements()).isFalse();
+			assertThat(java.util.Collections.list(forwarded.getHeaderNames()))
+					.noneMatch(n -> n.equalsIgnoreCase("X-Internal-Api-Key"));
+		}
+	}
+
 	@Test
 	void authProtectedEndpoint_withoutToken_rejected() throws Exception {
 		MockHttpServletResponse res = new MockHttpServletResponse();
