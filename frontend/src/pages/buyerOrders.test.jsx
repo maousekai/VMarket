@@ -336,14 +336,16 @@ describe('OrderDetailPage', () => {
     expect(listMyReviews).toHaveBeenCalledWith({ orderId: delivered.id })
   })
 
-  it('stops reviews once the return is resolved and explains hidden reviews', async () => {
+  it('stops reviews of the returned shop only and explains hidden reviews', async () => {
     getOrder.mockResolvedValue({ ...delivered, status: 'COMPLETED' })
     listOrderReturns.mockResolvedValue([
       {
         id: 'ret1',
+        shopId: 's1',
         status: 'RESOLVED',
         reason: 'Hàng lỗi',
         evidenceUrls: [],
+        items: [{ id: 'ri1', orderItemId: 'i1', productId: 'p1', quantity: 1 }],
         createdAt: '2026-11-03T00:00:00Z',
       },
     ])
@@ -356,9 +358,79 @@ describe('OrderDetailPage', () => {
     })
     renderAt(`/profile/orders/${delivered.id}`)
     expect(
-      await screen.findByText('Đánh giá không còn hiển thị vì đơn đã trả hàng / hoàn tiền'),
+      await screen.findByText('Đánh giá không còn hiển thị vì sản phẩm đã trả hàng / hoàn tiền'),
     ).toBeInTheDocument()
+    // Ly gom cua shop khac khong nam trong yeu cau tra hang: van danh gia duoc.
+    expect(screen.getAllByRole('button', { name: 'Đánh giá' })).toHaveLength(1)
+  })
+
+  it('does not offer a review for a product whose return is resolved', async () => {
+    getOrder.mockResolvedValue({ ...delivered, status: 'COMPLETED' })
+    listOrderReturns.mockResolvedValue([
+      { id: 'ret1', shopId: 's1', status: 'RESOLVED', reason: 'Hàng lỗi', evidenceUrls: [] },
+      { id: 'ret2', shopId: 's2', status: 'RESOLVED', reason: 'Hàng lỗi', evidenceUrls: [] },
+    ])
+    renderAt(`/profile/orders/${delivered.id}`)
+    await screen.findByText('Áo polo')
+    await waitFor(() => expect(listMyReviews).toHaveBeenCalled())
     expect(screen.queryByRole('button', { name: 'Đánh giá' })).not.toBeInTheDocument()
+  })
+
+  it('waits for photo uploads before sending a review', async () => {
+    getOrder.mockResolvedValue(delivered)
+    let finishUpload
+    uploadReviewImage.mockReturnValue(new Promise((resolve) => (finishUpload = resolve)))
+    createReview.mockImplementation(async (body) => ({ id: 'r1', ...body }))
+    renderAt(`/profile/orders/${delivered.id}`)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Đánh giá' }))[0])
+    const dialog = await screen.findByRole('dialog', { name: 'Đánh giá sản phẩm đã mua' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /5 sao/ }))
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(within(dialog).getByLabelText(/Thêm ảnh$/), { target: { files: [file] } })
+
+    const send = await within(dialog).findByRole('button', { name: 'Đang tải ảnh…' })
+    expect(send).toBeDisabled()
+    fireEvent.submit(send.closest('form'))
+    expect(createReview).not.toHaveBeenCalled()
+
+    finishUpload({ url: 'http://localhost:9000/m/reviews/x/a.jpg' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Gửi đánh giá' }))
+    await waitFor(() =>
+      expect(createReview).toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrls: ['http://localhost:9000/m/reviews/x/a.jpg'] }),
+      ),
+    )
+  })
+
+  it('keeps photos when the dialog closes while the review is still saving', async () => {
+    getOrder.mockResolvedValue(delivered)
+    uploadReviewImage.mockResolvedValue({ url: 'http://localhost:9000/m/reviews/x/a.jpg' })
+    let finishSave
+    createReview.mockReturnValue(new Promise((resolve) => (finishSave = resolve)))
+    renderAt(`/profile/orders/${delivered.id}`)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Đánh giá' }))[0])
+    const dialog = await screen.findByRole('dialog', { name: 'Đánh giá sản phẩm đã mua' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /5 sao/ }))
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' })
+    fireEvent.change(within(dialog).getByLabelText(/Thêm ảnh$/), { target: { files: [file] } })
+    await within(dialog).findByRole('img', { name: 'Ảnh 1' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Gửi đánh giá' }))
+    expect(within(dialog).getByRole('button', { name: 'Huỷ' })).toBeDisabled()
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Đánh giá sản phẩm đã mua' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(deleteReviewImage).not.toHaveBeenCalled()
+
+    finishSave({ id: 'r1', productId: 'p1', rating: 5 })
+    await waitFor(() => expect(createReview).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(deleteReviewImage).not.toHaveBeenCalled()
   })
 
   it('still offers reviews while a return is only requested', async () => {
