@@ -14,3 +14,12 @@ const ratingFormat = new Intl.NumberFormat('vi-VN', {
 
 /** 4.666 -> "4,7"; gia tri khong hop le -> "0,0". */
 export const formatRating = (value) => ratingFormat.format(Number(value) || 0)
+
+/**
+ * Trang cuoi con du lieu khi trang dang xem da rong vi so trang giam (muc cuoi vua roi khoi danh
+ * sach sau khi phan hoi / an / khoi phuc). Trang con du lieu hoac trang dau thi giu nguyen.
+ */
+export function lastPage(result, page) {
+  if (result?.items?.length || page <= 0) return page
+  return Math.min(page, Math.max(0, (result?.totalPages || 0) - 1))
+}

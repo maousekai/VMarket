@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import Modal from '../components/Modal'
 import Pagination from '../components/Pagination'
 import { ReviewItem, StarRow } from '../components/ReviewParts'
-import { formatRating } from '../utils/review'
+import { formatRating, lastPage } from '../utils/review'
 import { useProductLookup } from '../hooks/useCatalogLookup'
 import { getApiError } from '../services/api/apiClient'
 import {
@@ -201,7 +201,24 @@ export default function SellerReviewsPage() {
     let current = true
     setState((previous) => ({ ...previous, status: 'loading', error: '' }))
     listSellerReviews({ rating: tab.rating, replied: tab.replied, page, size: PAGE_SIZE })
-      .then((result) => current && setState({ status: 'ready', result, error: '' }))
+      .then((result) => {
+        if (!current) return
+        // So trang giam (vua phan hoi muc cuoi cua trang cuoi): ve trang cuoi con du lieu.
+        const last = lastPage(result, page)
+        if (last !== page) {
+          setParams(
+            (previous) => {
+              const next = new URLSearchParams(previous)
+              if (last) next.set('page', String(last))
+              else next.delete('page')
+              return next
+            },
+            { replace: true },
+          )
+          return
+        }
+        setState({ status: 'ready', result, error: '' })
+      })
       .catch(
         (failure) =>
           current &&
@@ -210,7 +227,7 @@ export default function SellerReviewsPage() {
     return () => {
       current = false
     }
-  }, [tab.key, tab.rating, tab.replied, page, reload])
+  }, [tab.key, tab.rating, tab.replied, page, reload, setParams])
 
   const result = state.result
   const products = useProductLookup(result?.items.map((review) => review.productId) || [])

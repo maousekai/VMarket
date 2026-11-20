@@ -13,6 +13,7 @@ import {
   searchReviews,
 } from '../services/api/reviewApi'
 import { formatDateTime } from '../utils/formatDate'
+import { lastPage } from '../utils/review'
 import { shortOrderId } from '../utils/order'
 import '../components/account.css'
 import '../components/accountForms.css'
@@ -112,7 +113,13 @@ export default function AdminReviewsPage() {
     let current = true
     setState((previous) => ({ ...previous, status: 'loading', error: '' }))
     searchReviews({ status, productId: filter, page, size: PAGE_SIZE })
-      .then((result) => current && setState({ status: 'ready', result, error: '' }))
+      .then((result) => {
+        if (!current) return
+        // So trang giam (vua an / khoi phuc muc cuoi cua trang cuoi): ve trang cuoi con du lieu.
+        const last = lastPage(result, page)
+        if (last !== page) return setPage(last)
+        setState({ status: 'ready', result, error: '' })
+      })
       .catch(
         (failure) =>
           current &&

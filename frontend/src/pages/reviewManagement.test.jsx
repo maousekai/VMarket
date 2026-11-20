@@ -131,6 +131,27 @@ describe('SellerReviewsPage', () => {
     await waitFor(() => expect(deleteReviewReply).toHaveBeenCalledWith('r1'))
     expect(await screen.findByText('Đã xoá phản hồi.')).toBeInTheDocument()
   })
+
+  it('goes back to the last page that still has reviews', async () => {
+    // Trang 2 cua "Chua phan hoi" vua het muc (11 -> 10): con dung 1 trang.
+    listSellerReviews.mockImplementation(async ({ page: current, size }) =>
+      size === 1
+        ? page([], 10)
+        : current === 1
+          ? { items: [], page: 1, size: 10, totalElements: 10, totalPages: 1 }
+          : page([review({ comment: 'Còn chờ phản hồi' })], 10),
+    )
+    renderSeller('/seller/reviews?tab=unreplied&page=1')
+
+    expect(await screen.findByText('Còn chờ phản hồi')).toBeInTheDocument()
+    expect(listSellerReviews).toHaveBeenLastCalledWith({
+      rating: undefined,
+      replied: false,
+      page: 0,
+      size: 10,
+    })
+    expect(screen.queryByText('Tất cả đánh giá đã được phản hồi.')).not.toBeInTheDocument()
+  })
 })
 
 describe('Reviews of returned orders', () => {
@@ -229,5 +250,42 @@ describe('AdminReviewsPage', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Khôi phục đánh giá' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Khôi phục' }))
     await waitFor(() => expect(restoreReview).toHaveBeenCalledWith('r1'))
+  })
+
+  it('moves back a page after hiding the last review of the last page', async () => {
+    let hidden = false
+    searchReviews.mockImplementation(async ({ page: current }) => {
+      if (current === 0)
+        return { ...page([review({ id: 'r0', comment: 'Trang đầu' })]), totalPages: hidden ? 1 : 2 }
+      return hidden
+        ? { items: [], page: 1, size: 20, totalElements: 20, totalPages: 1 }
+        : {
+            items: [review({ comment: 'Mục cuối' })],
+            page: 1,
+            size: 20,
+            totalElements: 21,
+            totalPages: 2,
+          }
+    })
+    hideReview.mockImplementation(async () => {
+      hidden = true
+      return review({ status: 'HIDDEN' })
+    })
+    renderAdmin()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Trang 2' }))
+    expect(await screen.findByText('Mục cuối')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Ẩn' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Ẩn đánh giá vi phạm' })
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Spam' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ẩn đánh giá' }))
+
+    expect(await screen.findByText('Trang đầu')).toBeInTheDocument()
+    expect(searchReviews).toHaveBeenLastCalledWith({
+      status: 'VISIBLE',
+      productId: '',
+      page: 0,
+      size: 20,
+    })
   })
 })
