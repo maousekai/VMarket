@@ -7,8 +7,8 @@ auth:
     secret: ${AUTH_JWT_SECRET:dev-only-insecure-secret-change-me-please-0123456789}
 app:
   review:
-    # Trung MINIO_PUBLIC_ORIGIN cua docker compose
-    image-origins: ${REVIEW_IMAGE_ORIGINS:http://localhost:9000}
+    # Khong khai thi lay dung MINIO_PUBLIC_ORIGIN (origin cua URL anh vua tai len)
+    image-origins: ${REVIEW_IMAGE_ORIGINS:${MINIO_PUBLIC_ORIGIN:http://localhost:9000}}
   # MinIO chay trong docker compose voi credential local trong .env.example.
   media:
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
