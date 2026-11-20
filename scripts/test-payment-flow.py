@@ -208,12 +208,8 @@ class Suite:
         stub = f"http://127.0.0.1:{self.server.server_port}"
         datasource = dict(**{"spring.datasource.url": f"jdbc:postgresql://127.0.0.1:{pp[5432]}/vmarket_order",
             "spring.datasource.username": "postgres", "spring.datasource.password": "fixture-only"})
-        self.order = self.start_service("order-service", {**datasource, "app.cart-service.base-url": stub,
-                                        "app.cart-service.internal-api-key": SECRET, "app.user-service.base-url": stub})
-        datasource["spring.datasource.url"] = datasource["spring.datasource.url"].replace("vmarket_order", "vmarket_payment")
-        self.payment = self.start_service("payment-service", {**datasource, "app.order-service.base-url": self.order,
-            "app.vnpay.enabled": "true", "app.vnpay.tmn-code": "FLOWTEST",
-            "app.vnpay.hash-secret": HASH_SECRET})
+        # Product chay truoc: order-service dinh gia lai tung dong tu product-service luc dat hang
+        # (PBL6-48), nen can URL cua product-service va san pham fixture co gia khop gio (3000).
         self.product = self.start_service("product-service", {
             "spring.mongodb.uri": f"mongodb://127.0.0.1:{mp[27017]}/vmarket_product?replicaSet=rs0&directConnection=true",
             "app.catalog-migration.enabled": "false"})
@@ -222,6 +218,13 @@ class Suite:
             minPrice=3000, maxPrice=3000, availableStock=20, soldCount=0,
             variants=[dict(_id=VARIANT, sku="fixture", attributes={}, price=3000, currency="VND", stock=20,
                            reservedStock=0, soldCount=0, deleted=False)])) + ")")
+        self.order = self.start_service("order-service", {**datasource, "app.cart-service.base-url": stub,
+                                        "app.cart-service.internal-api-key": SECRET, "app.user-service.base-url": stub,
+                                        "app.product-service.base-url": self.product})
+        datasource["spring.datasource.url"] = datasource["spring.datasource.url"].replace("vmarket_order", "vmarket_payment")
+        self.payment = self.start_service("payment-service", {**datasource, "app.order-service.base-url": self.order,
+            "app.vnpay.enabled": "true", "app.vnpay.tmn-code": "FLOWTEST",
+            "app.vnpay.hash-secret": HASH_SECRET})
 
     def create(self, method="VNPAY"):
         order = http("POST", self.order + "/api/orders", dict(addressId=ADDRESS, paymentMethod=method), self.token, 201)
