@@ -12,8 +12,8 @@ cd services/review-service
 ../mvnw spring-boot:run                    # Windows: ..\mvnw.cmd spring-boot:run
 ```
 
-Profile `dev` có sẵn `AUTH_JWT_SECRET` giả và `REVIEW_IMAGE_ORIGINS=http://localhost:9000`
-(MinIO của compose). Profile `prod` bắt buộc `AUTH_JWT_SECRET`, `ORDER_SERVICE_URL`,
+Profile `dev` có sẵn `AUTH_JWT_SECRET` giả và `REVIEW_IMAGE_ORIGINS` mặc định bằng `MINIO_PUBLIC_ORIGIN`
+(`http://localhost:9000`, MinIO của compose). Profile `prod` bắt buộc `AUTH_JWT_SECRET`, `ORDER_SERVICE_URL`,
 `SHOP_SERVICE_URL`, `REVIEW_IMAGE_ORIGINS` (xem `.env.prod.example`).
 
 Swagger UI: `http://localhost:8089/swagger-ui.html`.
@@ -59,13 +59,17 @@ thấy `orderId` nhưng không có `buyerId`; admin và chính người viết t
   (người mua xác nhận đã nhận hàng, hoặc tự chuyển); cả hai đều được đánh giá (`ReviewService.REVIEWABLE_STATUSES`).
 - **Trả hàng / hoàn tiền:** đánh giá chỉ hiển thị từ khi nhận hàng tới trước khi trả hàng. Service nghe
   `ReturnResolved` (queue `review.events.v1`) — Order Service phát khi yêu cầu trả hàng chuyển `RESOLVED`
-  (đã thu hồi hàng, kích hoạt hoàn tiền; hoặc admin chấp thuận khiếu nại). Khi đó đơn được ghi vào
-  `returned_orders` và mọi đánh giá của đơn chuyển `RETURNED`: không hiển thị công khai, không tính điểm
-  (phát lại `ReviewCreated`), seller không phản hồi được, admin không ẩn / khôi phục được
-  (`409 REVIEW_RETURNED`). Viết đánh giá cho đơn đã trả hàng → `422 ORDER_RETURNED`. Yêu cầu trả hàng còn
-  chờ / đã chấp nhận / bị từ chối thì đánh giá vẫn hiển thị.
+  (đã thu hồi hàng, kích hoạt hoàn tiền; hoặc admin chấp thuận khiếu nại). Áp dụng **theo sản phẩm** của
+  yêu cầu trả hàng (đơn cũ có thể gồm nhiều gian hàng, mỗi yêu cầu trả hàng chỉ thuộc một gian hàng): từng
+  `(order_id, product_id)` được ghi vào `returned_items` và đánh giá của sản phẩm đó chuyển `RETURNED`: không
+  hiển thị công khai, không tính điểm (phát lại `ReviewCreated`), seller không phản hồi được, admin không
+  ẩn / khôi phục được (`409 REVIEW_RETURNED`). Viết đánh giá cho sản phẩm đã trả hàng → `422 ORDER_RETURNED`.
+  Gửi đánh giá và chốt trả hàng cùng giữ khoá theo đơn (`review_order_locks`), nên hai luồng chạy đồng thời
+  không thể cùng thành công. Yêu cầu trả hàng còn chờ / đã chấp nhận / bị từ chối thì đánh giá vẫn hiển thị.
 - **Ảnh:** tối đa 5, URL phải thuộc một origin trong `REVIEW_IMAGE_ORIGINS` (khớp chính xác
   scheme + host + port); ngoài localhost bắt buộc https — sai cấu hình thì service không khởi động.
+  Key ảnh là `reviews/{ngẫu nhiên}/{sha256}.jpg`, không chứa buyerId (API công khai đã giấu người mua);
+  chủ sở hữu lưu ở bảng `review_media`, chỉ chủ ảnh xoá được ảnh chưa gửi kèm đánh giá.
 - **Mỗi sản phẩm trong đơn chỉ đánh giá một lần:** ràng buộc `UNIQUE (order_id, product_id)`
   ở DB, request trùng (kể cả đồng thời) nhận `409 REVIEW_ALREADY_EXISTS`.
 - **Điểm tổng hợp** tính từ các đánh giá `VISIBLE` bằng `group by rating`, làm tròn 2 chữ số.
@@ -106,8 +110,8 @@ giá trị tuyệt đối nên consumer xử lý lặp vẫn đúng.
 |---|---|---|
 | 404 | `ORDER_NOT_FOUND` | Đơn không tồn tại hoặc không thuộc người mua |
 | 422 | `ORDER_NOT_COMPLETED` | Đơn chưa ở trạng thái hoàn thành |
-| 422 | `ORDER_RETURNED` | Đơn đã trả hàng / hoàn tiền |
-| 409 | `REVIEW_RETURNED` | Admin ẩn / khôi phục đánh giá của đơn đã trả hàng |
+| 422 | `ORDER_RETURNED` | Sản phẩm trong đơn đã trả hàng / hoàn tiền |
+| 409 | `REVIEW_RETURNED` | Admin ẩn / khôi phục đánh giá của sản phẩm đã trả hàng |
 | 422 | `PRODUCT_NOT_IN_ORDER` | Sản phẩm không có trong đơn |
 | 409 | `REVIEW_ALREADY_EXISTS` | Sản phẩm trong đơn đã được đánh giá |
 | 409 | `REVIEW_HIDDEN` | Seller phản hồi đánh giá đã bị ẩn |

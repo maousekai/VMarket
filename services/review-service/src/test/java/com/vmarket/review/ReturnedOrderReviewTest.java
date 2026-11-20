@@ -18,12 +18,14 @@ import org.springframework.http.MediaType;
 
 import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.ReturnResolved;
+import com.vmarket.events.StockItem;
 import com.vmarket.review.client.ReviewClients;
 import com.vmarket.review.event.ReturnResolvedReviewConsumer;
 
 /**
  * PBL6-35: đánh giá chỉ hiện từ khi nhận hàng tới trước khi trả hàng. Khi Order Service chốt trả hàng /
- * hoàn tiền ({@code ReturnResolved}), đánh giá của đơn không còn hiển thị và không viết thêm được.
+ * hoàn tiền ({@code ReturnResolved}), đánh giá của các sản phẩm được trả không còn hiển thị và không viết
+ * thêm được; sản phẩm khác trong cùng đơn (gian hàng khác) không bị ảnh hưởng.
  */
 class ReturnedOrderReviewTest extends ReviewTestSupport {
 
@@ -31,7 +33,13 @@ class ReturnedOrderReviewTest extends ReviewTestSupport {
 	ReturnResolvedReviewConsumer consumer;
 
 	private void returnResolved(String orderId) {
-		consumer.handle(new ReturnResolved("return-" + orderId, orderId, BigDecimal.TEN, true, List.of()),
+		returnResolved(orderId, PRODUCT);
+	}
+
+	/** Yêu cầu trả hàng chỉ gồm các sản phẩm {@code productIds} của đơn (một gian hàng). */
+	private void returnResolved(String orderId, String... productIds) {
+		List<StockItem> items = java.util.Arrays.stream(productIds).map(p -> new StockItem(p, p + "-v1", 1)).toList();
+		consumer.handle(new ReturnResolved("return-" + orderId, orderId, BigDecimal.TEN, true, items),
 				(EventEnvelope) null);
 	}
 
@@ -98,7 +106,7 @@ class ReturnedOrderReviewTest extends ReviewTestSupport {
 		// Seller vẫn thấy đánh giá kèm lý do trong danh sách của shop.
 		mvc.perform(get("/api/reviews/seller").header("Authorization", token(SELLER, "SELLER")))
 				.andExpect(jsonPath("$.items[0].status").value("RETURNED"))
-				.andExpect(jsonPath("$.items[0].moderationReason").value("Đơn hàng đã được trả hàng / hoàn tiền"));
+				.andExpect(jsonPath("$.items[0].moderationReason").value("Sản phẩm đã được trả hàng / hoàn tiền"));
 	}
 
 	@Test
@@ -110,7 +118,7 @@ class ReturnedOrderReviewTest extends ReviewTestSupport {
 		returnResolved("order-1");
 
 		assertThat(outboxRows()).isEqualTo(after);
-		assertThat(jdbc.queryForObject("select count(*) from returned_orders", Long.class)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("select count(*) from returned_items", Long.class)).isEqualTo(1);
 		mvc.perform(get("/api/reviews/admin").param("status", "RETURNED").header("Authorization", token(ADMIN, "ADMIN")))
 				.andExpect(jsonPath("$.totalElements").value(1));
 	}
@@ -121,5 +129,35 @@ class ReturnedOrderReviewTest extends ReviewTestSupport {
 		createReview(BUYER, "order-2", PRODUCT, 5);
 
 		mvc.perform(get("/api/reviews/products/{id}", PRODUCT)).andExpect(jsonPath("$.totalElements").value(1));
+	}
+
+	@Test
+	void returnOfOneShopKeepsReviewsOfOtherProductsInTheOrder() throws Exception {
+		String otherProduct = "product-2";
+		String returnedReview = createReview(BUYER, "order-1", PRODUCT, 2);
+		String keptReview = createReview(BUYER, "order-1", otherProduct, 5);
+
+		returnResolved("order-1", PRODUCT);
+
+		mvc.perform(get("/api/reviews/me").param("orderId", "order-1").header("Authorization", token(BUYER, "BUYER")))
+				.andExpect(jsonPath("$.items[?(@.id == '" + returnedReview + "')].status").value("RETURNED"))
+				.andExpect(jsonPath("$.items[?(@.id == '" + keptReview + "')].status").value("VISIBLE"));
+		mvc.perform(get("/api/reviews/products/{id}", otherProduct)).andExpect(jsonPath("$.totalElements").value(1));
+	}
+
+	@Test
+	void productNotInTheReturnCanStillBeReviewed() throws Exception {
+		String otherProduct = "product-2";
+		returnResolved("order-1", PRODUCT);
+
+		createReview(BUYER, "order-1", otherProduct, 4);
+
+		givenOrder("order-1", "COMPLETED", PRODUCT, otherProduct);
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-1", PRODUCT, 5, List.of())))
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.error.code").value("ORDER_RETURNED"));
 	}
 }

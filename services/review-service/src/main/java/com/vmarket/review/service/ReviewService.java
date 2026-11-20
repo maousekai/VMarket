@@ -77,7 +77,7 @@ public class ReviewService {
 		if (!REVIEWABLE_STATUSES.contains(order.path("status").asString())) {
 			throw ApiException.unprocessable("ORDER_NOT_COMPLETED", "Chỉ đánh giá được sản phẩm thuộc đơn đã hoàn thành");
 		}
-		if (returnedOrders.isReturned(request.orderId())) {
+		if (returnedOrders.isReturned(request.orderId(), request.productId())) {
 			throw orderReturned();
 		}
 		JsonNode item = findItem(order, request.productId());
@@ -93,12 +93,14 @@ public class ReviewService {
 
 		try {
 			return transactions.execute(status -> {
-				Review review = reviews.saveAndFlush(Review.create(request.orderId(), request.productId(), variantId,
-						shopId, buyerId, request.rating(), comment, images, clock.instant()));
-				// Đơn vừa được chốt trả hàng trong lúc người mua gửi: huỷ thay vì để lại đánh giá hiển thị.
-				if (returnedOrders.isReturned(request.orderId())) {
+				// Cùng khoá với luồng chốt trả hàng: sản phẩm vừa được chốt trả hàng trong lúc người mua gửi
+				// thì từ chối; nếu đánh giá ghi trước, luồng trả hàng chạy sau sẽ thấy và ẩn nó.
+				returnedOrders.lockOrder(request.orderId());
+				if (returnedOrders.isReturned(request.orderId(), request.productId())) {
 					throw orderReturned();
 				}
+				Review review = reviews.saveAndFlush(Review.create(request.orderId(), request.productId(), variantId,
+						shopId, buyerId, request.rating(), comment, images, clock.instant()));
 				outbox.ratingChanged(review.getId(), review.getProductId());
 				return ReviewResponse.fullView(review);
 			});
@@ -191,7 +193,7 @@ public class ReviewService {
 	}
 
 	private static ApiException orderReturned() {
-		return ApiException.unprocessable("ORDER_RETURNED", "Đơn hàng đã được trả hàng / hoàn tiền nên không thể đánh giá");
+		return ApiException.unprocessable("ORDER_RETURNED", "Sản phẩm đã được trả hàng / hoàn tiền nên không thể đánh giá");
 	}
 
 	private static ApiException alreadyReviewed() {

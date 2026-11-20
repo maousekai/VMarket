@@ -37,6 +37,7 @@ import com.vmarket.review.exception.ApiException;
 import com.vmarket.review.service.ModerationService;
 import com.vmarket.review.service.RatingService;
 import com.vmarket.review.service.ReviewOutboxPublisher;
+import com.vmarket.review.service.ReturnedOrderService;
 import com.vmarket.review.service.ReviewService;
 
 /**
@@ -68,6 +69,8 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 	Clock clock;
 	@Autowired
 	PlatformTransactionManager transactionManager;
+	@Autowired
+	ReturnedOrderService returnedOrders;
 
 	private ExecutorService pool;
 
@@ -200,6 +203,91 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 
 		assertThat(Collections.frequency(claimed, true)).isEqualTo(2);
 		assertThat(jdbc.queryForObject("select count(*) from review_outbox", Long.class)).isZero();
+	}
+
+	/**
+	 * Chốt trả hàng và gửi đánh giá cho cùng sản phẩm chạy đồng thời: luồng trả hàng giữ khoá đơn chưa
+	 * commit, nên luồng gửi đánh giá phải đợi rồi mới kiểm tra, và thấy sản phẩm đã trả hàng. Không còn
+	 * trường hợp cả hai cùng thành công để lại đánh giá công khai.
+	 */
+	@Test
+	void reviewWaitsForConcurrentReturnOfTheSameOrder() throws Exception {
+		givenOrder("order-1", "DELIVERED", PRODUCT);
+		CountDownLatch marked = new CountDownLatch(1);
+		CountDownLatch releaseReturn = new CountDownLatch(1);
+		var tx = new TransactionTemplate(transactionManager);
+
+		Future<?> returning = pool.submit(() -> tx.execute(s -> {
+			returnedOrders.markReturned("order-1", "return-1", List.of(PRODUCT));
+			marked.countDown();
+			try {
+				assertThat(releaseReturn.await(20, TimeUnit.SECONDS)).isTrue();
+			} catch (InterruptedException ex) {
+				Thread.currentThread().interrupt();
+			}
+			return null;
+		}));
+		assertThat(marked.await(20, TimeUnit.SECONDS)).isTrue();
+
+		var request = new ReviewRequests.CreateReview("order-1", PRODUCT, 5, null, List.of());
+		Future<HttpStatus> reviewing = pool.submit(() -> {
+			try {
+				reviewService.create(BUYER, "Bearer x", request);
+				return HttpStatus.CREATED;
+			} catch (ApiException ex) {
+				return ex.getStatus();
+			}
+		});
+		Thread.sleep(500);
+		assertThat(reviewing.isDone()).as("Gửi đánh giá phải đợi khoá đơn của luồng trả hàng").isFalse();
+
+		releaseReturn.countDown();
+		returning.get(20, TimeUnit.SECONDS);
+		assertThat(reviewing.get(20, TimeUnit.SECONDS)).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+		assertThat(jdbc.queryForObject("select count(*) from reviews", Long.class)).isZero();
+	}
+
+	/** Chiều ngược lại: đánh giá commit trước thì luồng trả hàng chạy sau thấy và ẩn nó. */
+	@Test
+	void returnAfterConcurrentReviewHidesIt() throws Exception {
+		givenOrder("order-1", "DELIVERED", PRODUCT);
+		var request = new ReviewRequests.CreateReview("order-1", PRODUCT, 5, null, List.of());
+		var tx = new TransactionTemplate(transactionManager);
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+
+		// Giữ khoá đơn như một lần gửi đánh giá đang chạy, rồi cho cả hai luồng cùng chờ.
+		Future<?> holder = pool.submit(() -> tx.execute(s -> {
+			returnedOrders.lockOrder("order-1");
+			locked.countDown();
+			try {
+				assertThat(release.await(20, TimeUnit.SECONDS)).isTrue();
+			} catch (InterruptedException ex) {
+				Thread.currentThread().interrupt();
+			}
+			return null;
+		}));
+		assertThat(locked.await(20, TimeUnit.SECONDS)).isTrue();
+		Future<HttpStatus> reviewing = pool.submit(() -> {
+			try {
+				reviewService.create(BUYER, "Bearer x", request);
+				return HttpStatus.CREATED;
+			} catch (ApiException ex) {
+				return ex.getStatus();
+			}
+		});
+		Future<?> returning = pool.submit(() -> {
+			returnedOrders.markReturned("order-1", "return-1", List.of(PRODUCT));
+			return null;
+		});
+		release.countDown();
+		holder.get(20, TimeUnit.SECONDS);
+		HttpStatus reviewStatus = reviewing.get(20, TimeUnit.SECONDS);
+		returning.get(20, TimeUnit.SECONDS);
+
+		// Dù bên nào giành khoá trước, không có đánh giá nào còn hiển thị.
+		assertThat(reviewStatus).isIn(HttpStatus.CREATED, HttpStatus.UNPROCESSABLE_ENTITY);
+		assertThat(jdbc.queryForObject("select count(*) from reviews where status = 'VISIBLE'", Long.class)).isZero();
 	}
 
 	private static <T> Callable<T> named(String name, Callable<T> body) {

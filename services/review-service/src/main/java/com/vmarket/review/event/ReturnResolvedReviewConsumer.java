@@ -1,17 +1,21 @@
 package com.vmarket.review.event;
 
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 
 import com.vmarket.events.EventConsumer;
 import com.vmarket.events.EventEnvelope;
 import com.vmarket.events.EventType;
 import com.vmarket.events.ReturnResolved;
+import com.vmarket.events.StockItem;
 import com.vmarket.review.service.ReturnedOrderService;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Order Service chốt yêu cầu trả hàng / hoàn tiền → đánh giá của đơn không còn hiển thị (PBL6-35).
+ * Order Service chốt yêu cầu trả hàng / hoàn tiền → đánh giá của các sản phẩm được trả không còn hiển thị
+ * (PBL6-35).
  * Queue {@code review.events.v1}, khai báo ở {@code app.events}.
  */
 @Component
@@ -32,6 +36,8 @@ public class ReturnResolvedReviewConsumer implements EventConsumer<ReturnResolve
 
 	@Override
 	public void handle(ReturnResolved payload, EventEnvelope envelope) {
-		returnedOrders.markReturned(payload.orderId(), payload.returnId());
+		List<String> products = payload.items() == null ? List.of()
+				: payload.items().stream().map(StockItem::productId).toList();
+		returnedOrders.markReturned(payload.orderId(), payload.returnId(), products);
 	}
 }
