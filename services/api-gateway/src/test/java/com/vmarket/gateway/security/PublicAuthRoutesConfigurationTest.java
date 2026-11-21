@@ -46,7 +46,12 @@ class PublicAuthRoutesConfigurationTest {
 	@ParameterizedTest
 	@ValueSource(strings = { "/internal/cart", "/internal/cart/items/p1", "/internal/users/1",
 			"/api/cart/internal/x", "/api/auth/internal/users", "/api/products/internal/shop-access",
-			"/api/products;x=1/internal/shop-access", "/api/products/internal;y=2/shop-access" })
+			"/api/products;x=1/internal/shop-access", "/api/products/internal;y=2/shop-access",
+			// %xx: service đích giải mã path nên "%69nternal" chính là "internal"
+			"/api/products/%69nternal/shop-access", "/api/products/%69%6E%74%65%72%6E%61%6C/shop-access",
+			"/%69nternal/cart", "/api/products%2Finternal/shop-access",
+			// segment "internal" ở sâu hơn một cấp dưới /api
+			"/api/ai/search/internal/x" })
 	void internalRoutesAreDeniedByDeployedConfiguration(String path) throws Exception {
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		AtomicBoolean reached = new AtomicBoolean();

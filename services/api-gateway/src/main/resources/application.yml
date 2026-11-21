@@ -142,12 +142,12 @@ app:
       - /api/ai/recommendations/health
     # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi
     # nhau trực tiếp qua URL nội bộ (BACKEND_SERVICES_HOST), kèm X-Internal-Api-Key.
+    # "/api/**/internal/**" khớp segment "internal" ở mọi độ sâu (vd
+    # /api/products/internal/..., /api/ai/search/internal/...), nên không cần liệt kê
+    # từng service. Không route công khai nào được có segment tên "internal".
     internal-deny-paths:
       - /internal/**
-      - /api/*/internal/**
-      - /api/products/internal/**
-      - /api/shops/internal/**
-      - /api/users/internal/**
+      - /api/**/internal/**
     # RBAC theo vai trò (PBL6-46) - route protected (da qua buoc xac thuc JWT o
     # tren) con doi hoi it nhat MOT vai trò trong danh sach. Chua co route
     # admin-only thuc te nao trong he thong tinh den luc nay -> de trong, cac
