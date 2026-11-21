@@ -21,6 +21,8 @@ import com.vmarket.events.ReturnResolved;
 import com.vmarket.events.StockItem;
 import com.vmarket.review.client.ReviewClients;
 import com.vmarket.review.event.ReturnResolvedReviewConsumer;
+import com.vmarket.review.exception.ApiException;
+import com.vmarket.review.service.LegacyReturnReconciler;
 
 /**
  * PBL6-35: đánh giá chỉ hiện từ khi nhận hàng tới trước khi trả hàng. Khi Order Service chốt trả hàng /
@@ -31,6 +33,8 @@ class ReturnedOrderReviewTest extends ReviewTestSupport {
 
 	@Autowired
 	ReturnResolvedReviewConsumer consumer;
+	@Autowired
+	LegacyReturnReconciler reconciler;
 
 	private void returnResolved(String orderId) {
 		returnResolved(orderId, PRODUCT);
@@ -159,5 +163,67 @@ class ReturnedOrderReviewTest extends ReviewTestSupport {
 				.content(createBody("order-1", PRODUCT, 5, List.of())))
 				.andExpect(status().isUnprocessableEntity())
 				.andExpect(jsonPath("$.error.code").value("ORDER_RETURNED"));
+	}
+
+	/** Dữ liệu trả hàng của bản đầu: chỉ biết đơn, mọi đánh giá của đơn đã bị chuyển RETURNED. */
+	private void givenLegacyReturn(String orderId) {
+		jdbc.update("insert into legacy_returned_orders (order_id, return_id, resolved_at) values (?, ?, current_timestamp)",
+				orderId, "return-" + orderId);
+		jdbc.update("update reviews set status = 'RETURNED', moderation_reason = 'Đơn hàng đã được trả hàng / hoàn tiền'"
+				+ " where order_id = ?", orderId);
+	}
+
+	private void reviewNewProduct(String orderId, String productId, int expectedStatus) throws Exception {
+		givenOrder(orderId, "COMPLETED", productId);
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody(orderId, productId, 5, List.of())))
+				.andExpect(status().is(expectedStatus));
+	}
+
+	@Test
+	void legacyReturnBlocksTheWholeOrderUntilReconciledWithOrderService() throws Exception {
+		String returnedReview = createReview(BUYER, "order-1", PRODUCT, 2);
+		String otherShopReview = createReview(BUYER, "order-1", "product-2", 5);
+		givenLegacyReturn("order-1");
+
+		// Chưa đối chiếu: chặn cả đơn như trước, kể cả sản phẩm chưa có đánh giá.
+		reviewNewProduct("order-1", "product-3", 422);
+
+		when(clients.returnedProducts("order-1")).thenReturn(List.of(PRODUCT));
+		reconciler.reconcile();
+
+		assertThat(jdbc.queryForObject("select count(*) from legacy_returned_orders", Long.class)).isZero();
+		mvc.perform(get("/api/reviews/me").param("orderId", "order-1").header("Authorization", token(BUYER, "BUYER")))
+				.andExpect(jsonPath("$.items[?(@.id == '" + returnedReview + "')].status").value("RETURNED"))
+				.andExpect(jsonPath("$.items[?(@.id == '" + otherShopReview + "')].status").value("VISIBLE"));
+		// Sản phẩm đã trả vẫn bị chặn (không cần có đánh giá trước), sản phẩm khác viết được.
+		reviewNewProduct("order-1", PRODUCT, 422);
+		assertThat(jdbc.queryForObject("select count(*) from returned_items where order_id = 'order-1'", Long.class))
+				.isEqualTo(1);
+		reviewNewProduct("order-1", "product-3", 201);
+	}
+
+	@Test
+	void legacyReturnWithoutReviewsKeepsItsBlockForTheReturnedProduct() throws Exception {
+		givenLegacyReturn("order-1");
+		when(clients.returnedProducts("order-1")).thenReturn(List.of(PRODUCT));
+
+		reconciler.reconcile();
+
+		reviewNewProduct("order-1", PRODUCT, 422);
+	}
+
+	@Test
+	void legacyReturnStaysBlockedWhenOrderServiceIsUnavailable() throws Exception {
+		givenLegacyReturn("order-1");
+		when(clients.returnedProducts("order-1"))
+				.thenThrow(ApiException.unavailable("DEPENDENCY_UNAVAILABLE", "Order Service chưa sẵn sàng"));
+
+		reconciler.reconcile();
+
+		assertThat(jdbc.queryForObject("select count(*) from legacy_returned_orders", Long.class)).isEqualTo(1);
+		reviewNewProduct("order-1", "product-3", 422);
 	}
 }

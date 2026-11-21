@@ -23,6 +23,9 @@ app:
     outbox-enabled: false
     outbox-monitor-enabled: false
     image-origins: https://cdn.vmarket.vn
+    internal-api-key: test-internal-api-key-0123456789-0123456789
+    # Test goi LegacyReturnReconciler truc tiep, khong de lich chay xen vao.
+    legacy-return-initial-delay: 3600000
   media:
     endpoint: http://minio.test:9000
     public-origin: https://cdn.vmarket.vn

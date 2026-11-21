@@ -5,6 +5,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -45,12 +46,68 @@ public class ReturnedOrderService {
 	private final ReviewOutbox outbox;
 	private final Clock clock;
 
+	/**
+	 * Sản phẩm của đơn đã trả hàng. Đơn trả hàng ghi theo kiểu cũ (chỉ biết đơn, {@code legacy_returned_orders})
+	 * chưa được đối chiếu thì chặn cả đơn như trước.
+	 */
 	@Transactional(readOnly = true)
 	public boolean isReturned(String orderId, String productId) {
+		Integer found = jdbc.queryForObject("""
+				select (select count(*) from returned_items where order_id = ? and product_id = ?)
+				     + (select count(*) from legacy_returned_orders where order_id = ?)""", Integer.class, orderId,
+				productId, orderId);
+		return found != null && found > 0;
+	}
+
+	/** Đơn trả hàng ghi theo kiểu cũ còn chờ đối chiếu với Order Service. */
+	@Transactional(readOnly = true)
+	public List<LegacyReturn> legacyReturns(int limit) {
+		return jdbc.query("select order_id, return_id from legacy_returned_orders order by resolved_at, order_id limit ?",
+				(rs, row) -> new LegacyReturn(rs.getString("order_id"), rs.getString("return_id")), limit);
+	}
+
+	/**
+	 * Chuyển một đơn trả hàng kiểu cũ sang theo sản phẩm: {@code returnedProducts} là sản phẩm trong các
+	 * yêu cầu trả hàng {@code RESOLVED} của đơn (theo Order Service). Đánh giá của các sản phẩm đó giữ
+	 * {@code RETURNED}; đánh giá của sản phẩm khác bị bản cũ ẩn nhầm (cả đơn) được hiển thị lại.
+	 */
+	@Transactional
+	public void reconcileLegacy(LegacyReturn legacy, Collection<String> returnedProducts) {
+		lockOrder(legacy.orderId());
+		Set<String> products = new LinkedHashSet<>(returnedProducts);
+		Instant now = clock.instant();
+		for (String productId : products) {
+			jdbc.update("insert into returned_items (order_id, product_id, return_id, resolved_at) values (?, ?, ?, ?)"
+					+ " on conflict do nothing", legacy.orderId(), productId, legacy.returnId(), Timestamp.from(now));
+		}
+		int restored = 0;
+		for (Review review : reviews.findByOrderId(legacy.orderId())) {
+			if (review.getStatus() != ReviewStatus.RETURNED || products.contains(review.getProductId())
+					|| isReturnedItem(legacy.orderId(), review.getProductId())) {
+				continue;
+			}
+			review.setStatus(ReviewStatus.VISIBLE);
+			review.setModerationReason(null);
+			review.setModeratedBy(null);
+			review.setModeratedAt(null);
+			review.setUpdatedAt(now);
+			reviews.saveAndFlush(review);
+			outbox.ratingChanged(review.getId(), review.getProductId());
+			restored++;
+		}
+		jdbc.update("delete from legacy_returned_orders where order_id = ?", legacy.orderId());
+		log.info("Đối chiếu đơn trả hàng cũ {}: {} sản phẩm đã trả, hiển thị lại {} đánh giá", legacy.orderId(),
+				products.size(), restored);
+	}
+
+	private boolean isReturnedItem(String orderId, String productId) {
 		Integer found = jdbc.queryForObject(
 				"select count(*) from returned_items where order_id = ? and product_id = ?", Integer.class, orderId,
 				productId);
 		return found != null && found > 0;
+	}
+
+	public record LegacyReturn(String orderId, String returnId) {
 	}
 
 	/**

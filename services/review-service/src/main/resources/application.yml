@@ -58,6 +58,8 @@ app:
   review:
     order-url: ${ORDER_SERVICE_URL:http://localhost:8086}
     shop-url: ${SHOP_SERVICE_URL:http://localhost:8083}
+    # Khoa /internal/** cua Order Service: doi chieu don da tra hang ghi theo kieu cu (PBL6-35).
+    internal-api-key: ${INTERNAL_API_KEY:}
     # Origin kho anh (MinIO/CDN) ma URL anh danh gia duoc phep tro toi, phan tach bang dau phay.
     # Khong co mac dinh o day: dev lay o application-dev.yml, prod bat buoc khai (https).
     image-origins: ${REVIEW_IMAGE_ORIGINS}

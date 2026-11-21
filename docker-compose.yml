@@ -679,6 +679,8 @@ services:
       # Kiem tra don (GET /api/orders/{id}) va gian hang cua seller bang token nguoi goi.
       ORDER_SERVICE_URL: http://order-service:8086
       SHOP_SERVICE_URL: http://shop-service:8083
+      # Khoa /internal/** cua order-service: doi chieu don da tra hang ghi theo kieu cu.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       # MinIO - anh danh gia (reviews/{ngau nhien}/...). URL anh chi duoc tro toi
       # REVIEW_IMAGE_ORIGINS; khong khai thi lay dung MINIO_PUBLIC_ORIGIN de anh vua tai luon hop le.
       MINIO_ENDPOINT: http://minio:9000

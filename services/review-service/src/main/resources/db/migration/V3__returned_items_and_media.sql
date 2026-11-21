@@ -2,7 +2,6 @@
 --
 -- 1. Tra hang theo tung san pham: don tao bang POST /api/orders co the gom nhieu gian hang, ma moi
 --    yeu cau tra hang chi thuoc mot gian hang. Tra hang cua shop A khong duoc an danh gia cua shop B.
---    Du lieu cu chi biet don nao da tra: chuyen sang cac san pham da co danh gia trong don do.
 CREATE TABLE returned_items (
     order_id VARCHAR(64) NOT NULL,
     product_id VARCHAR(64) NOT NULL,
@@ -10,11 +9,11 @@ CREATE TABLE returned_items (
     resolved_at TIMESTAMP WITH TIME ZONE NOT NULL,
     PRIMARY KEY (order_id, product_id)
 );
-INSERT INTO returned_items (order_id, product_id, return_id, resolved_at)
-SELECT DISTINCT o.order_id, r.product_id, o.return_id, o.resolved_at
-FROM returned_orders o
-JOIN reviews r ON r.order_id = o.order_id;
-DROP TABLE returned_orders;
+-- Du lieu cu chi biet don nao da tra, khong biet san pham nao. KHONG suy ra tu danh gia: don chua co
+-- danh gia se mat dau chan, con san pham cua shop khac bi danh dau nham. Giu lai de
+-- LegacyReturnReconciler hoi Order Service cac dong tra hang RESOLVED cua don roi chuyen sang
+-- returned_items; trong luc cho, ca don van bi chan nhu truoc.
+ALTER TABLE returned_orders RENAME TO legacy_returned_orders;
 
 -- 2. Khoa theo don: gui danh gia va chot tra hang cung giu khoa dong nay trong transaction, nen mot
 --    ben luon thay du lieu da commit cua ben kia (khong con truong hop ca hai cung thanh cong).

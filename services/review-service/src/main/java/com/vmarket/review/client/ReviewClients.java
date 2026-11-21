@@ -2,6 +2,8 @@ package com.vmarket.review.client;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -49,6 +51,27 @@ public class ReviewClients {
 			}
 			throw ApiException.forbidden("ORDER_ACCESS_DENIED", "Không xác minh được đơn hàng của bạn");
 		}
+	}
+
+	/**
+	 * Sản phẩm của đơn nằm trong các yêu cầu trả hàng đã chốt ({@code RESOLVED}), hỏi qua endpoint nội bộ
+	 * của Order Service. Dùng để đối chiếu dữ liệu trả hàng cũ chỉ ghi theo đơn.
+	 */
+	public List<String> returnedProducts(String orderId) {
+		JsonNode body;
+		try {
+			body = call(http.get().uri(config.getOrderUrl() + "/internal/orders/{id}/returned-products", orderId)
+					.header("X-Internal-Api-Key", config.getInternalApiKey()));
+		} catch (UpstreamRejected ex) {
+			throw ApiException.unavailable("DEPENDENCY_UNAVAILABLE", "Order Service từ chối yêu cầu nội bộ: " + ex.status);
+		}
+		List<String> products = new ArrayList<>();
+		for (JsonNode product : body.path("productIds")) {
+			if (product.isString() && !product.asString().isBlank()) {
+				products.add(product.asString());
+			}
+		}
+		return products;
 	}
 
 	/** Id gian hàng của seller đang đăng nhập. */
