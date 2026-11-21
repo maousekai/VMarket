@@ -113,6 +113,10 @@ class ClientIpResolverTest {
 		ClientIpResolver r = new ClientIpResolver(List.of("frontend"), 30,
 				host -> new InetAddress[] { InetAddress.getByName("172.18.0.5") }, clock::get, queued::add);
 
+		// Lần tra đầu cũng chạy nền: constructor chỉ xếp hàng, không tự tra DNS
+		assertThat(queued).hasSize(1);
+		queued.remove(0).run();
+
 		clock.set(30_000);
 		// Refresh được đẩy sang executor, request vẫn trả kết quả ngay với danh sách hiện có
 		assertThat(r.resolve("172.18.0.5", List.of("198.51.100.1"))).isEqualTo("198.51.100.1");
@@ -120,6 +124,57 @@ class ClientIpResolverTest {
 		// Đang có một refresh chờ chạy thì không xếp thêm
 		r.resolve("172.18.0.5", List.of("198.51.100.1"));
 		assertThat(queued).hasSize(1);
+	}
+
+	@Test
+	void unresolvedHostname_isRetriedWithBackoff_notAfterFullRefreshPeriod() throws Exception {
+		AtomicLong clock = new AtomicLong(0);
+		AtomicInteger lookups = new AtomicInteger();
+		AtomicReference<String> current = new AtomicReference<>(null);
+		ClientIpResolver.HostResolver dns = host -> {
+			lookups.incrementAndGet();
+			String ip = current.get();
+			if (ip == null) {
+				throw new UnknownHostException(host);
+			}
+			return new InetAddress[] { InetAddress.getByName(ip) };
+		};
+		// frontend khởi động sau gateway: lần tra đầu thất bại
+		ClientIpResolver r = new ClientIpResolver(List.of("frontend"), 30, dns, clock::get, Runnable::run);
+		assertThat(lookups.get()).isEqualTo(1);
+
+		// Thử lại sau 1s, rồi 2s
+		clock.set(999);
+		r.resolve("172.18.0.5", List.of("198.51.100.1"));
+		assertThat(lookups.get()).isEqualTo(1);
+		clock.set(1_000);
+		r.resolve("172.18.0.5", List.of("198.51.100.1"));
+		assertThat(lookups.get()).isEqualTo(2);
+		clock.set(2_999);
+		r.resolve("172.18.0.5", List.of("198.51.100.1"));
+		assertThat(lookups.get()).isEqualTo(2);
+
+		// frontend đã lên: lần thử sau 2s tra được, XFF được tin ngay
+		current.set("172.18.0.5");
+		clock.set(3_000);
+		r.resolve("172.18.0.5", List.of("198.51.100.1"));
+		assertThat(lookups.get()).isEqualTo(3);
+		assertThat(r.resolve("172.18.0.5", List.of("198.51.100.1"))).isEqualTo("198.51.100.1");
+
+		// Đủ tên host rồi thì quay về chu kỳ refresh đầy đủ
+		clock.set(32_999);
+		r.resolve("172.18.0.5", List.of("198.51.100.1"));
+		assertThat(lookups.get()).isEqualTo(3);
+		clock.set(33_000);
+		r.resolve("172.18.0.5", List.of("198.51.100.1"));
+		assertThat(lookups.get()).isEqualTo(4);
+	}
+
+	@Test
+	void ipv4MappedIpv6_sharesBucketWithPlainIpv4() {
+		assertThat(ClientIpResolver.bucketKey("::ffff:198.51.100.1")).isEqualTo("198.51.100.1");
+		// Không tin XFF thì vẫn trả địa chỉ kết nối ở dạng chuẩn
+		assertThat(resolver().resolve("::ffff:198.51.100.1", List.of())).isEqualTo("198.51.100.1");
 	}
 
 	@Test

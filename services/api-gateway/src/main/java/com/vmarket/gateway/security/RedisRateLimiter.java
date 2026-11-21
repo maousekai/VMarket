@@ -67,6 +67,11 @@ public class RedisRateLimiter implements RateLimiter {
 		this.clockMillis = clockMillis;
 	}
 
+	/** {@code true} khi lần gọi Redis gần nhất lỗi và đang đếm bằng bộ dự phòng. */
+	public boolean isDegraded() {
+		return degraded.get();
+	}
+
 	@Override
 	public boolean tryAcquire(String key) {
 		long now = clockMillis.getAsLong();

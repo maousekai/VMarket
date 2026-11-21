@@ -35,6 +35,10 @@ def generated_files(values):
         proxy_connect_timeout 5s;
         proxy_read_timeout 15s;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
         error_page 413 = @search_too_large;
     }}
 
@@ -68,6 +72,21 @@ def generated_files(values):
     yield path, updated
 
 
+def check_forwarded_headers(text):
+    """Every nginx location that proxies to the gateway must set X-Forwarded-For.
+
+    A location-level proxy_set_header replaces all inherited ones, and nginx
+    forwards client headers as-is, so a block without it lets a client-supplied
+    X-Forwarded-For reach the gateway untouched (the gateway keys rate limits on it).
+    """
+    missing = []
+    for match in re.finditer(r'location\s+([^{]+?)\s*\{(.*?)\n    \}', text, flags=re.S):
+        body = match.group(2)
+        if 'proxy_pass' in body and 'X-Forwarded-For $proxy_add_x_forwarded_for' not in body:
+            missing.append(match.group(1).strip())
+    return missing
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--check', action='store_true')
@@ -84,6 +103,10 @@ def main():
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(expected, encoding='utf-8', newline='\n')
+    template = (ROOT / 'frontend/default.conf.template').read_text(encoding='utf-8')
+    missing = check_forwarded_headers(template)
+    if missing:
+        parser.exit(1, 'nginx locations proxying without X-Forwarded-For: ' + ', '.join(missing) + '\n')
     if stale:
         parser.exit(1, 'Search contract drift; run python scripts/generate-search-contract.py:\n' + '\n'.join(stale) + '\n')
 
