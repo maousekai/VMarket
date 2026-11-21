@@ -38,7 +38,9 @@ class RedisRateLimiterRedisTest {
 		factory.afterPropertiesSet();
 		factory.start();
 		redis = new StringRedisTemplate(factory);
-		redis.getConnectionFactory().getConnection().serverCommands().flushAll();
+		try (var connection = factory.getConnection()) {
+			connection.serverCommands().flushAll();
+		}
 	}
 
 	@AfterEach

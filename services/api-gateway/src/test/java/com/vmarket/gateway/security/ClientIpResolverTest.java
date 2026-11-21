@@ -127,6 +127,25 @@ class ClientIpResolverTest {
 	}
 
 	@Test
+	void constructorWaitsBrieflyForFirstLookup_soFirstRequestTrustsProxy() {
+		// Tra DNS ở luồng khác (như thực tế); constructor chờ nó xong trong giới hạn
+		ClientIpResolver r = new ClientIpResolver(List.of("frontend"), 30,
+				host -> new InetAddress[] { InetAddress.getByName("172.18.0.5") }, () -> 0L,
+				task -> new Thread(task).start(), 2_000);
+		assertThat(r.resolve("172.18.0.5", List.of("198.51.100.1"))).isEqualTo("198.51.100.1");
+	}
+
+	@Test
+	void hangingFirstLookup_doesNotBlockConstructorBeyondTheWait() {
+		long start = System.nanoTime();
+		ClientIpResolver r = new ClientIpResolver(List.of("frontend"), 30,
+				host -> new InetAddress[0], () -> 0L, task -> { /* không bao giờ chạy */ }, 100);
+		assertThat(System.nanoTime() - start).isLessThan(java.time.Duration.ofSeconds(2).toNanos());
+		// Chưa có danh sách tin cậy: dùng địa chỉ kết nối
+		assertThat(r.resolve("172.18.0.5", List.of("198.51.100.1"))).isEqualTo("172.18.0.5");
+	}
+
+	@Test
 	void unresolvedHostname_isRetriedWithBackoff_notAfterFullRefreshPeriod() throws Exception {
 		AtomicLong clock = new AtomicLong(0);
 		AtomicInteger lookups = new AtomicInteger();

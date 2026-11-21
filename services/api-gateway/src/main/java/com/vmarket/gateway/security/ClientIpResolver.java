@@ -10,8 +10,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
@@ -53,6 +55,9 @@ public class ClientIpResolver {
 	/** Lần thử lại đầu tiên khi còn tên host chưa tra được; nhân đôi tới chu kỳ refresh. */
 	private static final long INITIAL_RETRY_MILLIS = 1000;
 
+	/** Thời gian tối đa constructor chờ lần tra DNS đầu tiên. */
+	private static final long INITIAL_WAIT_MILLIS = 2000;
+
 	/** Tra DNS cho tên host cấu hình; tách ra để test thay được. */
 	@FunctionalInterface
 	public interface HostResolver {
@@ -69,6 +74,7 @@ public class ClientIpResolver {
 	private final Map<String, List<IpRange>> resolvedHosts = new LinkedHashMap<>();
 	private final Map<String, Long> lastResolvedAt = new HashMap<>();
 	private final AtomicBoolean refreshing = new AtomicBoolean(false);
+	private final CountDownLatch firstRefreshDone = new CountDownLatch(1);
 	private volatile List<IpRange> hostRanges = List.of();
 	private volatile long nextRefreshAt;
 	/** Số lần refresh liên tiếp còn tên host chưa tra được; chỉ dùng khi giữ cờ {@code refreshing}. */
@@ -80,11 +86,16 @@ public class ClientIpResolver {
 					Thread t = new Thread(r, "trusted-proxy-dns");
 					t.setDaemon(true);
 					return t;
-				}));
+				}), INITIAL_WAIT_MILLIS);
 	}
 
 	ClientIpResolver(Collection<String> trustedProxies, int refreshSeconds, HostResolver hostResolver,
 			LongSupplier clockMillis, Executor refreshExecutor) {
+		this(trustedProxies, refreshSeconds, hostResolver, clockMillis, refreshExecutor, 0);
+	}
+
+	ClientIpResolver(Collection<String> trustedProxies, int refreshSeconds, HostResolver hostResolver,
+			LongSupplier clockMillis, Executor refreshExecutor, long initialWaitMillis) {
 		this.hostResolver = hostResolver;
 		this.clockMillis = clockMillis;
 		this.refreshExecutor = refreshExecutor;
@@ -103,9 +114,25 @@ public class ClientIpResolver {
 				hostnames.add(entry);
 			}
 		}
-		// Lần đầu tra ở luồng nền để DNS chậm không chặn khởi động gateway.
+		// Lần đầu tra ở luồng nền, chờ tối đa initialWaitMillis: thường DNS trả lời ngay
+		// nên request đầu tiên đã tin được proxy (nếu không, mọi người dùng sau nginx chung
+		// một bucket cho tới khi tra xong); DNS treo thì không chặn khởi động lâu hơn mức đó.
 		if (!hostnames.isEmpty()) {
 			scheduleRefresh();
+			awaitFirstRefresh(initialWaitMillis);
+		}
+	}
+
+	private void awaitFirstRefresh(long waitMillis) {
+		if (waitMillis <= 0) {
+			return;
+		}
+		try {
+			if (!firstRefreshDone.await(waitMillis, TimeUnit.MILLISECONDS)) {
+				log.warn("Tra DNS trusted proxy chưa xong sau {} ms, tiếp tục ở luồng nền", waitMillis);
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
 		}
 	}
 
@@ -237,6 +264,7 @@ public class ClientIpResolver {
 		} finally {
 			nextRefreshAt = clockMillis.getAsLong() + nextDelayMillis(allResolved);
 			refreshing.set(false);
+			firstRefreshDone.countDown();
 		}
 	}
 

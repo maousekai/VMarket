@@ -87,7 +87,7 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-		<!-- Redis that cho RedisRateLimiterRedisIT; may khong co Docker thi test tu bo qua -->
+		<!-- Redis that cho RedisRateLimiterRedisTest; may khong co Docker thi test tu bo qua -->
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>junit-jupiter</artifactId>
