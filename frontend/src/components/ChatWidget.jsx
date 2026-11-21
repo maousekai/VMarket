@@ -190,39 +190,47 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(null)
   const returnTo = `${location.pathname}${location.search}`
-  // Phien dang hien thi. Moi yeu cau ghi nho phien da tao ra no; phan hoi ve sau khi phien doi
-  // (dang xuat / doi tai khoan o tab khac) bi bo, khong hien hay luu vao phien moi.
-  const sessionRef = useRef(userId)
-  const isStale = (startedFor) => sessionRef.current !== startedFor
+  // Pham vi dang hien thi (tai khoan + hoi thoai). Moi yeu cau ghi nho pham vi da tao ra no; doi tai
+  // khoan (dang xuat / dang nhap o tab khac), bam "Moi" hay mo hoi thoai khac thi tao pham vi moi, va
+  // phan hoi den muon cua pham vi cu bi bo: khong hien, khong ghi lai id hoi thoai cu.
+  const scopeRef = useRef({})
+  const isStale = (scope) => scopeRef.current !== scope
+  const newScope = () => {
+    scopeRef.current = {}
+    return scopeRef.current
+  }
 
-  // Doi tai khoan / dang xuat: khong de lo hoi thoai cua nguoi truoc.
+  // Doi tai khoan / dang xuat: khong de lo hoi thoai lan ban nhap cua nguoi truoc.
   if (owner !== userId) {
     setOwner(userId)
     setConversationId(readStored(userId))
     setMessages([])
     setLoadedFor(null)
+    setInput('')
     setFailed(null)
     setSending(false)
     setView('chat')
   }
 
-  // Layout effect: cap nhat ngay khi commit, truoc khi phan hoi nao cua phien cu kip chay tiep.
+  // Layout effect: doi pham vi ngay khi commit, truoc khi phan hoi nao cua tai khoan cu kip chay tiep.
   useLayoutEffect(() => {
-    sessionRef.current = userId
+    scopeRef.current = {}
   }, [userId])
 
   const openConversation = useCallback(async (id) => {
-    const startedFor = sessionRef.current
+    scopeRef.current = {}
+    const scope = scopeRef.current
     setView('chat')
     setFailed(null)
+    setSending(false)
     setLoadedFor(id)
     try {
       const page = await listConversationMessages(id)
-      if (sessionRef.current !== startedFor) return
+      if (scopeRef.current !== scope) return
       setConversationId(id)
       setMessages((page.messages || []).map(fromServer))
     } catch (failure) {
-      if (sessionRef.current !== startedFor) return
+      if (scopeRef.current !== scope) return
       // Hoi thoai khong con (hoac cua nguoi khac): bat dau hoi thoai moi.
       if (getApiError(failure).status === 404) {
         setConversationId(null)
@@ -256,7 +264,7 @@ export default function ChatWidget() {
   async function send(text) {
     const message = text.trim()
     if (!message || sending) return
-    const startedFor = sessionRef.current
+    const scope = scopeRef.current
     setSending(true)
     setFailed(null)
     setInput('')
@@ -264,7 +272,7 @@ export default function ChatWidget() {
     setMessages((current) => [...current, { id: pendingId, role: 'user', content: message }])
     try {
       const reply = await sendChatMessage({ message, conversationId })
-      if (isStale(startedFor)) return
+      if (isStale(scope)) return
       if (reply.conversationId) {
         setConversationId(reply.conversationId)
         setLoadedFor(reply.conversationId)
@@ -282,7 +290,7 @@ export default function ChatWidget() {
         },
       ])
     } catch (failure) {
-      if (isStale(startedFor)) return
+      if (isStale(scope)) return
       const problem = getApiError(failure)
       if (problem.code === 'CONVERSATION_NOT_FOUND') {
         setConversationId(null)
@@ -298,11 +306,14 @@ export default function ChatWidget() {
         retry: message,
       })
     } finally {
-      if (!isStale(startedFor)) setSending(false)
+      if (!isStale(scope)) setSending(false)
     }
   }
 
   function startNew() {
+    // Tin dang cho tra loi thuoc hoi thoai vua roi: bo phan hoi cua no.
+    newScope()
+    setSending(false)
     setConversationId(null)
     setLoadedFor(null)
     setMessages([])

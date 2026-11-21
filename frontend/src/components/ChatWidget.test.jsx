@@ -240,4 +240,54 @@ describe('ChatWidget', () => {
     expect(sessionStorage.getItem('vmarket.chat.u2')).toBeNull()
     expect(within(current).getByRole('button', { name: 'Gửi' })).toBeInTheDocument()
   })
+
+  it('clears the draft of the previous account', () => {
+    const tree = (auth) => (
+      <AuthContext.Provider value={auth}>
+        <MemoryRouter initialEntries={['/products/p1']}>
+          <ChatWidget />
+        </MemoryRouter>
+      </AuthContext.Provider>
+    )
+    const { rerender } = render(tree(buyer))
+    const panel = openPanel()
+    fireEvent.change(within(panel).getByLabelText('Nhập câu hỏi cho trợ lý'), {
+      target: { value: 'Đơn #A1 của tôi giao chưa?' },
+    })
+
+    rerender(tree({ session: { userId: 'u2', roles: ['BUYER'] }, bootstrapState: 'ready' }))
+
+    const current = screen.getByRole('dialog', { name: 'Trợ lý VMarket' })
+    expect(within(current).getByLabelText('Nhập câu hỏi cho trợ lý')).toHaveValue('')
+    expect(within(current).getByRole('button', { name: 'Gửi' })).toBeDisabled()
+  })
+
+  it('does not reopen the old conversation when a new one starts during a reply', async () => {
+    let resolveReply
+    sendChatMessage.mockReturnValueOnce(new Promise((resolve) => (resolveReply = resolve)))
+    renderWidget(buyer)
+    const panel = openPanel()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Chính sách đổi trả như thế nào?' }))
+    expect(await within(panel).findByText('Trợ lý đang trả lời…')).toBeInTheDocument()
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Mới' }))
+    resolveReply(reply({ conversationId: CONVERSATION, reply: 'Trả lời cho hội thoại cũ' }))
+    await waitFor(() =>
+      expect(within(panel).queryByText('Trợ lý đang trả lời…')).not.toBeInTheDocument(),
+    )
+    expect(within(panel).queryByText('Trả lời cho hội thoại cũ')).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('vmarket.chat.u1')).toBeNull()
+
+    sendChatMessage.mockResolvedValueOnce(reply())
+    fireEvent.change(within(panel).getByLabelText('Nhập câu hỏi cho trợ lý'), {
+      target: { value: 'Câu hỏi mới' },
+    })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Gửi' }))
+    await waitFor(() =>
+      expect(sendChatMessage).toHaveBeenLastCalledWith({
+        message: 'Câu hỏi mới',
+        conversationId: null,
+      }),
+    )
+  })
 })
