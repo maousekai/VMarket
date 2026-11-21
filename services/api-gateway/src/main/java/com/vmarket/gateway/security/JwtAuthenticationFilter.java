@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import com.vmarket.gateway.config.GatewaySecurityProperties;
 import com.vmarket.gateway.config.SearchContract;
@@ -76,6 +78,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	private final GatewaySecurityProperties securityProperties;
 	private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
+	/** Tham số ma trận {@code ;a=b} trong một segment. */
+	private static final Pattern MATRIX_PARAMS = Pattern.compile(";[^/]*");
+
+	/** Path trong ứng dụng, đã giải mã {@code %xx} và bỏ {@code ;param}. */
+	private static final UrlPathHelper DECODING_PATH_HELPER = new UrlPathHelper();
+
+	static {
+		DECODING_PATH_HELPER.setUrlDecode(true);
+		DECODING_PATH_HELPER.setRemoveSemicolonContent(true);
+	}
+
 	public JwtAuthenticationFilter(JwtService jwtService, GatewaySecurityProperties securityProperties) {
 		this.jwtService = jwtService;
 		this.securityProperties = securityProperties;
@@ -126,12 +139,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 */
 	private boolean isInternalApiRequest(HttpServletRequest request) {
 		String raw = request.getRequestURI();
-		// Bỏ tham số ma trận (";a=b") trước khi so: route predicate của gateway bỏ qua
-		// chúng, nên "/api/products;x/internal/..." vẫn được định tuyến — không được để
-		// nó lọt qua danh sách chặn (PBL6-50).
-		String path = raw.replaceAll(";[^/]*", "");
+		// So trên cả URI gốc lẫn path đã chuẩn hoá giống cách route predicate và service
+		// đích hiểu nó (PBL6-50):
+		//  - bỏ tham số ma trận (";a=b"): predicate bỏ qua chúng, nên
+		//    "/api/products;x/internal/..." vẫn được định tuyến;
+		//  - giải mã %xx: URI chuyển xuống vẫn ở dạng mã hoá và service đích tự giải mã,
+		//    nên "/api/products/%69nternal/..." tới được endpoint nội bộ.
+		String withoutMatrix = MATRIX_PARAMS.matcher(raw).replaceAll("");
+		String decoded = DECODING_PATH_HELPER.getPathWithinApplication(request);
 		for (String pattern : securityProperties.getInternalDenyPaths()) {
-			if (pathMatcher.match(pattern, path) || pathMatcher.match(pattern, raw)) {
+			if (pathMatcher.match(pattern, raw) || pathMatcher.match(pattern, withoutMatrix)
+					|| pathMatcher.match(pattern, decoded)) {
 				return true;
 			}
 		}
@@ -240,7 +258,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		@Override
 		public String getHeader(String name) {
-			if (isIdentityHeader(name)) {
+			if (isGatewayManagedHeader(name)) {
 				return identity.entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(name))
 						.map(Map.Entry::getValue).findFirst().orElse(null);
 			}
@@ -249,7 +267,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		@Override
 		public Enumeration<String> getHeaders(String name) {
-			if (isIdentityHeader(name)) {
+			if (isGatewayManagedHeader(name)) {
 				String value = getHeader(name);
 				return value != null ? Collections.enumeration(List.of(value)) : Collections.emptyEnumeration();
 			}
@@ -259,7 +277,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		@Override
 		public Enumeration<String> getHeaderNames() {
 			Set<String> names = new LinkedHashSet<>(Collections.list(super.getHeaderNames()));
-			names.removeIf(IdentityRequestWrapper::isIdentityHeader);
+			names.removeIf(IdentityRequestWrapper::isGatewayManagedHeader);
 			names.addAll(identity.keySet());
 			return Collections.enumeration(names);
 		}
@@ -269,7 +287,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		 * (danh tính) và {@code X-Internal-Api-Key} (khoá service-to-service, PBL6-50 —
 		 * nếu lọt qua, ai biết khoá có thể mạo danh người dùng ở service đích).
 		 */
-		private static boolean isIdentityHeader(String name) {
+		private static boolean isGatewayManagedHeader(String name) {
 			if (name == null) {
 				return false;
 			}
