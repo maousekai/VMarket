@@ -448,6 +448,30 @@ describe('OrderDetailPage', () => {
     expect(await screen.findAllByRole('button', { name: 'Đánh giá' })).toHaveLength(2)
   })
 
+  it('finishing the review of one product keeps the dialog of another product open', async () => {
+    getOrder.mockResolvedValue(delivered)
+    let finishSave
+    createReview.mockReturnValueOnce(new Promise((resolve) => (finishSave = resolve)))
+    renderAt(`/profile/orders/${delivered.id}`)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Đánh giá' }))[0])
+    let dialog = await screen.findByRole('dialog', { name: 'Đánh giá sản phẩm đã mua' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /5 sao/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Gửi đánh giá' }))
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Đánh giá' })[1])
+    dialog = await screen.findByRole('dialog', { name: 'Đánh giá sản phẩm đã mua' })
+    expect(within(dialog).getByText('Ly gốm')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Bản nháp' } })
+
+    finishSave({ id: 'r1', productId: 'p1', rating: 5 })
+    expect(await screen.findByText('Cảm ơn bạn đã đánh giá sản phẩm!')).toBeInTheDocument()
+    dialog = screen.getByRole('dialog', { name: 'Đánh giá sản phẩm đã mua' })
+    expect(within(dialog).getByRole('textbox')).toHaveValue('Bản nháp')
+  })
+
   it('does not offer reviews for an order that is not delivered yet', async () => {
     getOrder.mockResolvedValue(pending)
     renderAt(`/profile/orders/${pending.id}`)

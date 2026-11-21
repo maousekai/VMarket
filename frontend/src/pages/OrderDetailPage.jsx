@@ -466,12 +466,16 @@ export default function OrderDetailPage() {
       )}
       {dialog?.type === 'review' && (
         <ReviewDialog
+          key={dialog.item.id}
           orderId={order.id}
           item={dialog.item}
           product={products[dialog.item.productId]?.value}
           onClose={() => setDialog(null)}
           onCreated={(created, message) => {
-            setDialog(null)
+            // Hop thoai nay co the da dong (Escape luc dang luu) va nguoi dung da mo hop thoai khac:
+            // chi dong dung hop thoai da gui danh gia, khong dong ban nhap dang viet.
+            const opened = dialog
+            setDialog((current) => (current === opened ? null : current))
             if (created) {
               setReviews((current) => ({
                 orderId,
