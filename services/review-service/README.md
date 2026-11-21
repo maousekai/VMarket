@@ -14,7 +14,7 @@ cd services/review-service
 
 Profile `dev` có sẵn `AUTH_JWT_SECRET` giả và `REVIEW_IMAGE_ORIGINS` mặc định bằng `MINIO_PUBLIC_ORIGIN`
 (`http://localhost:9000`, MinIO của compose). Profile `prod` bắt buộc `AUTH_JWT_SECRET`, `ORDER_SERVICE_URL`,
-`SHOP_SERVICE_URL`, `REVIEW_IMAGE_ORIGINS` (xem `.env.prod.example`).
+`SHOP_SERVICE_URL`, `REVIEW_IMAGE_ORIGINS`, `INTERNAL_API_KEY` (xem `.env.prod.example`).
 
 Swagger UI: `http://localhost:8089/swagger-ui.html`.
 
@@ -66,10 +66,15 @@ thấy `orderId` nhưng không có `buyerId`; admin và chính người viết t
   ẩn / khôi phục được (`409 REVIEW_RETURNED`). Viết đánh giá cho sản phẩm đã trả hàng → `422 ORDER_RETURNED`.
   Gửi đánh giá và chốt trả hàng cùng giữ khoá theo đơn (`review_order_locks`), nên hai luồng chạy đồng thời
   không thể cùng thành công. Yêu cầu trả hàng còn chờ / đã chấp nhận / bị từ chối thì đánh giá vẫn hiển thị.
+  Dữ liệu của bản đầu chỉ ghi theo đơn (`legacy_returned_orders`): trong lúc chờ vẫn chặn cả đơn;
+  `LegacyReturnReconciler` (5 phút / lần) hỏi Order Service `GET /internal/orders/{id}/returned-products`
+  (khoá `INTERNAL_API_KEY`) rồi chuyển sang `returned_items` và hiển thị lại đánh giá bị ẩn nhầm.
 - **Ảnh:** tối đa 5, URL phải thuộc một origin trong `REVIEW_IMAGE_ORIGINS` (khớp chính xác
   scheme + host + port); ngoài localhost bắt buộc https — sai cấu hình thì service không khởi động.
   Key ảnh là `reviews/{ngẫu nhiên}/{sha256}.jpg`, không chứa buyerId (API công khai đã giấu người mua);
-  chủ sở hữu lưu ở bảng `review_media`, chỉ chủ ảnh xoá được ảnh chưa gửi kèm đánh giá.
+  chủ sở hữu lưu ở bảng `review_media`, chỉ chủ ảnh xoá được ảnh chưa gửi kèm đánh giá. Tạo đánh giá
+  khoá bản ghi của các ảnh gửi kèm (phải do chính người mua tải lên và chưa bị xoá, nếu không →
+  `400 IMAGE_NOT_FOUND`); xoá ảnh dùng cùng khoá nên không đánh giá nào lưu URL ảnh đã xoá.
 - **Mỗi sản phẩm trong đơn chỉ đánh giá một lần:** ràng buộc `UNIQUE (order_id, product_id)`
   ở DB, request trùng (kể cả đồng thời) nhận `409 REVIEW_ALREADY_EXISTS`.
 - **Điểm tổng hợp** tính từ các đánh giá `VISIBLE` bằng `group by rating`, làm tròn 2 chữ số.

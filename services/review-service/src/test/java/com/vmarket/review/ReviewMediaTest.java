@@ -78,7 +78,7 @@ class ReviewMediaTest extends ReviewTestSupport {
 		upload(BUYER);
 		mvc.perform(delete("/api/reviews/media").param("url", URL).header("Authorization", token(BUYER, "BUYER")))
 				.andExpect(status().isNoContent());
-		verify(mediaStorage).deleteByUrl(URL, "reviews");
+		verify(mediaStorage).deleteQuietly(URL, "reviews");
 
 		upload(BUYER);
 		givenOrder("order-1", "DELIVERED", PRODUCT);
@@ -104,7 +104,35 @@ class ReviewMediaTest extends ReviewTestSupport {
 				.andExpect(jsonPath("$.error.code").value("INVALID_MEDIA_URL"));
 		mvc.perform(delete("/api/reviews/media").param("url", URL + "x").header("Authorization", token(BUYER, "BUYER")))
 				.andExpect(status().isBadRequest());
-		verify(mediaStorage, never()).deleteByUrl(anyString(), anyString());
+		verify(mediaStorage, never()).deleteQuietly(anyString(), anyString());
+	}
+
+	@Test
+	void deletedOrForeignImageCannotBeAttachedToAReview() throws Exception {
+		when(mediaStorage.upload(anyString(), any(ProcessedImage.class)))
+				.thenReturn(new StoredMedia("reviews/0f1e2d3c/a.jpg", URL));
+		upload(BUYER);
+		givenOrder("order-1", "DELIVERED", PRODUCT);
+
+		// Người khác không gắn được ảnh của mình.
+		givenOrder("order-2", "DELIVERED", PRODUCT);
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(OTHER_BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-2", PRODUCT, 5, List.of(URL))))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("IMAGE_NOT_FOUND"));
+
+		// Trình duyệt hết thời gian chờ và dọn ảnh trước khi request lưu tới: URL đã xoá bị từ chối.
+		mvc.perform(delete("/api/reviews/media").param("url", URL).header("Authorization", token(BUYER, "BUYER")))
+				.andExpect(status().isNoContent());
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-1", PRODUCT, 5, List.of(URL))))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("IMAGE_NOT_FOUND"));
+		assertThat(jdbc.queryForObject("select count(*) from reviews", Long.class)).isZero();
 	}
 
 	private void upload(String buyer) throws Exception {

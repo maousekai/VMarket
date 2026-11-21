@@ -4,12 +4,18 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.vmarket.media.ImageKind;
@@ -22,8 +28,6 @@ import com.vmarket.media.StoredMedia;
 import com.vmarket.review.exception.ApiException;
 import com.vmarket.review.repository.ReviewRepository;
 
-import lombok.RequiredArgsConstructor;
-
 /**
  * Ảnh thực tế người mua đính kèm đánh giá (FR-REV-01, tối đa 5 ảnh / đánh giá).
  *
@@ -33,7 +37,6 @@ import lombok.RequiredArgsConstructor;
  * mua chỉ xoá được ảnh của chính mình, và ảnh đã nằm trong một đánh giá thì không xoá được nữa.
  */
 @Service
-@RequiredArgsConstructor
 public class ReviewMediaService {
 
 	/** Thư mục gốc của ảnh đánh giá trong kho ảnh (bucket policy cho đọc công khai {@code reviews/*}). */
@@ -45,6 +48,17 @@ public class ReviewMediaService {
 	private final ReviewRepository reviews;
 	private final JdbcTemplate jdbc;
 	private final Clock clock;
+	private final TransactionTemplate transactions;
+
+	public ReviewMediaService(ImageProcessor imageProcessor, MediaStorage mediaStorage, ReviewRepository reviews,
+			JdbcTemplate jdbc, Clock clock, PlatformTransactionManager transactionManager) {
+		this.imageProcessor = imageProcessor;
+		this.mediaStorage = mediaStorage;
+		this.reviews = reviews;
+		this.jdbc = jdbc;
+		this.clock = clock;
+		this.transactions = new TransactionTemplate(transactionManager);
+	}
 
 	public MediaUploadResponse upload(String buyerId, MultipartFile file) {
 		String owner = requireBuyer(buyerId);
@@ -68,21 +82,48 @@ public class ReviewMediaService {
 		}
 	}
 
+	/**
+	 * Xoá ảnh chưa gửi kèm đánh giá. Bản ghi ảnh bị khoá và xoá trong một transaction, dùng chung khoá với
+	 * {@link #lockOwnedImages} khi tạo đánh giá: bên nào chạy sau cũng thấy kết quả của bên kia, nên không
+	 * có đánh giá nào lưu URL ảnh đã bị xoá. File trên kho ảnh chỉ bị xoá sau khi transaction commit.
+	 */
 	public void delete(String buyerId, String url) {
-		List<String> owners = url == null ? List.of()
-				: jdbc.queryForList("select buyer_id from review_media where url = ?", String.class, url);
-		if (owners.isEmpty() || !owners.get(0).equals(requireBuyer(buyerId))) {
-			throw ApiException.badRequest("INVALID_MEDIA_URL", "URL ảnh không thuộc kho ảnh của bạn");
+		String owner = requireBuyer(buyerId);
+		transactions.executeWithoutResult(status -> {
+			List<String> owners = url == null ? List.of()
+					: jdbc.queryForList("select buyer_id from review_media where url = ? for update", String.class, url);
+			if (owners.isEmpty() || !owners.get(0).equals(owner)) {
+				throw ApiException.badRequest("INVALID_MEDIA_URL", "URL ảnh không thuộc kho ảnh của bạn");
+			}
+			if (reviews.isImageUsed(owner, url)) {
+				throw ApiException.conflict("MEDIA_IN_USE", "Ảnh đã được gửi kèm một đánh giá");
+			}
+			jdbc.update("delete from review_media where url = ?", url);
+		});
+		// Bản ghi đã xoá: không đánh giá nào gắn được ảnh này nữa. File sót lại (kho ảnh lỗi) chỉ là rác.
+		mediaStorage.deleteQuietly(url, MEDIA_ROOT);
+	}
+
+	/**
+	 * Gọi trong transaction tạo đánh giá: khoá bản ghi của mọi ảnh gửi kèm tới hết transaction và bắt buộc
+	 * ảnh do chính người mua tải lên và chưa bị xoá.
+	 */
+	@Transactional(propagation = Propagation.MANDATORY)
+	public void lockOwnedImages(String buyerId, List<String> urls) {
+		if (urls.isEmpty()) {
+			return;
 		}
-		if (reviews.isImageUsed(buyerId, url)) {
-			throw ApiException.conflict("MEDIA_IN_USE", "Ảnh đã được gửi kèm một đánh giá");
+		String placeholders = String.join(", ", Collections.nCopies(urls.size(), "?"));
+		List<Object> args = new ArrayList<>();
+		args.add(buyerId);
+		args.addAll(urls);
+		List<String> owned = jdbc.queryForList(
+				"select url from review_media where buyer_id = ? and url in (" + placeholders + ") for update",
+				String.class, args.toArray());
+		if (owned.size() != urls.size()) {
+			throw ApiException.badRequest("IMAGE_NOT_FOUND",
+					"Ảnh không còn trên kho ảnh hoặc không phải ảnh bạn tải lên, vui lòng tải lại ảnh");
 		}
-		try {
-			mediaStorage.deleteByUrl(url, MEDIA_ROOT);
-		} catch (MediaException ex) {
-			throw translate(ex);
-		}
-		jdbc.update("delete from review_media where url = ?", url);
 	}
 
 	private static String requireBuyer(String buyerId) {

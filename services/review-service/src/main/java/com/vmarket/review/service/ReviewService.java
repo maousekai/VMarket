@@ -50,17 +50,19 @@ public class ReviewService {
 	private final ReviewOutbox outbox;
 	private final ReviewProperties properties;
 	private final ReturnedOrderService returnedOrders;
+	private final ReviewMediaService media;
 	private final Clock clock;
 	private final TransactionTemplate transactions;
 
 	public ReviewService(ReviewRepository reviews, ReviewClients clients, ReviewOutbox outbox,
-			ReviewProperties properties, ReturnedOrderService returnedOrders, Clock clock,
+			ReviewProperties properties, ReturnedOrderService returnedOrders, ReviewMediaService media, Clock clock,
 			PlatformTransactionManager transactionManager) {
 		this.reviews = reviews;
 		this.clients = clients;
 		this.outbox = outbox;
 		this.properties = properties;
 		this.returnedOrders = returnedOrders;
+		this.media = media;
 		this.clock = clock;
 		this.transactions = new TransactionTemplate(transactionManager);
 	}
@@ -99,6 +101,9 @@ public class ReviewService {
 				if (returnedOrders.isReturned(request.orderId(), request.productId())) {
 					throw orderReturned();
 				}
+				// Khoá bản ghi ảnh tới hết transaction: lệnh xoá ảnh chạy song song phải đợi, rồi thấy ảnh đã
+				// thuộc đánh giá (409). Ảnh đã bị xoá trước đó thì không còn bản ghi -> từ chối.
+				media.lockOwnedImages(buyerId, images);
 				Review review = reviews.saveAndFlush(Review.create(request.orderId(), request.productId(), variantId,
 						shopId, buyerId, request.rating(), comment, images, clock.instant()));
 				outbox.ratingChanged(review.getId(), review.getProductId());

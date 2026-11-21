@@ -38,6 +38,7 @@ import com.vmarket.review.service.ModerationService;
 import com.vmarket.review.service.RatingService;
 import com.vmarket.review.service.ReviewOutboxPublisher;
 import com.vmarket.review.service.ReturnedOrderService;
+import com.vmarket.review.service.ReviewMediaService;
 import com.vmarket.review.service.ReviewService;
 
 /**
@@ -71,6 +72,8 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 	PlatformTransactionManager transactionManager;
 	@Autowired
 	ReturnedOrderService returnedOrders;
+	@Autowired
+	ReviewMediaService mediaService;
 
 	private ExecutorService pool;
 
@@ -288,6 +291,54 @@ class ReviewConcurrencyPostgresTest extends ReviewTestSupport {
 		// Dù bên nào giành khoá trước, không có đánh giá nào còn hiển thị.
 		assertThat(reviewStatus).isIn(HttpStatus.CREATED, HttpStatus.UNPROCESSABLE_CONTENT);
 		assertThat(jdbc.queryForObject("select count(*) from reviews where status = 'VISIBLE'", Long.class)).isZero();
+	}
+
+	/**
+	 * Gắn ảnh vào đánh giá và xoá ảnh chạy đồng thời: transaction tạo đánh giá giữ khoá bản ghi ảnh, nên
+	 * lệnh xoá phải đợi rồi thấy ảnh đã thuộc đánh giá (409) — không còn đánh giá lưu URL ảnh đã xoá.
+	 */
+	@Test
+	void deletingAnImageWaitsForTheReviewThatAttachesIt() throws Exception {
+		String url = "https://cdn.vmarket.vn/vmarket-media-test/reviews/0f1e2d3c/a.jpg";
+		givenUploaded(BUYER, url);
+		givenOrder("order-1", "DELIVERED", PRODUCT);
+		var tx = new TransactionTemplate(transactionManager);
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+
+		Future<?> attaching = pool.submit(() -> tx.execute(s -> {
+			mediaService.lockOwnedImages(BUYER, List.of(url));
+			locked.countDown();
+			try {
+				assertThat(release.await(20, TimeUnit.SECONDS)).isTrue();
+			} catch (InterruptedException ex) {
+				Thread.currentThread().interrupt();
+			}
+			// Như ReviewService.create: ghi đánh giá kèm ảnh trong cùng transaction.
+			jdbc.update("insert into reviews (id, order_id, product_id, shop_id, buyer_id, rating, status, created_at,"
+					+ " updated_at) values ('01JREVIEWRACE000000000001', 'order-1', ?, ?, ?, 5, 'VISIBLE',"
+					+ " current_timestamp, current_timestamp)", PRODUCT, SHOP, BUYER);
+			jdbc.update("insert into review_images (id, review_id, url, sort_order) values"
+					+ " ('01JIMAGERACE0000000000001', '01JREVIEWRACE000000000001', ?, 0)", url);
+			return null;
+		}));
+		assertThat(locked.await(20, TimeUnit.SECONDS)).isTrue();
+
+		Future<HttpStatus> deleting = pool.submit(() -> {
+			try {
+				mediaService.delete(BUYER, url);
+				return HttpStatus.NO_CONTENT;
+			} catch (ApiException ex) {
+				return ex.getStatus();
+			}
+		});
+		Thread.sleep(500);
+		assertThat(deleting.isDone()).as("Xoá ảnh phải đợi transaction đang gắn ảnh").isFalse();
+
+		release.countDown();
+		attaching.get(20, TimeUnit.SECONDS);
+		assertThat(deleting.get(20, TimeUnit.SECONDS)).isEqualTo(HttpStatus.CONFLICT);
+		assertThat(jdbc.queryForObject("select count(*) from review_media", Long.class)).isEqualTo(1);
 	}
 
 	private static <T> Callable<T> named(String name, Callable<T> body) {
