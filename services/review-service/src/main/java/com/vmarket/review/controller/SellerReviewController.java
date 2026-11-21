@@ -21,6 +21,7 @@ import com.vmarket.review.entity.ReviewStatus;
 import com.vmarket.review.service.SellerReplyService;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,8 +38,10 @@ public class SellerReviewController {
 	@GetMapping
 	public PageResponse<ReviewResponse> myShopReviews(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
 			@RequestParam(required = false) ReviewStatus status, @RequestParam(required = false) Integer rating,
+			@Parameter(description = "true = đã phản hồi, false = chưa phản hồi; bỏ trống = tất cả")
+			@RequestParam(required = false) Boolean replied,
 			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
-		return sellerReplyService.myShopReviews(authorization, status, rating, page, size);
+		return sellerReplyService.myShopReviews(authorization, status, rating, replied, page, size);
 	}
 
 	@Operation(summary = "Tạo hoặc sửa phản hồi công khai cho một đánh giá")

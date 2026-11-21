@@ -12,9 +12,9 @@ cd services/review-service
 ../mvnw spring-boot:run                    # Windows: ..\mvnw.cmd spring-boot:run
 ```
 
-Profile `dev` có sẵn `AUTH_JWT_SECRET` giả và `REVIEW_IMAGE_ORIGINS=http://localhost:9000`
-(MinIO của compose). Profile `prod` bắt buộc `AUTH_JWT_SECRET`, `ORDER_SERVICE_URL`,
-`SHOP_SERVICE_URL`, `REVIEW_IMAGE_ORIGINS` (xem `.env.prod.example`).
+Profile `dev` có sẵn `AUTH_JWT_SECRET` giả và `REVIEW_IMAGE_ORIGINS` mặc định bằng `MINIO_PUBLIC_ORIGIN`
+(`http://localhost:9000`, MinIO của compose). Profile `prod` bắt buộc `AUTH_JWT_SECRET`, `ORDER_SERVICE_URL`,
+`SHOP_SERVICE_URL`, `REVIEW_IMAGE_ORIGINS`, `INTERNAL_API_KEY` (xem `.env.prod.example`).
 
 Swagger UI: `http://localhost:8089/swagger-ui.html`.
 
@@ -24,11 +24,13 @@ Swagger UI: `http://localhost:8089/swagger-ui.html`.
 |---|---|---|---|
 | POST | `/api/reviews` | BUYER | FR-REV-01: viết đánh giá 1–5 sao, tối đa 5 ảnh |
 | GET | `/api/reviews/me?orderId=&page=&size=` | BUYER | Đánh giá của tôi (lọc theo đơn) |
+| POST | `/api/reviews/media` (multipart `file`) | BUYER | Tải ảnh đánh giá (JPEG/PNG/WebP ≤ 5 MB) → `{url}` để gửi kèm `imageUrls` |
+| DELETE | `/api/reviews/media?url=` | BUYER | Xoá ảnh đã tải nhưng chưa gửi kèm đánh giá (`409 MEDIA_IN_USE` nếu đã dùng) |
 | GET | `/api/reviews/products/{productId}?rating=&page=&size=` | Công khai | Đánh giá của sản phẩm |
 | GET | `/api/reviews/products/{productId}/summary` | Công khai | FR-REV-02: điểm TB, số lượt, phân bố sao |
 | GET | `/api/reviews/shops/{shopId}` | Công khai | Đánh giá của gian hàng |
 | GET | `/api/reviews/shops/{shopId}/summary` | Công khai | Điểm tổng hợp của gian hàng |
-| GET | `/api/reviews/seller?status=&rating=` | SELLER | Đánh giá thuộc gian hàng của tôi |
+| GET | `/api/reviews/seller?status=&rating=&replied=` | SELLER | Đánh giá thuộc gian hàng của tôi (`replied=false`: chưa phản hồi) |
 | PUT | `/api/reviews/seller/{reviewId}/reply` | SELLER | FR-REV-03: tạo/sửa phản hồi |
 | DELETE | `/api/reviews/seller/{reviewId}/reply` | SELLER | Xoá phản hồi |
 | GET | `/api/reviews/admin?status=&productId=&shopId=` | ADMIN | Tìm đánh giá để kiểm duyệt |
@@ -49,15 +51,30 @@ thấy `orderId` nhưng không có `buyerId`; admin và chính người viết t
 ## Quy tắc nghiệp vụ
 
 - **Điều kiện đánh giá:** Review Service gọi `GET /api/orders/{orderId}` của Order Service
-  bằng chính token người mua — đơn phải thuộc về họ, ở trạng thái `DELIVERED` (Hoàn thành)
+  bằng chính token người mua — đơn phải thuộc về họ, ở trạng thái `DELIVERED` hoặc `COMPLETED`
   và chứa sản phẩm được đánh giá. `shopId`/`variantId` lấy từ dòng hàng trong đơn, không
   tin dữ liệu client gửi. Quyền sở hữu đơn được kiểm tra trước khi kiểm tra trùng, nên người
   khác đoán đúng `orderId` chỉ nhận 404.
-- **"Hoàn thành" = `DELIVERED`:** SRS FR-REV-01 yêu cầu đơn "Hoàn thành", nhưng Order Service
-  hiện chưa có trạng thái hoàn thành riêng (hay tự chuyển sau N ngày) nên tạm dùng `DELIVERED`
-  (`ReviewService.COMPLETED_STATUS`). Đổi lại khi Order Service bổ sung trạng thái này.
+- **"Hoàn thành":** SRS FR-REV-01 yêu cầu đơn "Hoàn thành". Order Service có `DELIVERED` (đã giao) và `COMPLETED`
+  (người mua xác nhận đã nhận hàng, hoặc tự chuyển); cả hai đều được đánh giá (`ReviewService.REVIEWABLE_STATUSES`).
+- **Trả hàng / hoàn tiền:** đánh giá chỉ hiển thị từ khi nhận hàng tới trước khi trả hàng. Service nghe
+  `ReturnResolved` (queue `review.events.v1`) — Order Service phát khi yêu cầu trả hàng chuyển `RESOLVED`
+  (đã thu hồi hàng, kích hoạt hoàn tiền; hoặc admin chấp thuận khiếu nại). Áp dụng **theo sản phẩm** của
+  yêu cầu trả hàng (đơn cũ có thể gồm nhiều gian hàng, mỗi yêu cầu trả hàng chỉ thuộc một gian hàng): từng
+  `(order_id, product_id)` được ghi vào `returned_items` và đánh giá của sản phẩm đó chuyển `RETURNED`: không
+  hiển thị công khai, không tính điểm (phát lại `ReviewCreated`), seller không phản hồi được, admin không
+  ẩn / khôi phục được (`409 REVIEW_RETURNED`). Viết đánh giá cho sản phẩm đã trả hàng → `422 ORDER_RETURNED`.
+  Gửi đánh giá và chốt trả hàng cùng giữ khoá theo đơn (`review_order_locks`), nên hai luồng chạy đồng thời
+  không thể cùng thành công. Yêu cầu trả hàng còn chờ / đã chấp nhận / bị từ chối thì đánh giá vẫn hiển thị.
+  Dữ liệu của bản đầu chỉ ghi theo đơn (`legacy_returned_orders`): trong lúc chờ vẫn chặn cả đơn;
+  `LegacyReturnReconciler` (5 phút / lần) hỏi Order Service `GET /internal/orders/{id}/returned-products`
+  (khoá `INTERNAL_API_KEY`) rồi chuyển sang `returned_items` và hiển thị lại đánh giá bị ẩn nhầm.
 - **Ảnh:** tối đa 5, URL phải thuộc một origin trong `REVIEW_IMAGE_ORIGINS` (khớp chính xác
   scheme + host + port); ngoài localhost bắt buộc https — sai cấu hình thì service không khởi động.
+  Key ảnh là `reviews/{ngẫu nhiên}/{sha256}.jpg`, không chứa buyerId (API công khai đã giấu người mua);
+  chủ sở hữu lưu ở bảng `review_media`, chỉ chủ ảnh xoá được ảnh chưa gửi kèm đánh giá. Tạo đánh giá
+  khoá bản ghi của các ảnh gửi kèm (phải do chính người mua tải lên và chưa bị xoá, nếu không →
+  `400 IMAGE_NOT_FOUND`); xoá ảnh dùng cùng khoá nên không đánh giá nào lưu URL ảnh đã xoá.
 - **Mỗi sản phẩm trong đơn chỉ đánh giá một lần:** ràng buộc `UNIQUE (order_id, product_id)`
   ở DB, request trùng (kể cả đồng thời) nhận `409 REVIEW_ALREADY_EXISTS`.
 - **Điểm tổng hợp** tính từ các đánh giá `VISIBLE` bằng `group by rating`, làm tròn 2 chữ số.
@@ -98,6 +115,8 @@ giá trị tuyệt đối nên consumer xử lý lặp vẫn đúng.
 |---|---|---|
 | 404 | `ORDER_NOT_FOUND` | Đơn không tồn tại hoặc không thuộc người mua |
 | 422 | `ORDER_NOT_COMPLETED` | Đơn chưa ở trạng thái hoàn thành |
+| 422 | `ORDER_RETURNED` | Sản phẩm trong đơn đã trả hàng / hoàn tiền |
+| 409 | `REVIEW_RETURNED` | Admin ẩn / khôi phục đánh giá của sản phẩm đã trả hàng |
 | 422 | `PRODUCT_NOT_IN_ORDER` | Sản phẩm không có trong đơn |
 | 409 | `REVIEW_ALREADY_EXISTS` | Sản phẩm trong đơn đã được đánh giá |
 | 409 | `REVIEW_HIDDEN` | Seller phản hồi đánh giá đã bị ẩn |

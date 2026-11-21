@@ -40,12 +40,12 @@ public class SellerReplyService {
 	}
 
 	public PageResponse<ReviewResponse> myShopReviews(String authorization, ReviewStatus status, Integer rating,
-			int page, int size) {
+			Boolean replied, int page, int size) {
 		ReviewService.validateRating(rating);
 		var pageable = ReviewService.newestFirst(page, size);
 		String shopId = clients.myShop(authorization).id();
-		return transactions.execute(tx -> PageResponse.of(reviews.findByShop(shopId, status, rating, pageable),
-				ReviewResponse::sellerView));
+		return transactions.execute(tx -> PageResponse.of(
+				reviews.findForSeller(shopId, status, rating, replied, pageable), ReviewResponse::sellerView));
 	}
 
 	public ReviewResponse reply(String sellerId, String authorization, String reviewId, String content) {

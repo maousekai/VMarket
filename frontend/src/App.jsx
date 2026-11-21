@@ -13,6 +13,7 @@ import PaymentDetailPage from './pages/PaymentDetailPage'
 import NotificationsPage from './pages/NotificationsPage'
 import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import AppHeader from './components/AppHeader'
+import ChatWidget from './components/ChatWidget'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
 import HomePage from './pages/HomePage'
@@ -40,6 +41,7 @@ import SellerDashboardPage from './pages/SellerDashboardPage'
 import SellerProductsPage from './pages/SellerProductsPage'
 import SellerProductFormPage from './pages/SellerProductFormPage'
 import SellerOrdersPage from './pages/SellerOrdersPage'
+import SellerReviewsPage from './pages/SellerReviewsPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
 import RoleAreaPage from './pages/RoleAreaPage'
@@ -50,12 +52,14 @@ function LegacyOrderRedirect() {
   return <Navigate to={`/profile/orders/${encodeURIComponent(orderId)}`} replace />
 }
 
+// Tro ly chi o khu mua sam (khach + nguoi mua); kenh nguoi ban / admin co layout rieng.
 function ApplicationLayout() {
   return (
     <>
       <AppHeader />
       <Outlet />
       <SiteFooter />
+      <ChatWidget />
     </>
   )
 }
@@ -98,6 +102,7 @@ export default function App() {
               <Route path="products/:productId/edit" element={<SellerProductFormPage />} />
               <Route path="orders" element={<SellerOrdersPage />} />
               <Route path="orders/:orderId" element={<Navigate to="/seller/orders" replace />} />
+              <Route path="reviews" element={<SellerReviewsPage />} />
               <Route path="payment" element={<SellerPaymentInfoPage />} />
               <Route path="settings" element={<SellerSettingsPage />} />
             </Route>

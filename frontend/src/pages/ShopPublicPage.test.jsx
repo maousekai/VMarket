@@ -8,6 +8,14 @@ import { getPublicShop } from '../services/api/shopApi'
 
 vi.mock('../services/api/productApi', () => ({ listProducts: vi.fn() }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
+vi.mock('../services/api/reviewApi', () => ({
+  getShopRatingSummary: vi.fn(async () => ({
+    targetId: 'shop-1',
+    average: 4.67,
+    count: 3,
+    distribution: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 2 },
+  })),
+}))
 
 const product = (index) => ({
   id: `p${index}`,
@@ -74,6 +82,11 @@ describe('ShopPublicPage', () => {
     expect(screen.getAllByRole('article')).toHaveLength(13)
     expect(listProducts).toHaveBeenLastCalledWith({ shopId: 'shop-1', page: 1, size: 12 })
     expect(screen.queryByRole('button', { name: 'Tải thêm sản phẩm' })).toBeNull()
+  })
+
+  it('shows the shop rating from the review service', async () => {
+    renderAt('/shops/shop-1')
+    expect(await screen.findAllByText('4,7 (3 đánh giá)')).toHaveLength(2)
   })
 
   it('keeps loaded products and allows retrying a failed next page', async () => {

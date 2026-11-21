@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import AddToCartActions from '../components/AddToCartActions'
 import ProductGrid from '../components/ProductGrid'
+import ProductReviews from '../components/ProductReviews'
 import SectionError from '../components/SectionError'
 import StarIcon from '../components/StarIcon'
 import { useCategoryTree } from '../hooks/useCatalog'
@@ -247,6 +248,8 @@ export function ProductDetailView({ detail, categoryTree, renderActions }) {
           <Specs product={product} categoryPath={categoryPath} />
         </div>
       </section>
+
+      <ProductReviews productId={product.id} />
 
       {similarProducts.length > 0 && (
         <section className="home-section" aria-labelledby="pdp-similar">

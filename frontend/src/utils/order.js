@@ -53,6 +53,24 @@ export const canCancelOrder = (order) => ['PENDING', 'WAITING_PAYMENT'].includes
 
 export const canCompleteOrder = (order) => order?.status === 'DELIVERED'
 
+/**
+ * Danh gia tu khi nhan hang (DELIVERED / COMPLETED) toi truoc khi tra hang: san pham nam trong yeu
+ * cau tra hang da chot (RESOLVED = da thu hoi, kich hoat hoan tien) thi khong danh gia duoc nua
+ * (PBL6-35). Xet theo tung san pham nhu Review Service: don nhieu gian hang chi tra phan cua mot shop.
+ */
+export function isItemReturned(item, returns = []) {
+  return returns.some((entry) => {
+    if (entry.status !== 'RESOLVED') return false
+    const lines = entry.items || []
+    return lines.length
+      ? lines.some((line) => line.productId === item.productId)
+      : entry.shopId === item.shopId
+  })
+}
+
+export const canReviewItem = (order, item, returns = []) =>
+  ['DELIVERED', 'COMPLETED'].includes(order?.status) && !isItemReturned(item, returns)
+
 /** Han tra hang (deliveredAt + 7 ngay) hoac null khi chua biet thoi diem giao. */
 export function returnDeadline(order) {
   if (!order?.deliveredAt) return null

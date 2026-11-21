@@ -1,17 +1,36 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ProductDetailPage from './ProductDetailPage'
 import { AuthContext } from '../auth/useAuth'
 import { getProduct, listCategories } from '../services/api/productApi'
 import { getPublicShop } from '../services/api/shopApi'
+import { getProductRatingSummary, getProductReviews } from '../services/api/reviewApi'
 
 vi.mock('../services/api/productApi', () => ({
   getProduct: vi.fn(),
   listCategories: vi.fn(),
 }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
+vi.mock('../services/api/reviewApi', () => ({
+  getProductRatingSummary: vi.fn(),
+  getProductReviews: vi.fn(),
+}))
+
+const emptySummary = {
+  targetId: 'p1',
+  average: 0,
+  count: 0,
+  distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+}
+const reviewPage = (items) => ({
+  items,
+  page: 0,
+  size: 5,
+  totalElements: items.length,
+  totalPages: 1,
+})
 
 const product = {
   id: 'p1',
@@ -50,6 +69,8 @@ beforeEach(() => {
   ])
   getPublicShop.mockResolvedValue({ id: 's1', name: 'Danang Apparel', province: 'Đà Nẵng' })
   getProduct.mockResolvedValue({ product, similarProducts: [] })
+  getProductRatingSummary.mockResolvedValue(emptySummary)
+  getProductReviews.mockResolvedValue(reviewPage([]))
 })
 
 describe('ProductDetailPage', () => {
@@ -94,6 +115,44 @@ describe('ProductDetailPage', () => {
       'src',
       'https://cdn.test/2.jpg',
     )
+  })
+
+  it('shows rating summary, reviews with seller replies and filters by stars', async () => {
+    getProductRatingSummary.mockResolvedValue({
+      targetId: 'p1',
+      average: 4.5,
+      count: 2,
+      distribution: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 1 },
+    })
+    getProductReviews.mockResolvedValue(
+      reviewPage([
+        {
+          id: 'r1',
+          productId: 'p1',
+          rating: 5,
+          comment: 'Vải mát, giao nhanh',
+          imageUrls: ['https://cdn.test/r1.jpg'],
+          createdAt: '2026-11-10T03:00:00Z',
+          reply: { content: 'Cảm ơn bạn!', createdAt: '2026-11-11T03:00:00Z' },
+        },
+      ]),
+    )
+    renderPage()
+    const section = await screen.findByRole('region', { name: 'Đánh giá khách hàng' })
+    expect(await within(section).findByText('Vải mát, giao nhanh')).toBeInTheDocument()
+    expect(within(section).getByText('Cảm ơn bạn!')).toBeInTheDocument()
+    expect(within(section).getByText('Người mua đã xác minh')).toBeInTheDocument()
+    expect(within(section).getByText('2 đánh giá')).toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('button', { name: '4 sao' }))
+    await waitFor(() =>
+      expect(getProductReviews).toHaveBeenLastCalledWith('p1', { rating: 4, page: 0, size: 5 }),
+    )
+  })
+
+  it('invites the first review when the product has none', async () => {
+    renderPage()
+    expect(await screen.findByText(/Sản phẩm chưa có đánh giá/)).toBeInTheDocument()
   })
 
   it('explains a product that is no longer for sale', async () => {

@@ -30,34 +30,39 @@ import tools.jackson.databind.JsonNode;
  * Viết và đọc đánh giá (FR-REV-01, FR-REV-02).
  *
  * <p>Điều kiện được đánh giá: đơn thuộc về người gọi, đã ở trạng thái hoàn thành
- * ({@value #COMPLETED_STATUS}) và chứa sản phẩm được đánh giá. Gọi Order Service <b>ngoài</b>
+ * ({@link #REVIEWABLE_STATUSES}) và chứa sản phẩm được đánh giá. Gọi Order Service <b>ngoài</b>
  * transaction để không giữ kết nối DB trong lúc chờ mạng; ràng buộc {@code UNIQUE (order_id,
  * product_id)} vẫn chặn được request trùng lọt qua bước kiểm tra trước.
  *
- * <p>SRS gọi trạng thái này là "Hoàn thành"; Order Service hiện chưa có trạng thái hoàn thành riêng
- * (hay tự chuyển sau N ngày) nên dùng {@code DELIVERED}. Khi Order Service bổ sung thì đổi
- * {@link #COMPLETED_STATUS}.
+ * <p>SRS gọi trạng thái này là "Hoàn thành". Order Service có {@code DELIVERED} (đã giao) và
+ * {@code COMPLETED} (người mua xác nhận đã nhận hàng); cả hai đều đủ điều kiện, kẻo đơn đã hoàn tất
+ * bị từ chối còn đơn mới chỉ giao xong thì được.
  */
 @Service
 public class ReviewService {
 
-	/** Trạng thái "Hoàn thành" của đơn bên Order Service ({@code OrderStatus.DELIVERED}). */
-	static final String COMPLETED_STATUS = "DELIVERED";
+	/** Trạng thái đơn bên Order Service cho phép đánh giá: đã giao hoặc đã hoàn tất. */
+	static final java.util.Set<String> REVIEWABLE_STATUSES = java.util.Set.of("DELIVERED", "COMPLETED");
 	static final int MAX_PAGE_SIZE = 50;
 
 	private final ReviewRepository reviews;
 	private final ReviewClients clients;
 	private final ReviewOutbox outbox;
 	private final ReviewProperties properties;
+	private final ReturnedOrderService returnedOrders;
+	private final ReviewMediaService media;
 	private final Clock clock;
 	private final TransactionTemplate transactions;
 
 	public ReviewService(ReviewRepository reviews, ReviewClients clients, ReviewOutbox outbox,
-			ReviewProperties properties, Clock clock, PlatformTransactionManager transactionManager) {
+			ReviewProperties properties, ReturnedOrderService returnedOrders, ReviewMediaService media, Clock clock,
+			PlatformTransactionManager transactionManager) {
 		this.reviews = reviews;
 		this.clients = clients;
 		this.outbox = outbox;
 		this.properties = properties;
+		this.returnedOrders = returnedOrders;
+		this.media = media;
 		this.clock = clock;
 		this.transactions = new TransactionTemplate(transactionManager);
 	}
@@ -71,8 +76,11 @@ public class ReviewService {
 		if (!request.orderId().equals(order.path("id").asString())) {
 			throw ApiException.notFound("ORDER_NOT_FOUND", "Không tìm thấy đơn hàng của bạn");
 		}
-		if (!COMPLETED_STATUS.equals(order.path("status").asString())) {
+		if (!REVIEWABLE_STATUSES.contains(order.path("status").asString())) {
 			throw ApiException.unprocessable("ORDER_NOT_COMPLETED", "Chỉ đánh giá được sản phẩm thuộc đơn đã hoàn thành");
+		}
+		if (returnedOrders.isReturned(request.orderId(), request.productId())) {
+			throw orderReturned();
 		}
 		JsonNode item = findItem(order, request.productId());
 		String shopId = item.path("shopId").asString();
@@ -87,6 +95,15 @@ public class ReviewService {
 
 		try {
 			return transactions.execute(status -> {
+				// Cùng khoá với luồng chốt trả hàng: sản phẩm vừa được chốt trả hàng trong lúc người mua gửi
+				// thì từ chối; nếu đánh giá ghi trước, luồng trả hàng chạy sau sẽ thấy và ẩn nó.
+				returnedOrders.lockOrder(request.orderId());
+				if (returnedOrders.isReturned(request.orderId(), request.productId())) {
+					throw orderReturned();
+				}
+				// Khoá bản ghi ảnh tới hết transaction: lệnh xoá ảnh chạy song song phải đợi, rồi thấy ảnh đã
+				// thuộc đánh giá (409). Ảnh đã bị xoá trước đó thì không còn bản ghi -> từ chối.
+				media.lockOwnedImages(buyerId, images);
 				Review review = reviews.saveAndFlush(Review.create(request.orderId(), request.productId(), variantId,
 						shopId, buyerId, request.rating(), comment, images, clock.instant()));
 				outbox.ratingChanged(review.getId(), review.getProductId());
@@ -178,6 +195,10 @@ public class ReviewService {
 			}
 		}
 		throw ApiException.unprocessable("PRODUCT_NOT_IN_ORDER", "Sản phẩm không thuộc đơn hàng này");
+	}
+
+	private static ApiException orderReturned() {
+		return ApiException.unprocessable("ORDER_RETURNED", "Sản phẩm đã được trả hàng / hoàn tiền nên không thể đánh giá");
 	}
 
 	private static ApiException alreadyReviewed() {

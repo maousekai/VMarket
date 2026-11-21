@@ -42,9 +42,22 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 	PlatformTransactionManager transactionManager;
 
 	@Test
+	void buyerReviewsProductOfCompletedOrder() throws Exception {
+		givenOrder("order-completed", "COMPLETED", PRODUCT);
+
+		mvc.perform(post("/api/reviews")
+				.header("Authorization", token(BUYER, "BUYER"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(createBody("order-completed", PRODUCT, 4, List.of())))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.rating").value(4));
+	}
+
+	@Test
 	void buyerReviewsDeliveredProductWithImages() throws Exception {
 		givenOrder("order-1", "DELIVERED", PRODUCT);
 		List<String> images = List.of("https://cdn.vmarket.vn/r/1.jpg", "https://cdn.vmarket.vn/r/2.jpg");
+		givenUploaded(BUYER, images.toArray(String[]::new));
 
 		mvc.perform(post("/api/reviews")
 				.header("Authorization", token(BUYER, "BUYER"))
@@ -296,6 +309,7 @@ class ReviewWriteAndRatingTest extends ReviewTestSupport {
 		}
 		assertThat(jdbc.queryForObject("select count(*) from reviews", Long.class)).isZero();
 
+		givenUploaded(BUYER, "https://CDN.vmarket.vn:443/r/1.jpg");
 		mvc.perform(post("/api/reviews")
 				.header("Authorization", token(BUYER, "BUYER"))
 				.contentType(MediaType.APPLICATION_JSON)

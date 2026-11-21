@@ -33,6 +33,13 @@ public class ReviewProperties {
 	private String shopUrl = "http://localhost:8083";
 
 	/**
+	 * Khoá {@code X-Internal-Api-Key} của Order Service ({@code INTERNAL_API_KEY}): đối chiếu dữ liệu trả
+	 * hàng cũ chỉ ghi theo đơn ({@code LegacyReturnReconciler}). Để trống thì bỏ qua bước đối chiếu và các
+	 * đơn đó vẫn bị chặn cả đơn.
+	 */
+	private String internalApiKey = "";
+
+	/**
 	 * Origin ({@code scheme://host[:port]}) của kho ảnh/CDN mà ảnh đánh giá được phép trỏ tới, ví dụ
 	 * MinIO {@code MINIO_PUBLIC_ORIGIN}. Ảnh hiển thị công khai nên không cho trỏ host tuỳ ý (ảnh
 	 * tracking lộ IP người xem, nội dung không kiểm soát, mixed-content).

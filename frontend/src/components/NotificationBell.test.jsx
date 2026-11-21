@@ -61,6 +61,7 @@ describe('notificationRoute', () => {
   it('maps service links to web routes', () => {
     expect(notificationRoute('/orders/o1')).toBe('/profile/orders/o1')
     expect(notificationRoute('/seller/orders/o2')).toBe('/seller/orders')
+    expect(notificationRoute('/seller/returns/o2')).toBe('/seller/orders?view=returns')
     expect(notificationRoute('/seller/products/p1')).toBe('/seller/products/p1/edit')
     expect(notificationRoute('/seller')).toBe('/seller')
     expect(notificationRoute('/shipper/assignments/a1')).toBe('')

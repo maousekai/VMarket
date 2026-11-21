@@ -26,5 +26,7 @@ public enum NotificationType {
 	PRODUCT_REMOVED,
 	PRODUCT_RESTORED,
 	/** Buyer: yêu cầu trả hàng đã có kết quả. */
-	RETURN_RESOLVED
+	RETURN_RESOLVED,
+	/** Seller: người mua gửi yêu cầu trả hàng, cần phản hồi trong 48 giờ (FR-ORD-07). */
+	RETURN_REQUESTED
 }
