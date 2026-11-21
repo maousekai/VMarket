@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -154,16 +155,70 @@ class CartControllerTest {
 		verify(cartService).getCart("user-1");
 	}
 
-	/** Đường service-to-service: khoá nội bộ đúng + {@code X-User-Id} → dùng được. */
+	/**
+	 * PBL6-50: route công khai bỏ qua khoá nội bộ — kể cả khoá ĐÚNG kèm
+	 * {@code X-User-Id} cũng 401, để khoá bị lộ không mạo danh được người dùng.
+	 */
 	@Test
-	void khoaNoiBoDung_choPhepDocGioCuaUserId() throws Exception {
+	void routeCongKhai_khoaNoiBoDung_vanTra401() throws Exception {
+		mockMvc.perform(get("/api/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+
+		verifyNoInteractions(cartService);
+	}
+
+	/** Đường service-to-service: {@code /internal/cart} + khoá nội bộ đúng + {@code X-User-Id}. */
+	@Test
+	void routeNoiBo_khoaNoiBoDung_choPhepDocGioCuaUserId() throws Exception {
 		when(cartService.getCart("user-1")).thenReturn(sampleCart());
 
-		mockMvc.perform(get("/api/cart")
+		mockMvc.perform(get("/internal/cart")
 						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
 						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("user-1"));
+	}
+
+	@Test
+	void routeNoiBo_xoaGioVaXoaItem() throws Exception {
+		when(cartService.removeItem("user-1", "p1", "v1")).thenReturn(sampleCart());
+
+		mockMvc.perform(delete("/internal/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+		mockMvc.perform(delete("/internal/cart/items/p1").param("variantId", "v1")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+
+		verify(cartService).clearCart("user-1");
+		verify(cartService).removeItem("user-1", "p1", "v1");
+	}
+
+	@Test
+	void routeNoiBo_saiKhoaHoacThieuKhoa_tra401() throws Exception {
+		mockMvc.perform(get("/internal/cart").header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/internal/cart")
+						.header(InternalApiProperties.HEADER, "khong-phai-khoa-that")
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+
+		verifyNoInteractions(cartService);
+	}
+
+	/** Access token của người dùng không gọi được route nội bộ. */
+	@Test
+	void routeNoiBo_tokenNguoiDung_tra403() throws Exception {
+		mockMvc.perform(get("/internal/cart").header(HttpHeaders.AUTHORIZATION, tokenFor("user-1")))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+
+		verifyNoInteractions(cartService);
 	}
 
 	// ------------------------------------------------------------ mapping & lỗi

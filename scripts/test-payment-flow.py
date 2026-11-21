@@ -102,7 +102,8 @@ class Dependencies(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(data).encode())
 
     def do_GET(self):
-        if self.path == "/api/cart":
+        # Order-service doc gio qua route noi bo /internal/cart (PBL6-50).
+        if self.path == "/internal/cart":
             item = dict(productId=PRODUCT, variantId=VARIANT, shopId=SHOP, quantity=1, unitPrice=3000, lineTotal=3000)
             self.reply(dict(userId=BUYER, groups=[dict(shopId=SHOP, items=[item], subtotal=3000)], totalQuantity=1, totalAmount=3000))
         elif "/addresses/" in self.path:

@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import com.vmarket.gateway.config.GatewaySecurityProperties;
 import com.vmarket.gateway.config.SearchContract;
@@ -67,12 +69,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	public static final String HEADER_USER_EMAIL = "X-User-Email";
 	public static final String HEADER_USER_USERNAME = "X-User-Username";
 	public static final String HEADER_USER_EMAIL_VERIFIED = "X-User-Email-Verified";
+	/** Khoá nội bộ giữa các service (viết thường để so khớp không phân biệt hoa thường). */
+	static final String HEADER_INTERNAL_API_KEY = "x-internal-api-key";
 
 	private static final String BEARER_PREFIX = "Bearer ";
 
 	private final JwtService jwtService;
 	private final GatewaySecurityProperties securityProperties;
 	private final AntPathMatcher pathMatcher = new AntPathMatcher();
+
+	/** Tham số ma trận {@code ;a=b} trong một segment. */
+	private static final Pattern MATRIX_PARAMS = Pattern.compile(";[^/]*");
+
+	/** Path trong ứng dụng, đã giải mã {@code %xx} và bỏ {@code ;param}. */
+	private static final UrlPathHelper DECODING_PATH_HELPER = new UrlPathHelper();
+
+	static {
+		DECODING_PATH_HELPER.setUrlDecode(true);
+		DECODING_PATH_HELPER.setRemoveSemicolonContent(true);
+	}
 
 	public JwtAuthenticationFilter(JwtService jwtService, GatewaySecurityProperties securityProperties) {
 		this.jwtService = jwtService;
@@ -123,8 +138,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * bao giờ đi qua cổng công khai (PBL6-15 Review 3, defense-in-depth).
 	 */
 	private boolean isInternalApiRequest(HttpServletRequest request) {
-		String path = request.getRequestURI();
+		List<String> paths = pathVariants(request);
 		for (String pattern : securityProperties.getInternalDenyPaths()) {
+			if (matchesAny(pattern, paths)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Các cách hiểu của path dùng cho rule CHẶN (deny list, role rule): khớp bất kỳ
+	 * cách nào thì rule áp dụng — fail closed (PBL6-50):
+	 * <ul>
+	 *   <li>URI gốc;</li>
+	 *   <li>bỏ tham số ma trận ({@code ;a=b}): route predicate bỏ qua chúng, nên
+	 *       {@code /api/products;x/internal/...} vẫn được định tuyến;</li>
+	 *   <li>đã giải mã {@code %xx}: URI chuyển xuống vẫn ở dạng mã hoá và service đích
+	 *       tự giải mã, nên {@code /api/products/%69nternal/...} tới được endpoint nội bộ.</li>
+	 * </ul>
+	 * Không dùng cho danh sách public: ở đó khớp ít hơn là an toàn.
+	 */
+	private static List<String> pathVariants(HttpServletRequest request) {
+		String raw = request.getRequestURI();
+		String withoutMatrix = MATRIX_PARAMS.matcher(raw).replaceAll("");
+		String decoded = DECODING_PATH_HELPER.getPathWithinApplication(request);
+		return List.of(raw, withoutMatrix, decoded);
+	}
+
+	private boolean matchesAny(String pattern, List<String> paths) {
+		for (String path : paths) {
 			if (pathMatcher.match(pattern, path)) {
 				return true;
 			}
@@ -141,9 +184,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * {@code POST /api/shops/*\/approve}) sẽ vô hiệu hoá rule hẹp đó.
 	 */
 	private boolean hasRequiredRole(HttpServletRequest request, Claims claims) {
-		String path = request.getRequestURI();
+		// Khớp trên mọi cách hiểu của path: "/api/shops/%61pprove" không được né rule
+		// của "/api/shops/*/approve" (PBL6-50).
+		List<String> paths = pathVariants(request);
 		List<RoleRule> matched = securityProperties.getRoleRequiredPaths().stream()
-				.filter(rule -> pathMatcher.match(rule.getPattern(), path))
+				.filter(rule -> matchesAny(rule.getPattern(), paths))
 				.filter(rule -> rule.getMethods().isEmpty()
 						|| rule.getMethods().stream().anyMatch(m -> m.equalsIgnoreCase(request.getMethod())))
 				.toList();
@@ -234,7 +279,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		@Override
 		public String getHeader(String name) {
-			if (isIdentityHeader(name)) {
+			if (isGatewayManagedHeader(name)) {
 				return identity.entrySet().stream().filter(e -> e.getKey().equalsIgnoreCase(name))
 						.map(Map.Entry::getValue).findFirst().orElse(null);
 			}
@@ -243,7 +288,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		@Override
 		public Enumeration<String> getHeaders(String name) {
-			if (isIdentityHeader(name)) {
+			if (isGatewayManagedHeader(name)) {
 				String value = getHeader(name);
 				return value != null ? Collections.enumeration(List.of(value)) : Collections.emptyEnumeration();
 			}
@@ -253,13 +298,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		@Override
 		public Enumeration<String> getHeaderNames() {
 			Set<String> names = new LinkedHashSet<>(Collections.list(super.getHeaderNames()));
-			names.removeIf(IdentityRequestWrapper::isIdentityHeader);
+			names.removeIf(IdentityRequestWrapper::isGatewayManagedHeader);
 			names.addAll(identity.keySet());
 			return Collections.enumeration(names);
 		}
 
-		private static boolean isIdentityHeader(String name) {
-			return name != null && name.toLowerCase(java.util.Locale.ROOT).startsWith("x-user-");
+		/**
+		 * Header do gateway quản lý, client không được tự gửi: {@code X-User-*}
+		 * (danh tính) và {@code X-Internal-Api-Key} (khoá service-to-service, PBL6-50 —
+		 * nếu lọt qua, ai biết khoá có thể mạo danh người dùng ở service đích).
+		 */
+		private static boolean isGatewayManagedHeader(String name) {
+			if (name == null) {
+				return false;
+			}
+			String lower = name.toLowerCase(java.util.Locale.ROOT);
+			return lower.startsWith("x-user-") || lower.equals(HEADER_INTERNAL_API_KEY);
 		}
 	}
 }

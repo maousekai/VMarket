@@ -245,6 +245,28 @@ class JwtAuthenticationFilterTest {
 				.isEqualTo("BUYER,SELLER");
 	}
 
+	/** PBL6-50: khoá nội bộ do client gửi không bao giờ tới được service đích. */
+	@Test
+	void clientSuppliedInternalApiKey_isStrippedOnPublicAndProtectedRoutes() throws Exception {
+		String valid = token(Instant.now(), Instant.now().plusSeconds(60));
+		for (MockHttpServletRequest req : java.util.List.of(
+				request("GET", "/api/cart", "Bearer " + valid),
+				request("POST", "/api/auth/login", null))) {
+			req.addHeader("X-Internal-Api-Key", "leaked-internal-key");
+			req.addHeader("x-internal-api-key", "leaked-internal-key-lowercase");
+			AtomicReference<HttpServletRequest> downstream = new AtomicReference<>();
+
+			filter.doFilter(req, new MockHttpServletResponse(), (r, s) -> downstream.set((HttpServletRequest) r));
+
+			HttpServletRequest forwarded = downstream.get();
+			assertThat(forwarded).as(req.getRequestURI()).isNotNull();
+			assertThat(forwarded.getHeader("X-Internal-Api-Key")).isNull();
+			assertThat(forwarded.getHeaders("X-INTERNAL-API-KEY").hasMoreElements()).isFalse();
+			assertThat(java.util.Collections.list(forwarded.getHeaderNames()))
+					.noneMatch(n -> n.equalsIgnoreCase("X-Internal-Api-Key"));
+		}
+	}
+
 	@Test
 	void authProtectedEndpoint_withoutToken_rejected() throws Exception {
 		MockHttpServletResponse res = new MockHttpServletResponse();
@@ -299,6 +321,20 @@ class JwtAuthenticationFilterTest {
 
 		assertThat(res.getStatus()).isEqualTo(403);
 		assertThat(res.getContentAsString()).contains("FORBIDDEN_ROLE");
+	}
+
+	/** PBL6-50: path mã hoá ("%61pprove" = "approve") hay có ";param" không né được role rule. */
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.ValueSource(strings = {
+			"/api/shops/01J/%61pprove", "/api/shops/01J;x=1/approve", "/api/shops/01J/approve;y=2" })
+	void roleRequiredPath_encodedOrMatrixVariant_stillForbidden(String path) throws Exception {
+		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("ADMIN"));
+		String buyerToken = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		roleFilter.doFilter(request("POST", path, "Bearer " + buyerToken), res, new MockFilterChain());
+
+		assertThat(res.getStatus()).as(path).isEqualTo(403);
 	}
 
 	@Test
