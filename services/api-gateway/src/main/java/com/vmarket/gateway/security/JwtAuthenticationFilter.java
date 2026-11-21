@@ -138,18 +138,37 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * bao giờ đi qua cổng công khai (PBL6-15 Review 3, defense-in-depth).
 	 */
 	private boolean isInternalApiRequest(HttpServletRequest request) {
+		List<String> paths = pathVariants(request);
+		for (String pattern : securityProperties.getInternalDenyPaths()) {
+			if (matchesAny(pattern, paths)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Các cách hiểu của path dùng cho rule CHẶN (deny list, role rule): khớp bất kỳ
+	 * cách nào thì rule áp dụng — fail closed (PBL6-50):
+	 * <ul>
+	 *   <li>URI gốc;</li>
+	 *   <li>bỏ tham số ma trận ({@code ;a=b}): route predicate bỏ qua chúng, nên
+	 *       {@code /api/products;x/internal/...} vẫn được định tuyến;</li>
+	 *   <li>đã giải mã {@code %xx}: URI chuyển xuống vẫn ở dạng mã hoá và service đích
+	 *       tự giải mã, nên {@code /api/products/%69nternal/...} tới được endpoint nội bộ.</li>
+	 * </ul>
+	 * Không dùng cho danh sách public: ở đó khớp ít hơn là an toàn.
+	 */
+	private static List<String> pathVariants(HttpServletRequest request) {
 		String raw = request.getRequestURI();
-		// So trên cả URI gốc lẫn path đã chuẩn hoá giống cách route predicate và service
-		// đích hiểu nó (PBL6-50):
-		//  - bỏ tham số ma trận (";a=b"): predicate bỏ qua chúng, nên
-		//    "/api/products;x/internal/..." vẫn được định tuyến;
-		//  - giải mã %xx: URI chuyển xuống vẫn ở dạng mã hoá và service đích tự giải mã,
-		//    nên "/api/products/%69nternal/..." tới được endpoint nội bộ.
 		String withoutMatrix = MATRIX_PARAMS.matcher(raw).replaceAll("");
 		String decoded = DECODING_PATH_HELPER.getPathWithinApplication(request);
-		for (String pattern : securityProperties.getInternalDenyPaths()) {
-			if (pathMatcher.match(pattern, raw) || pathMatcher.match(pattern, withoutMatrix)
-					|| pathMatcher.match(pattern, decoded)) {
+		return List.of(raw, withoutMatrix, decoded);
+	}
+
+	private boolean matchesAny(String pattern, List<String> paths) {
+		for (String path : paths) {
+			if (pathMatcher.match(pattern, path)) {
 				return true;
 			}
 		}
@@ -165,9 +184,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * {@code POST /api/shops/*\/approve}) sẽ vô hiệu hoá rule hẹp đó.
 	 */
 	private boolean hasRequiredRole(HttpServletRequest request, Claims claims) {
-		String path = request.getRequestURI();
+		// Khớp trên mọi cách hiểu của path: "/api/shops/%61pprove" không được né rule
+		// của "/api/shops/*/approve" (PBL6-50).
+		List<String> paths = pathVariants(request);
 		List<RoleRule> matched = securityProperties.getRoleRequiredPaths().stream()
-				.filter(rule -> pathMatcher.match(rule.getPattern(), path))
+				.filter(rule -> matchesAny(rule.getPattern(), paths))
 				.filter(rule -> rule.getMethods().isEmpty()
 						|| rule.getMethods().stream().anyMatch(m -> m.equalsIgnoreCase(request.getMethod())))
 				.toList();

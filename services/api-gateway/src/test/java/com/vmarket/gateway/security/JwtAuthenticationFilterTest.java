@@ -323,6 +323,20 @@ class JwtAuthenticationFilterTest {
 		assertThat(res.getContentAsString()).contains("FORBIDDEN_ROLE");
 	}
 
+	/** PBL6-50: path mã hoá ("%61pprove" = "approve") hay có ";param" không né được role rule. */
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.ValueSource(strings = {
+			"/api/shops/01J/%61pprove", "/api/shops/01J;x=1/approve", "/api/shops/01J/approve;y=2" })
+	void roleRequiredPath_encodedOrMatrixVariant_stillForbidden(String path) throws Exception {
+		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("ADMIN"));
+		String buyerToken = token(Instant.now(), Instant.now().plusSeconds(60)); // roles = BUYER, SELLER
+
+		MockHttpServletResponse res = new MockHttpServletResponse();
+		roleFilter.doFilter(request("POST", path, "Bearer " + buyerToken), res, new MockFilterChain());
+
+		assertThat(res.getStatus()).as(path).isEqualTo(403);
+	}
+
 	@Test
 	void roleRequiredPath_withRequiredRole_passes() throws Exception {
 		JwtAuthenticationFilter roleFilter = filterWithRoleRule("/api/shops/*/approve", List.of("POST"), List.of("SELLER"));
