@@ -188,6 +188,8 @@ describe('CartPage', () => {
     expect(
       within(screen.getByRole('region', { name: 'Gốm Mộc' })).getByText('Sản phẩm đã hết hàng.'),
     ).toBeInTheDocument()
+    // /validate ghi gia moi vao gio nen trang tai lai gio sau khi validate bi chan
+    await waitFor(() => expect(getCart.mock.calls.length).toBeGreaterThanOrEqual(2))
     fireEvent.click(within(apparel).getByRole('button', { name: 'Cập nhật giá mới' }))
     await waitFor(() =>
       expect(addCartItem).toHaveBeenCalledWith(
