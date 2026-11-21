@@ -11,12 +11,45 @@ import com.vmarket.gateway.config.RateLimitProperties;
 
 class RateLimitFilterTest {
 
-	private RateLimitFilter filterWithProps(int capacity, boolean enabled) {
+	private static final String NGINX = "172.18.0.5";
+
+	private RateLimitFilter filterWithProps(int capacity, boolean enabled, String... trustedProxies) {
 		RateLimitProperties props = new RateLimitProperties();
 		props.setCapacity(capacity);
 		props.setEnabled(enabled);
 		props.setWindowSeconds(60);
-		return new RateLimitFilter(props);
+		return new RateLimitFilter(props, new InMemoryRateLimiter(capacity, 60),
+				new ClientIpResolver(java.util.List.of(trustedProxies), 30));
+	}
+
+	@Test
+	void twoClientsBehindTrustedProxy_getSeparateBuckets() throws Exception {
+		RateLimitFilter f = filterWithProps(1, true, NGINX);
+
+		// Client A qua nginx: request thứ 2 bị chặn
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", NGINX, "198.51.100.1")).getStatus()).isEqualTo(200);
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", NGINX, "198.51.100.1")).getStatus()).isEqualTo(429);
+
+		// Client B cũng qua nginx (cùng remoteAddr) nhưng có hạn mức riêng
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", NGINX, "198.51.100.2")).getStatus()).isEqualTo(200);
+	}
+
+	@Test
+	void spoofedXffFromUntrustedIp_isIgnored() throws Exception {
+		RateLimitFilter f = filterWithProps(1, true, NGINX);
+
+		// Gọi thẳng gateway (không qua nginx), xoay XFF vẫn đếm theo IP kết nối
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", "203.0.113.9", "1.1.1.1")).getStatus()).isEqualTo(200);
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", "203.0.113.9", "2.2.2.2")).getStatus()).isEqualTo(429);
+	}
+
+	@Test
+	void spoofedPrefixBehindTrustedProxy_cannotEscapeLimit() throws Exception {
+		RateLimitFilter f = filterWithProps(1, true, NGINX);
+
+		// Client tự gửi XFF, nginx nối IP thật vào cuối -> chỉ hop cuối được dùng
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", NGINX, "1.1.1.1, 198.51.100.7")).getStatus()).isEqualTo(200);
+		assertThat(doFilter(f, requestWithXff("GET", "/api/orders/1", NGINX, "9.9.9.9, 198.51.100.7")).getStatus()).isEqualTo(429);
 	}
 
 	private MockHttpServletRequest request(String method, String path) {
