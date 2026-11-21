@@ -162,7 +162,9 @@ public class CartService {
 			// Sản phẩm có nhiều biến thể mà không chọn biến thể: không biết lấy giá nào.
 			throw ApiException.badRequest("VARIANT_REQUIRED", "Hãy chọn phân loại sản phẩm");
 		}
-		if (price.signum() < 0) {
+		// Giá 0 cũng là dữ liệu lỗi: order-service coi giá <= 0 là không bán được
+		// (PRODUCT_UNAVAILABLE), nên nhận vào giỏ thì người mua không bao giờ đặt được.
+		if (price.signum() <= 0) {
 			throw ApiException.unavailable("PRODUCT_CATALOG_UNAVAILABLE",
 					"Dữ liệu giá sản phẩm không hợp lệ, vui lòng thử lại sau");
 		}
@@ -192,6 +194,30 @@ public class CartService {
 			items.set(items.indexOf(existing), new StoredItem(
 					existing.productId(), existing.variantId(), existing.shopId(),
 					existing.quantity(), currentPrice, existing.addedAt(), Instant.now()));
+			save(userId, new CartDocument(items));
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/**
+	 * Cập nhật gian hàng của một dòng sang gian hàng thật theo product-service (sau khi
+	 * validate phát hiện lệch). Dòng cũ có {@code shopId} sai bị order-service từ chối
+	 * (409), nên không sửa ở đây thì người mua đặt lại vẫn lỗi mãi. Dòng không còn
+	 * trong giỏ thì bỏ qua.
+	 */
+	public void refreshShop(String userId, String productId, String variantId, String currentShopId) {
+		ReentrantLock lock = lockFor(userId);
+		lock.lock();
+		try {
+			List<StoredItem> items = new ArrayList<>(load(userId).items());
+			StoredItem existing = findItem(items, productId, variantId);
+			if (existing == null || currentShopId.equals(existing.shopId())) {
+				return;
+			}
+			items.set(items.indexOf(existing), new StoredItem(
+					existing.productId(), existing.variantId(), currentShopId,
+					existing.quantity(), existing.unitPrice(), existing.addedAt(), Instant.now()));
 			save(userId, new CartDocument(items));
 		} finally {
 			lock.unlock();

@@ -156,6 +156,24 @@ class CheckoutServiceTest {
 		assertThat(response.ok()).isFalse();
 		assertThat(response.issues()).hasSize(1);
 		assertThat(response.issues().get(0).type()).isEqualTo(CheckoutService.TYPE_SHOP_CHANGED);
+		// PBL6-48: giỏ được sửa sang gian hàng thật để lần đặt lại không bị 409 nữa
+		org.mockito.Mockito.verify(cartService).refreshShop("user-1", "p1", null, "shop-KHAC");
+	}
+
+	/** Giá 0 từ product-service là dữ liệu lỗi: báo issue, không ghi giá 0 vào giỏ. */
+	@Test
+	void giaBangKhong_traVeIssueProductDataInvalid_khongCapNhatGio() {
+		when(cartService.items("user-1")).thenReturn(List.of(item("p1", null, 1, "100000")));
+		when(catalog.findProduct("p1")).thenReturn(Optional.of(
+				new ProductSnapshot("p1", "shop-1", BigDecimal.ZERO, 10, null)));
+
+		CheckoutCheckResponse response = checkoutService.validate("user-1");
+
+		assertThat(response.issues()).extracting(CheckoutIssueDto::type)
+				.containsExactly(CheckoutService.TYPE_PRODUCT_DATA_INVALID);
+		org.mockito.Mockito.verify(cartService, org.mockito.Mockito.never())
+				.refreshPrice(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+						org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
 	}
 
 	/** Product-service thiếu {@code shopId} (bản cũ) thì bỏ qua đối chiếu, không chặn oan. */

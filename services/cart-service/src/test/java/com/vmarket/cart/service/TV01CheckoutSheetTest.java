@@ -132,6 +132,8 @@ class TV01CheckoutSheetTest {
 		givenDefaultItem(2);
 		givenVariant("110000", 1, "shop-2");
 		assertIssues("SHOP_CHANGED");
+		// PBL6-48: giỏ sửa sang gian hàng thật để lần đặt lại không bị order-service trả 409
+		verify(cart).refreshShop(BUYER, PRODUCT, VARIANT, "shop-2");
 	}
 
 	@ParameterizedTest(name = "UT-CHK-08 missingPrice={0}")

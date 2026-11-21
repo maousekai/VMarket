@@ -104,12 +104,22 @@ public class CheckoutService {
 			// (FR-CART-02) mà validate vẫn trả ok=true (P2 của review PR #23).
 			// Chỉ so khi cả hai phía đều có giá trị — product-service cũ có thể chưa trả
 			// shopId, khi đó bỏ qua chứ không chặn oan.
-			if (product.shopId() != null && item.shopId() != null
+			// Lệch thì báo một lần và sửa giỏ sang gian hàng thật (PBL6-48): order-service
+			// từ chối dòng có shopId sai bằng 409, nên phải sửa ở đây thì luồng
+			// 409 → validate → đặt lại mới tự hồi phục. Như trước, không đánh giá giá/tồn
+			// của dòng sai gian hàng trong lần này (UT-CHK-07); lần validate sau sẽ đánh giá.
+			if (product.shopId() != null && !product.shopId().isBlank() && item.shopId() != null
 					&& !product.shopId().equals(item.shopId())) {
 				issues.add(new CheckoutIssueDto(
 						item.productId(), item.variantId(), TYPE_SHOP_CHANGED,
-						"Sản phẩm hiện thuộc gian hàng khác, hãy xoá khỏi giỏ và thêm lại",
+						"Sản phẩm hiện thuộc gian hàng khác, giỏ hàng đã được cập nhật",
 						item.unitPrice(), null, item.quantity(), null));
+				try {
+					cartService.refreshShop(userId, item.productId(), item.variantId(), product.shopId());
+				} catch (RuntimeException ex) {
+					log.warn("validate: không cập nhật được gian hàng cho productId={}: {}", item.productId(),
+							ex.toString());
+				}
 				continue;
 			}
 
@@ -124,10 +134,11 @@ public class CheckoutService {
 
 			// Thiếu giá = phản hồi sai hợp đồng, không phải giá 0. Không kiểm tra thì
 			// compareTo(null) ném NPE → HTTP 500 (P2 của review PR #23).
-			if (current.price() == null) {
+			// Giá <= 0 cũng là dữ liệu lỗi (order-service không bán): không ghi giá đó vào giỏ.
+			if (current.price() == null || current.price().signum() <= 0) {
 				issues.add(new CheckoutIssueDto(
 						item.productId(), item.variantId(), TYPE_PRODUCT_DATA_INVALID,
-						"Dữ liệu sản phẩm không hợp lệ (thiếu giá), vui lòng thử lại sau",
+						"Dữ liệu giá sản phẩm không hợp lệ, vui lòng thử lại sau",
 						item.unitPrice(), null, item.quantity(), null));
 				continue;
 			}

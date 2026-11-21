@@ -148,6 +148,31 @@ class CartServiceTest {
 		assertThat(store).doesNotContainKey("cart:user-1");
 	}
 
+	/** Giá 0: order-service không bán được, nên cart cũng không nhận vào giỏ. */
+	@Test
+	void addItemWithZeroCatalogPriceIsRejected() {
+		catalog.list("p1", null, "shop-1", BigDecimal.ZERO);
+
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p1", null, "shop-1", 1)))
+				.isInstanceOfSatisfying(ApiException.class,
+						ex -> assertThat(ex.getCode()).isEqualTo("PRODUCT_CATALOG_UNAVAILABLE"));
+		assertThat(store).doesNotContainKey("cart:user-1");
+	}
+
+	@Test
+	void refreshShopMovesOnlyThatLineToTheRealShop() {
+		cartService.addItem("user-1", add("p1", null, "shop-1", 2, "100000"));
+		cartService.addItem("user-1", add("p2", null, "shop-1", 1, "50000"));
+
+		cartService.refreshShop("user-1", "p1", null, "shop-2");
+
+		assertThat(cartService.items("user-1"))
+				.extracting(CartService.StoredItem::productId, CartService.StoredItem::shopId)
+				.containsExactlyInAnyOrder(
+						org.assertj.core.groups.Tuple.tuple("p1", "shop-2"),
+						org.assertj.core.groups.Tuple.tuple("p2", "shop-1"));
+	}
+
 	@Test
 	void refreshPriceUpdatesOnlyThatLine() {
 		cartService.addItem("user-1", add("p1", null, "shop-1", 2, "100000"));

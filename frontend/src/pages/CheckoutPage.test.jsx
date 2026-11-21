@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import CheckoutPage from './CheckoutPage'
 import OrderResultPage from './OrderResultPage'
 import VnpayReturnPage from './VnpayReturnPage'
@@ -76,13 +76,25 @@ const order = {
 const selectLines = (...keys) =>
   sessionStorage.setItem('vmarket.checkoutLines', JSON.stringify(keys))
 
+function CartStub() {
+  const { state } = useLocation()
+  return (
+    <>
+      <p>Trang giỏ hàng</p>
+      <p data-testid="cart-validation">
+        {(state?.validation?.issues || []).map((issue) => issue.type).join(',')}
+      </p>
+    </>
+  )
+}
+
 const renderCheckout = (value = cart) =>
   render(
     <CartContext.Provider value={value}>
       <MemoryRouter initialEntries={['/checkout']}>
         <Routes>
           <Route path="/checkout" element={<CheckoutPage />} />
-          <Route path="/cart" element={<p>Trang giỏ hàng</p>} />
+          <Route path="/cart" element={<CartStub />} />
           <Route path="/checkout/success" element={<p>Đặt thành công</p>} />
           <Route path="/profile/orders/:orderId" element={<p>Chi tiết đơn</p>} />
           <Route path="/payment/:orderId" element={<p>Màn thanh toán VNPay</p>} />
@@ -185,6 +197,18 @@ describe('CheckoutPage', () => {
   })
 
   it('sends the buyer back to the cart when the order service rejects a changed price', async () => {
+    validateCart.mockResolvedValueOnce({ ok: true, issues: [] }).mockResolvedValueOnce({
+      ok: false,
+      issues: [
+        {
+          productId: 'p1',
+          variantId: 'v1',
+          type: 'PRICE_CHANGED',
+          cartPrice: 249000,
+          currentPrice: 259000,
+        },
+      ],
+    })
     checkoutOrders.mockRejectedValue({
       response: {
         status: 409,
@@ -195,8 +219,10 @@ describe('CheckoutPage', () => {
     await screen.findByRole('radio', { name: /Bình/ })
     fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
     expect(await screen.findByText('Trang giỏ hàng')).toBeInTheDocument()
-    // Lan validate thu hai cap nhat gio sang gia moi truoc khi quay ve gio
+    // Lan validate thu hai cap nhat gio sang gia moi truoc khi quay ve gio, va ket qua cua no
+    // duoc mang ve trang gio (validate lai se khong con issue PRICE_CHANGED)
     expect(validateCart).toHaveBeenCalledTimes(2)
+    expect(await screen.findByTestId('cart-validation')).toHaveTextContent('PRICE_CHANGED')
     expect(cart.refresh).toHaveBeenCalled()
   })
 

@@ -202,6 +202,27 @@ describe('CartPage', () => {
     expect(within(apparel).queryByText(/Giá đã đổi từ/)).not.toBeInTheDocument()
   })
 
+  it('shows the price change carried back from checkout without validating again', async () => {
+    const validation = {
+      ok: false,
+      issues: [
+        {
+          productId: 'p1',
+          variantId: 'v1',
+          type: 'PRICE_CHANGED',
+          cartPrice: 249000,
+          currentPrice: 259000,
+        },
+      ],
+    }
+    renderWithCart(<CartPage />, {
+      path: { pathname: '/cart', state: { validation, message: 'Giá sản phẩm vừa thay đổi.' } },
+    })
+    const apparel = await screen.findByRole('region', { name: 'Danang Apparel' })
+    expect(await within(apparel).findByText(/Giá đã đổi từ/)).toBeInTheDocument()
+    expect(validateCart).not.toHaveBeenCalled()
+  })
+
   it('removes the selected items after confirmation', async () => {
     removeCartItem.mockResolvedValue(cartOf(mug))
     renderWithCart(<CartPage />)

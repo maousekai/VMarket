@@ -135,7 +135,9 @@ export default function CartPage() {
   const [selected, setSelected] = useState(
     () => new Set(location.state?.select ? [location.state.select] : []),
   )
-  const [validation, setValidation] = useState(null)
+  // Tu trang thanh toan quay ve (gia doi / 409) thi hien ngay ket qua validate da co:
+  // /validate da cap nhat gia trong gio nen validate lai se mat thong tin "gia cu -> moi".
+  const [validation, setValidation] = useState(() => location.state?.validation || null)
   const [checking, setChecking] = useState(false)
   const [pageError, setPageError] = useState('')
   const [fixing, setFixing] = useState('')
@@ -264,7 +266,7 @@ export default function CartPage() {
         </h1>
         <Link to="/">‹ Tiếp tục mua sắm</Link>
       </div>
-      {location.state?.message && !validation && (
+      {location.state?.message && !validation?.issues?.length && (
         <p className="account-notice account-notice--warning" role="status">
           {location.state.message}
         </p>
