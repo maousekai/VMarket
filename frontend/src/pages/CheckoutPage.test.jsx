@@ -184,6 +184,22 @@ describe('CheckoutPage', () => {
     expect(checkoutOrders).not.toHaveBeenCalled()
   })
 
+  it('sends the buyer back to the cart when the order service rejects a changed price', async () => {
+    checkoutOrders.mockRejectedValue({
+      response: {
+        status: 409,
+        data: { error: { code: 'PRICE_CHANGED', message: 'Giá đã thay đổi' } },
+      },
+    })
+    renderCheckout()
+    await screen.findByRole('radio', { name: /Bình/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Đặt hàng' }))
+    expect(await screen.findByText('Trang giỏ hàng')).toBeInTheDocument()
+    // Lan validate thu hai cap nhat gio sang gia moi truoc khi quay ve gio
+    expect(validateCart).toHaveBeenCalledTimes(2)
+    expect(cart.refresh).toHaveBeenCalled()
+  })
+
   it('opens the VNPay payment screen of the first order for VNPay', async () => {
     selectLines('p1::v1', 'p2::v2')
     checkoutOrders.mockResolvedValue([

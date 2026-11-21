@@ -21,7 +21,8 @@ import lombok.extern.slf4j.Slf4j;
  * API đồng bộ — không đọc CSDL của service khác) rồi so với snapshot trong giỏ:
  * <ul>
  *   <li>Sản phẩm/biến thể đã bị xoá → issue {@code NOT_FOUND}.</li>
- *   <li>Giá snapshot ≠ giá hiện tại → issue {@code PRICE_CHANGED}.</li>
+ *   <li>Giá snapshot ≠ giá hiện tại → issue {@code PRICE_CHANGED}, và giỏ được cập nhật
+ *       sang giá hiện tại (lần validate sau không báo lại).</li>
  *   <li>Tồn kho < số lượng trong giỏ → issue {@code OUT_OF_STOCK}.</li>
  *   <li>product-service không trả lời → issue {@code SERVICE_UNAVAILABLE}
  *       (kiểm tra lại khi dịch vụ ổn định, không trả 500 cho người dùng).</li>
@@ -136,6 +137,16 @@ public class CheckoutService {
 						item.productId(), item.variantId(), TYPE_PRICE_CHANGED,
 						"Giá đã thay đổi từ " + item.unitPrice() + " thành " + current.price(),
 						item.unitPrice(), current.price(), item.quantity(), null));
+				// Báo một lần rồi cập nhật giỏ sang giá mới: người mua xem lại giá và đặt
+				// lại là qua được bước định giá lại của order-service (PBL6-48).
+				try {
+					cartService.refreshPrice(userId, item.productId(), item.variantId(), current.price());
+				} catch (RuntimeException ex) {
+					// Không cập nhật được giỏ (vd Redis lỗi) thì vẫn trả kết quả kiểm tra;
+					// đặt hàng vẫn bị order-service chặn bằng 409 cho tới khi giá khớp.
+					log.warn("validate: không cập nhật được giá mới cho productId={}: {}", item.productId(),
+							ex.toString());
+				}
 			}
 			if (current.stock() < item.quantity()) {
 				issues.add(new CheckoutIssueDto(
