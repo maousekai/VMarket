@@ -90,6 +90,8 @@ describe('search API', () => {
   it.each([
     [{ response: { status: 503 } }, true],
     [{ response: { status: 502 } }, true],
+    // Gateway answers 500 when the Search container is unreachable.
+    [{ response: { status: 500, data: { status: 500, error: 'Internal Server Error' } } }, true],
     [{ code: 'ERR_NETWORK' }, true],
     [{ code: 'ERR_CANCELED' }, false],
     [{ response: { status: 400 } }, false],

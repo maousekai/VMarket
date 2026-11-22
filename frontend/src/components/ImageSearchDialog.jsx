@@ -282,7 +282,8 @@ export default function ImageSearchDialog({ onClose }) {
         setStep('invalid')
       } else if (status === 429) {
         setStep('busy')
-      } else if (status === 503 || code === 'IMAGE_SEARCH_UNAVAILABLE') {
+      } else if (status >= 500 || code === 'IMAGE_SEARCH_UNAVAILABLE') {
+        // 503 tu Search, hoac 500 tu gateway khi khong toi duoc container Search.
         setStep('unavailable')
       } else {
         setStep('error')

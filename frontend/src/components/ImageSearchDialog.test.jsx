@@ -144,6 +144,7 @@ describe('ImageSearchDialog', () => {
 
   it.each([
     [apiError(503, 'IMAGE_SEARCH_UNAVAILABLE'), 'Tìm bằng ảnh tạm gián đoạn'],
+    [apiError(500, undefined), 'Tìm bằng ảnh tạm gián đoạn'],
     [apiError(429, 'SEARCH_BUSY'), 'Hệ thống đang bận'],
     [apiError(413, 'IMAGE_TOO_LARGE'), 'Ảnh vượt quá 10 MB'],
     [apiError(400, 'INVALID_IMAGE'), 'Ảnh không hợp lệ'],

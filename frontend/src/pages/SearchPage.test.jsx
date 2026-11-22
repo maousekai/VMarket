@@ -105,6 +105,16 @@ describe('SearchPage', () => {
     )
   })
 
+  it('falls back when the gateway cannot reach Search (500)', async () => {
+    searchProducts.mockRejectedValue(
+      Object.assign(new Error('500'), {
+        response: { status: 500, data: { status: 500, error: 'Internal Server Error' } },
+      }),
+    )
+    renderAt('/search?q=%C3%A1o')
+    expect(await screen.findByText(/Tìm kiếm cơ bản đang hoạt động/)).toBeInTheDocument()
+  })
+
   it('shows an error, not the fallback, for a rejected query', async () => {
     searchProducts.mockRejectedValue(
       Object.assign(new Error('bad'), {

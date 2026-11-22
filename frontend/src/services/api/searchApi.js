@@ -95,11 +95,12 @@ export async function searchByImage(file, filters = {}, { signal } = {}) {
 }
 
 /**
- * Search Service tam ngung (503, gateway khong toi duoc service, mat mang): giao dien
- * chuyen sang tim co ban theo ten o Product Service (UC-03 luong thay the).
+ * Search Service tam ngung: giao dien chuyen sang tim co ban theo ten o Product Service
+ * (UC-03 luong thay the). Tinh moi loi 5xx va mat mang: khi container Search tat, gateway
+ * tra 500 (ResourceAccessException) chu khong phai 503.
  */
 export function isSearchUnavailable(error) {
   const status = error?.response?.status
   if (!status) return error?.code !== 'ERR_CANCELED'
-  return status === 502 || status === 503 || status === 504
+  return status >= 500
 }
