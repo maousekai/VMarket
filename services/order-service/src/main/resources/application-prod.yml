@@ -24,6 +24,9 @@ app:
     base-url: ${CART_SERVICE_URL}
     internal-api-key: ${INTERNAL_API_KEY}
 
+  product-service:
+    base-url: ${PRODUCT_SERVICE_URL}
+    
   user-service:
     base-url: ${USER_SERVICE_URL}
 
