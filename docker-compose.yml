@@ -101,6 +101,13 @@ x-service-urls: &service-urls
   RECOMMENDATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8101
   CHATBOT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8102
 
+# Mot image cho ca recommendation-service va recommendation-init (build mot lan).
+x-recommendation-image: &recommendation-image
+  image: ${COMPOSE_PROJECT_NAME:-vmarket}-recommendation-service
+  build:
+    context: .
+    dockerfile: services/recommendation-service/Dockerfile
+
 x-search-image: &search-image
   image: ${COMPOSE_PROJECT_NAME:-vmarket}-ai-search-service
   build:
@@ -875,6 +882,84 @@ services:
       retries: 10
       start_period: 10s
 
+  # Recommendation Service (PBL6-24/PBL6-37) - FastAPI + PostgreSQL + Redis, nghe
+  # su kien san pham / hanh vi tren RabbitMQ. Khoi dong 3 buoc:
+  #   recommendation-migrate (Flyway, mot lan) -> recommendation-service
+  #   recommendation-init (nap catalog tu Product, mot lan; chay lai an toan)
+  # Service khong doi init: consumer van nhan su kien, init chi bu catalog co san.
+  recommendation-migrate:
+    # Trung flyway.version cua Spring Boot (services/recommendation-service/pom.xml)
+    # de lich su migration giong het khi chay `python manage.py migrate`.
+    image: flyway/flyway:12.4.0
+    container_name: VMarket-recommendation-migrate
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    restart: 'no'
+    volumes:
+      - ./services/recommendation-service/src/main/resources/db/migration:/flyway/sql:ro
+    environment:
+      FLYWAY_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/vmarket_recommendation
+      FLYWAY_USER: ${POSTGRES_USER:-vmarket}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CLEAN_DISABLED: "true"
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  recommendation-service:
+    <<: *recommendation-image
+    container_name: VMarket-recommendation-service
+    networks:
+      - vmarket-network
+    # Benchmark (VERIFICATION.md) chay voi 512 MiB, do duoc ~81 MiB working set.
+    mem_limit: 512m
+    environment: &recommendation-environment
+      <<: *common-environment
+      DB_NAME: vmarket_recommendation
+      # Service tu verify Bearer token (for-you, events) - PHAI trung auth-service.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # Doc snapshot san pham noi bo cua Product Service.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+    ports:
+      - "${RECOMMENDATION_SERVICE_PORT:-8101}:8101"
+    depends_on:
+      recommendation-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/api/ai/recommendations/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Nap catalog hien co tu Product (`manage.py seed`). Moi lan `up` chay lai: an toan
+  # vi seed chi upsert theo productVersion, khong xoa dong nao (README recommendation).
+  recommendation-init:
+    <<: *recommendation-image
+    container_name: VMarket-recommendation-init
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    restart: 'no'
+    environment: *recommendation-environment
+    command: ["python", "manage.py", "seed", "--writers-paused"]
+    depends_on:
+      recommendation-migrate:
+        condition: service_completed_successfully
+      product-service:
+        condition: service_healthy
+
   # API Gateway - diem vao duy nhat cua he thong (browser goi vao localhost:8080).
   # Gateway goi cac business service chay tren may host qua host.docker.internal;
   # auth/user/shop/order/chatbot da container hoa nen goi truc tiep qua ten service.
@@ -903,6 +988,7 @@ services:
       NOTIFICATION_SERVICE_URL: http://notification-service:8090
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
       AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8101
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}

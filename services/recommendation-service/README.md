@@ -2,6 +2,11 @@
 
 FastAPI on port 8101. PostgreSQL owns catalog features and behavior history; Redis caches ranked IDs for 60 seconds. PR-1 supplies similar products and cold-start fallback (FR-REC-02/04). PR-2 completes FR-REC-01 hybrid ranking and the consumer side of FR-REC-03. Real behavior producers and FR-REC-05 periodic training/model versions remain outside this delivery.
 
+## Run with Docker Compose
+
+From the repository root: `docker compose up -d --build recommendation-service recommendation-init api-gateway`.
+Compose runs three containers in order: `recommendation-migrate` applies the Flyway migrations (image `flyway/flyway`, same version as the migration POM, so the history matches `python manage.py migrate`), `recommendation-service` starts on 8101, and `recommendation-init` runs `manage.py seed --writers-paused` once against Product (it needs `product-service`). The seed is safe to rerun on every `up`. The gateway container calls `http://recommendation-service:8101`.
+
 ## Run locally
 
 From the repository root, start the existing infrastructure: docker compose up -d postgres redis rabbitmq.
