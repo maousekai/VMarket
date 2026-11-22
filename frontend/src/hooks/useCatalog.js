@@ -29,9 +29,11 @@ export function useTopCategories() {
  * - Da dang nhap: goi y ca nhan theo hanh vi (user moi chua co lich su -> pho bien).
  * - Khach: pho bien, uu tien danh muc vua xem trong phien (FR-REC-04), bu bang pho bien toan san.
  * Recommendation loi/rong thi dung ban chay cua Product Service de trang khong trong.
+ * `ready=false` (dang khoi phuc phien): chua tai, tranh goi mot luot "khach" roi goi lai.
  */
-export function useHomeProducts(userId) {
+export function useHomeProducts(userId, ready = true) {
   const load = useCallback(async () => {
+    if (!ready) return new Promise(() => {})
     try {
       const categoryId = (!userId && lastViewedCategory()) || undefined
       let products = await getForYou({ limit: HOME_PRODUCT_COUNT, categoryId })
@@ -48,8 +50,8 @@ export function useHomeProducts(userId) {
       // Fall through to best sellers: recommendations are an enhancement, not a requirement.
     }
     return { source: 'popular', products: await bestSelling(HOME_PRODUCT_COUNT) }
-  }, [userId])
-  return useRemoteData(load, userId || 'guest')
+  }, [userId, ready])
+  return useRemoteData(load, ready ? userId || 'guest' : 'restoring-session')
 }
 
 const SIMILAR_PAGE = 10

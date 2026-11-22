@@ -12,10 +12,13 @@ import '../components/home.css'
 
 export default function HomePage() {
   const auth = useAuth()
-  const feed = useHomeProducts(auth.session?.userId)
+  const feed = useHomeProducts(auth.session?.userId, auth.bootstrapState !== 'loading')
   const shops = useFeaturedShops()
   // Only call it "for you" when the picks really are personal.
-  const personal = feed.status === 'ready' && feed.data.source === 'personal'
+  // Signed-in users keep the "for you" title while their picks load (no title flip).
+  const personal =
+    Boolean(auth.session) &&
+    (feed.status === 'loading' || (feed.status === 'ready' && feed.data.source === 'personal'))
 
   return (
     <main className="home">

@@ -28,8 +28,8 @@ const product = (id, shopId = 'shop-1') => ({
   ratingCount: 0,
 })
 
-function renderHome(session = null) {
-  const value = { session, bootstrapState: 'ready', refresh: vi.fn() }
+function renderHome(session = null, bootstrapState = 'ready') {
+  const value = { session, bootstrapState, refresh: vi.fn() }
   return render(
     <AuthContext.Provider value={value}>
       <MemoryRouter>
@@ -66,6 +66,13 @@ describe('HomePage', () => {
     expect(await screen.findByRole('link', { name: 'Sản phẩm popular-2' })).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Sản phẩm cat-1' })).toHaveLength(1)
     expect(getForYou).toHaveBeenCalledWith({ limit: 8, categoryId: 'c9' })
+  })
+
+  it('waits for the session to be restored before asking for picks', async () => {
+    renderHome(null, 'loading')
+    await screen.findByRole('heading', { name: 'Bán chạy tại Đà Nẵng' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(getForYou).not.toHaveBeenCalled()
   })
 
   it('shows Product Service best sellers to guests when Recommendation has nothing', async () => {
