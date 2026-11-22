@@ -114,4 +114,32 @@ class SellerReplyTest extends ReviewTestSupport {
 				.andExpect(jsonPath("$.items[0].orderId").value("order-2"))
 				.andExpect(jsonPath("$.items[0].buyerId").doesNotExist());
 	}
+
+	@Test
+	void sellerFiltersRepliedAndUnrepliedReviews() throws Exception {
+		String replied = createReview(BUYER, "order-1", PRODUCT, 5);
+		String unreplied = createReview(OTHER_BUYER, "order-2", PRODUCT, 2);
+		when(clients.myShop(anyString())).thenReturn(new ReviewClients.MyShop(SHOP, "ACTIVE"));
+		mvc.perform(put("/api/reviews/seller/{id}/reply", replied)
+				.header("Authorization", token(SELLER, "SELLER"))
+				.contentType(MediaType.APPLICATION_JSON).content(REPLY))
+				.andExpect(status().isOk());
+
+		mvc.perform(get("/api/reviews/seller").param("replied", "false").header("Authorization", token(SELLER, "SELLER")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.items[0].id").value(unreplied));
+
+		mvc.perform(get("/api/reviews/seller").param("replied", "true").header("Authorization", token(SELLER, "SELLER")))
+				.andExpect(jsonPath("$.totalElements").value(1))
+				.andExpect(jsonPath("$.items[0].id").value(replied))
+				.andExpect(jsonPath("$.items[0].reply.content").value("Cảm ơn bạn đã ủng hộ shop!"));
+
+		// Kết hợp với lọc số sao; bỏ trống replied thì lấy cả hai.
+		mvc.perform(get("/api/reviews/seller").param("replied", "false").param("rating", "5")
+				.header("Authorization", token(SELLER, "SELLER")))
+				.andExpect(jsonPath("$.totalElements").value(0));
+		mvc.perform(get("/api/reviews/seller").header("Authorization", token(SELLER, "SELLER")))
+				.andExpect(jsonPath("$.totalElements").value(2));
+	}
 }

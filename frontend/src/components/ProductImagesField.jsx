@@ -34,6 +34,7 @@ export default function ProductImagesField({
   value = [],
   onChange,
   onUploaded,
+  onUploadingChange,
   error,
   disabled = false,
   upload = uploadProductImage,
@@ -48,6 +49,9 @@ export default function ProductImagesField({
   const inputRef = useRef(null)
   const [uploading, setUploading] = useState(0)
   const [problems, setProblems] = useState([])
+  // So file dang tai, cap nhat dong bo voi `uploading` de bao cho form cha cung luc (form cha can
+  // biet anh con dang tai de khong gui thieu anh).
+  const pending = useRef(0)
   const remaining = max - value.length - uploading
   const unit = allowVideo ? 'tệp' : 'ảnh'
 
@@ -71,8 +75,12 @@ export default function ProductImagesField({
     setProblems(messages)
     if (!accepted.length) return
     setUploading((count) => count + accepted.length)
+    pending.current += accepted.length
+    onUploadingChange?.(true)
     const results = await Promise.allSettled(accepted.map((file) => upload(file)))
     setUploading((count) => count - accepted.length)
+    pending.current -= accepted.length
+    if (!pending.current) onUploadingChange?.(false)
     const urls = results.filter((r) => r.status === 'fulfilled').map((r) => r.value.url)
     const failures = results
       .map((r, index) =>

@@ -47,6 +47,7 @@ public class SecurityConfig {
 						.requestMatchers("/api/reviews/admin/**").hasRole("ADMIN")
 						.requestMatchers("/api/reviews/seller/**").hasRole("SELLER")
 						.requestMatchers(HttpMethod.POST, "/api/reviews").hasRole("BUYER")
+						.requestMatchers("/api/reviews/media").hasRole("BUYER")
 						.requestMatchers("/api/reviews/me", "/api/reviews/me/**").hasRole("BUYER")
 						.anyRequest().authenticated())
 				.addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class)

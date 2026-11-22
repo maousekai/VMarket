@@ -81,6 +81,11 @@ public class RecipientResolver {
 		return new SellerLookup(owners, failure);
 	}
 
+	/** Chủ gian hàng (bản chiếu cục bộ, thiếu thì hỏi Shop Service rồi lưu lại). */
+	public Optional<String> shopOwner(String shopId) {
+		return shopId == null ? Optional.empty() : ownerOf(shopId);
+	}
+
 	private Optional<String> ownerOf(String shopId) {
 		Optional<ShopOwner> cached = shopOwners.findById(shopId);
 		if (cached.isPresent() && cached.get().getOwnerId() != null) {

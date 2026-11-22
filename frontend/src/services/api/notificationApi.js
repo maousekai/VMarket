@@ -36,6 +36,8 @@ export function notificationRoute(link) {
   const [, first, second, third] = link.split('/')
   if (first === 'orders' && second) return `/profile/orders/${second}`
   if (first === 'seller' && second === 'orders') return '/seller/orders'
+  // Yeu cau tra hang moi (RETURN_REQUESTED) -> danh sach tra hang cua seller.
+  if (first === 'seller' && second === 'returns') return '/seller/orders?view=returns'
   if (first === 'seller' && second === 'products' && third) return `/seller/products/${third}/edit`
   if (first === 'seller') return '/seller'
   return ''

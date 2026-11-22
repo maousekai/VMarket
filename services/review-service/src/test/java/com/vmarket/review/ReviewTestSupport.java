@@ -56,7 +56,8 @@ abstract class ReviewTestSupport {
 
 	@BeforeEach
 	void cleanDatabase() {
-		for (String table : List.of("review_outbox", "product_rating_revisions", "seller_replies", "review_images", "reviews")) {
+		for (String table : List.of("review_outbox", "product_rating_revisions", "seller_replies", "review_images", "reviews",
+				"returned_items", "legacy_returned_orders", "review_order_locks", "review_media")) {
 			jdbc.update("delete from " + table);
 		}
 	}
@@ -79,6 +80,14 @@ abstract class ReviewTestSupport {
 				.toList();
 		JsonNode order = json.valueToTree(Map.of("id", orderId, "status", status, "items", items));
 		when(clients.myOrder(eq(orderId), anyString())).thenReturn(order);
+	}
+
+	/** Ảnh người mua đã tải lên kho ảnh (bản ghi chủ sở hữu ở {@code review_media}). */
+	void givenUploaded(String buyer, String... urls) {
+		for (String url : urls) {
+			jdbc.update("insert into review_media (url, buyer_id, created_at) values (?, ?, current_timestamp)", url,
+					buyer);
+		}
 	}
 
 	String createBody(String orderId, String productId, int rating, List<String> images) {

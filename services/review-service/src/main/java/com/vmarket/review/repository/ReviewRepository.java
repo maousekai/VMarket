@@ -21,6 +21,16 @@ public interface ReviewRepository extends JpaRepository<Review, String> {
 
 	boolean existsByOrderIdAndProductId(String orderId, String productId);
 
+	/** Mọi đánh giá của một đơn (khi đơn trả hàng / hoàn tiền). */
+	List<Review> findByOrderId(String orderId);
+
+	/** Ảnh đã gắn vào một đánh giá của người mua này (không được xoá khỏi kho nữa). */
+	@Query("""
+			select count(i) > 0 from ReviewImage i
+			where i.url = :url and i.review.buyerId = :buyerId
+			""")
+	boolean isImageUsed(@Param("buyerId") String buyerId, @Param("url") String url);
+
 	@EntityGraph(attributePaths = "reply")
 	@Query("""
 			select r from Review r
@@ -39,6 +49,22 @@ public interface ReviewRepository extends JpaRepository<Review, String> {
 			""")
 	Page<Review> findByShop(@Param("shopId") String shopId, @Param("status") ReviewStatus status,
 			@Param("rating") Integer rating, Pageable pageable);
+
+	/**
+	 * Danh sách cho seller: như {@link #findByShop} và thêm lọc đã/chưa phản hồi ({@code replied} null = tất cả).
+	 */
+	@EntityGraph(attributePaths = "reply")
+	@Query("""
+			select r from Review r
+			where r.shopId = :shopId
+			  and (:status is null or r.status = :status)
+			  and (:rating is null or r.rating = :rating)
+			  and (:replied is null
+			       or (:replied = true and exists (select 1 from SellerReply sr where sr.review = r))
+			       or (:replied = false and not exists (select 1 from SellerReply sr where sr.review = r)))
+			""")
+	Page<Review> findForSeller(@Param("shopId") String shopId, @Param("status") ReviewStatus status,
+			@Param("rating") Integer rating, @Param("replied") Boolean replied, Pageable pageable);
 
 	@EntityGraph(attributePaths = "reply")
 	@Query("""

@@ -9,7 +9,10 @@ import {
   ReturnStatusBadge,
 } from '../components/OrderParts'
 import ReturnRequestDialog from '../components/ReturnRequestDialog'
-import { useShopLookup } from '../hooks/useCatalogLookup'
+import ReviewDialog from '../components/ReviewDialog'
+import { StarRow } from '../components/ReviewParts'
+import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
+import { listMyReviews, REVIEW_STATUS } from '../services/api/reviewApi'
 import { getApiError } from '../services/api/apiClient'
 import { DELIVERY_STATUS_LABELS, getDelivery } from '../services/api/deliveryApi'
 import {
@@ -28,6 +31,7 @@ import {
   canCancelOrder,
   canCompleteOrder,
   canRequestReturn,
+  canReviewItem,
   groupItemsByShop,
   orderAddress,
   PAYMENT_METHOD_LABELS,
@@ -190,6 +194,55 @@ export default function OrderDetailPage() {
 
   const order = state.order
   const shops = useShopLookup(order?.items.map((item) => item.shopId) || [])
+  const products = useProductLookup(order?.items.map((item) => item.productId) || [])
+  // Da nhan hang: doc danh gia cua toi; con viet duoc hay khong con tuy san pham da tra hang chua.
+  const received = ['DELIVERED', 'COMPLETED'].includes(order?.status)
+  // productId -> danh gia cua toi trong don nay (moi san pham trong mot don chi danh gia mot lan).
+  const [reviews, setReviews] = useState({ orderId: null, byProduct: {} })
+
+  useEffect(() => {
+    if (!received) return undefined
+    let current = true
+    listMyReviews({ orderId })
+      .then((page) => {
+        if (!current) return
+        const byProduct = Object.fromEntries((page.items || []).map((r) => [r.productId, r]))
+        setReviews({ orderId, byProduct })
+      })
+      .catch(() => current && setReviews({ orderId, byProduct: {} }))
+    return () => {
+      current = false
+    }
+  }, [orderId, received])
+
+  const myReviews = reviews.orderId === orderId ? reviews.byProduct : null
+
+  function renderReview(item) {
+    if (!received || !myReviews) return null
+    const review = myReviews[item.productId]
+    if (!review && !canReviewItem(order, item, state.returns)) return null
+    return (
+      <span className="order-item__review">
+        {review?.status === REVIEW_STATUS.returned ? (
+          <span className="order-item__reviewed">
+            Đánh giá không còn hiển thị vì sản phẩm đã trả hàng / hoàn tiền
+          </span>
+        ) : review ? (
+          <span className="order-item__reviewed">
+            Đã đánh giá <StarRow value={review.rating} size={12} />
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="account-button account-button--secondary"
+            onClick={() => setDialog({ type: 'review', item })}
+          >
+            Đánh giá
+          </button>
+        )}
+      </span>
+    )
+  }
 
   async function run(name, action, message) {
     if (busy) return
@@ -344,7 +397,7 @@ export default function OrderDetailPage() {
                 {shops[group.shopId]?.value?.name || 'Gian hàng'}
               </Link>
             </h2>
-            <OrderItemsList items={group.items} />
+            <OrderItemsList items={group.items} renderExtra={renderReview} />
           </section>
         ))}
 
@@ -408,6 +461,38 @@ export default function OrderDetailPage() {
             setDialog(null)
             setNotice('Đã gửi yêu cầu trả hàng. Gian hàng sẽ phản hồi trong 48 giờ.')
             load()
+          }}
+        />
+      )}
+      {dialog?.type === 'review' && (
+        <ReviewDialog
+          key={dialog.item.id}
+          orderId={order.id}
+          item={dialog.item}
+          product={products[dialog.item.productId]?.value}
+          onClose={() => setDialog(null)}
+          onCreated={(created, message) => {
+            // Hop thoai nay co the da dong (Escape luc dang luu) va nguoi dung da mo hop thoai khac:
+            // chi dong dung hop thoai da gui danh gia, khong dong ban nhap dang viet.
+            const opened = dialog
+            setDialog((current) => (current === opened ? null : current))
+            if (created) {
+              setReviews((current) => ({
+                orderId,
+                byProduct: { ...current.byProduct, [created.productId]: created },
+              }))
+              setNotice('Cảm ơn bạn đã đánh giá sản phẩm!')
+            } else {
+              setNotice(message || 'Bạn đã đánh giá sản phẩm này.')
+              listMyReviews({ orderId })
+                .then((page) =>
+                  setReviews({
+                    orderId,
+                    byProduct: Object.fromEntries((page.items || []).map((r) => [r.productId, r])),
+                  }),
+                )
+                .catch(() => {})
+            }
           }}
         />
       )}

@@ -55,6 +55,7 @@ class OrderReturnApiTest {
 	@Autowired private OutboxRepository outboxRepository;
 	@Autowired private com.vmarket.order.service.OrderCompletionJob completionJob;
 	@Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+	@Autowired private com.vmarket.order.config.InternalApiProperties internalApi;
 
 	@MockitoBean private UserServiceClient userServiceClient;
 	@MockitoBean private CartServiceClient cartServiceClient;
@@ -359,6 +360,43 @@ class OrderReturnApiTest {
 
 		OrderReturn resolved = returnRepository.findById(returnId).orElseThrow();
 		assertThat(resolved.getStatus()).isEqualTo(ReturnStatus.RESOLVED);
+	}
+
+	@Test
+	void internalEndpointListsProductsOfResolvedReturnsOnly() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+		String internal = "/internal/orders/" + order.getId() + "/returned-products";
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{ "reason": "Đổi kích thước",
+						  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }] }
+						""".formatted(orderItemId)))
+				.andExpect(status().isCreated());
+		String returnId = returnRepository.findAll().get(0).getId();
+
+		// Chưa chốt: chưa có sản phẩm nào được tính là đã trả.
+		mockMvc.perform(get(internal).header("X-Internal-Api-Key", internalApi.getApiKey()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.productIds").isEmpty());
+
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/accept")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken()).param("shopId", SHOP_ID))
+				.andExpect(status().isOk());
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/confirm-receipt")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken()).param("shopId", SHOP_ID))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(get(internal).header("X-Internal-Api-Key", internalApi.getApiKey()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.orderId").value(order.getId()))
+				.andExpect(jsonPath("$.productIds[0]").value("01JBQ9PROD0000000000000001"));
+		mockMvc.perform(get(internal).header("X-Internal-Api-Key", "wrong-key"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get(internal)).andExpect(status().isUnauthorized());
 	}
 
 	@Test
