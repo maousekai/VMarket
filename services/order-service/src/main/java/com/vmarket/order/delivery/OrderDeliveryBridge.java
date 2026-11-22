@@ -3,9 +3,11 @@ package com.vmarket.order.delivery;
 import com.vmarket.events.DeliveryStatusChanged;
 import com.vmarket.events.EventType;
 import com.vmarket.events.OrderStatusChanged;
+import com.vmarket.events.UserBehaviorTracked;
 import com.vmarket.order.config.DeliveryIntegrationProperties;
 import com.vmarket.order.dto.OrderResponse;
 import com.vmarket.order.entity.Order;
+import com.vmarket.order.entity.OrderItem;
 import com.vmarket.order.entity.OrderStatus;
 import com.vmarket.order.event.Outbox;
 import com.vmarket.order.exception.ApiException;
@@ -132,7 +134,22 @@ public class OrderDeliveryBridge {
                             before.name(),
                             next.name(),
                             snapshot.path("paymentMethod").asString("COD")));
+            if (next == OrderStatus.DELIVERED) trackPurchases(order);
         }
+    }
+
+    /**
+     * FR-REC-03 (PBL6-37): đơn được tính là "đã mua" khi người mua nhận hàng (DELIVERED),
+     * áp dụng chung cho COD và thanh toán trước; đơn huỷ/hoàn trước khi giao không bao giờ
+     * tới đây. Ghi qua outbox để sự kiện cùng transaction với trạng thái đơn. Mỗi sản phẩm
+     * phát một lần dù đơn có nhiều biến thể của nó.
+     */
+    private void trackPurchases(Order order) {
+        order.getItems().stream()
+                .map(OrderItem::getProductId)
+                .distinct()
+                .forEach(productId -> outbox.add(EventType.USER_BEHAVIOR_TRACKED,
+                        new UserBehaviorTracked(order.getUserId(), productId, UserBehaviorTracked.PURCHASE)));
     }
 
     private JsonNode internalSnapshot(Order order) {
