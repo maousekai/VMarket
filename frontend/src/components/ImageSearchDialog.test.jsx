@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import ImageSearchDialog from './ImageSearchDialog'
 import { listCategories } from '../services/api/productApi'
@@ -182,5 +182,49 @@ describe('ImageSearchDialog', () => {
     expect(await screen.findByRole('dialog', { name: 'Chụp ảnh sản phẩm' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Đóng' }))
     expect(stop).toHaveBeenCalled()
+  })
+
+  // Review PR #62: the permission prompt may still be open when the dialog goes away.
+  function pendingCamera() {
+    const stop = vi.fn()
+    let grant
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(
+          () => new Promise((resolve) => (grant = () => resolve({ getTracks: () => [{ stop }] }))),
+        ),
+      },
+    })
+    return { stop, grant: () => act(async () => grant()) }
+  }
+
+  it('stops a camera granted after the dialog was closed', async () => {
+    const camera = pendingCamera()
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng camera' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Đóng' }))
+    expect(onClose).toHaveBeenCalled()
+    await camera.grant()
+    expect(camera.stop).toHaveBeenCalled()
+  })
+
+  it('stops a camera granted after the dialog was unmounted', async () => {
+    const camera = pendingCamera()
+    const { unmount } = renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng camera' }))
+    unmount()
+    await camera.grant()
+    expect(camera.stop).toHaveBeenCalled()
+  })
+
+  it('ignores a late camera grant once the buyer chose a file instead', async () => {
+    const camera = pendingCamera()
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Dùng camera' }))
+    choose(image())
+    await camera.grant()
+    expect(camera.stop).toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Kiểm tra ảnh' })).toBeInTheDocument()
   })
 })

@@ -180,7 +180,11 @@ export default function ImageSearchDialog({ onClose }) {
   const [dragging, setDragging] = useState(false)
   const preview = useObjectUrl(file)
 
+  // Ve cua lan xin camera gan nhat. Doi ve = huy moi lan xin dang cho nguoi dung cap quyen.
+  const cameraRequest = useRef(0)
+
   const stopCamera = useCallback(() => {
+    cameraRequest.current += 1
     stream.current?.getTracks().forEach((track) => track.stop())
     stream.current = null
   }, [])
@@ -223,13 +227,23 @@ export default function ImageSearchDialog({ onClose }) {
       setStep('denied')
       return
     }
+    stopCamera()
+    const ticket = cameraRequest.current
     try {
-      stream.current = await navigator.mediaDevices.getUserMedia({
+      const granted = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
         audio: false,
       })
+      // Hop thoai da dong, da chon anh khac hoac da xin lai trong luc cho cap quyen: tat ngay
+      // camera vua nhan, khong de no chay ngam sau khi component da unmount.
+      if (ticket !== cameraRequest.current) {
+        granted.getTracks().forEach((track) => track.stop())
+        return
+      }
+      stream.current = granted
       setStep('camera')
     } catch {
+      if (ticket !== cameraRequest.current) return
       stopCamera()
       setStep('denied')
     }
