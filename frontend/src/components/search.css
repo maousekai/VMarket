@@ -368,9 +368,9 @@ body:has(.chat-panel) .image-search-launcher {
   display: grid;
 }
 
+/* Dien thoai: nut camera trong o tim kiem da du, bo nut noi de khong che noi dung. */
 @media (max-width: 480px) {
   .image-search-launcher {
-    right: 16px;
-    bottom: 72px;
+    display: none;
   }
 }

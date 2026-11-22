@@ -12,8 +12,12 @@ export function isAcceptedImage(file) {
   )
 }
 
-/** "2,4 MB" theo cach doc cua nguoi dung (1 MB = 1.000.000 byte, khop gioi han Search). */
+/**
+ * "2,4 MB" theo cach doc cua nguoi dung (1 MB = 1.000.000 byte, khop gioi han Search).
+ * Anh nho hon 0,1 MB hien theo KB de khong ra "0 MB".
+ */
 export function formatMegabytes(bytes) {
+  if (bytes < 100_000) return `${Math.max(1, Math.round(bytes / 1000)).toLocaleString('vi-VN')} KB`
   const value = bytes / 1_000_000
   return `${value.toLocaleString('vi-VN', { maximumFractionDigits: value < 10 ? 1 : 0 })} MB`
 }
