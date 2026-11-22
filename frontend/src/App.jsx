@@ -13,6 +13,7 @@ import PaymentDetailPage from './pages/PaymentDetailPage'
 import NotificationsPage from './pages/NotificationsPage'
 import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import AppHeader from './components/AppHeader'
+import ImageSearchProvider from './components/ImageSearchProvider'
 import ChatWidget from './components/ChatWidget'
 import RouteGuard from './components/RouteGuard'
 import SiteFooter from './components/SiteFooter'
@@ -55,12 +56,12 @@ function LegacyOrderRedirect() {
 // Tro ly chi o khu mua sam (khach + nguoi mua); kenh nguoi ban / admin co layout rieng.
 function ApplicationLayout() {
   return (
-    <>
+    <ImageSearchProvider>
       <AppHeader />
       <Outlet />
       <SiteFooter />
       <ChatWidget />
-    </>
+    </ImageSearchProvider>
   )
 }
 

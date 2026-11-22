@@ -1,17 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { imageUrlOrEmpty } from '../utils/shop'
+import { IMAGE_ACCEPT, isAcceptedImage } from '../utils/imageFile'
 import Modal from './Modal'
 import './imageUploadField.css'
 
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
-const ACCEPTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
-const ACCEPT = ACCEPTED_TYPES.join(',')
+const ACCEPT = IMAGE_ACCEPT
 
 function validateFile(file, maxSizeMb) {
-  const extension = file.name.split('.').pop()?.toLocaleLowerCase('en')
-  const typeAllowed =
-    ACCEPTED_TYPES.includes(file.type) || (!file.type && ACCEPTED_EXTENSIONS.includes(extension))
-  if (!typeAllowed) return 'Chỉ nhận ảnh JPEG, PNG hoặc WebP.'
+  if (!isAcceptedImage(file)) return 'Chỉ nhận ảnh JPEG, PNG hoặc WebP.'
   if (file.size > maxSizeMb * 1024 * 1024) return `Ảnh tối đa ${maxSizeMb} MB.`
   return ''
 }
