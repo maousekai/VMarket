@@ -48,6 +48,26 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '503': {$ref: '#/components/responses/Error'}
+  /api/ai/recommendations/events:
+    post:
+      description: Records a signed-in product view (FR-REC-03). The service publishes UserBehaviorTracked {userId, productId, action} to the vmarket.events exchange; userId is always the verified JWT subject. Only view is accepted from clients; add_to_cart is published by Cart Service and purchase by Order Service when an order is DELIVERED. Guests are not tracked.
+      security: [{Bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [productId, action]
+              properties:
+                productId: {type: string, minLength: 1, maxLength: 128}
+                action: {type: string, enum: [view]}
+      responses:
+        '202': {description: Event accepted by the broker}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /api/ai/recommendations/health:
     get:
       responses:
