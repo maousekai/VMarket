@@ -99,6 +99,13 @@ public class CartController {
 	/**
 	 * Kiểm tra giá/tồn kho mới nhất trước khi vào thanh toán (FR-CART-03).
 	 * Trả 200 kèm {@code ok} và danh sách cảnh báo (nếu có).
+	 *
+	 * <p><b>Có ghi vào giỏ</b> (vì vậy là POST, không phải GET): dòng có
+	 * {@code PRICE_CHANGED} được cập nhật sang giá hiện tại, dòng có
+	 * {@code SHOP_CHANGED} được chuyển sang gian hàng thật (PBL6-48), để người mua đặt
+	 * lại là qua được bước định giá của order-service. Hệ quả: mỗi thay đổi chỉ được
+	 * báo ở <b>một</b> lần validate; gọi lại sẽ không còn issue đó. Client cần giữ kết
+	 * quả lần đầu nếu muốn hiển thị "giá cũ → giá mới".
 	 */
 	@PostMapping("/validate")
 	public CheckoutCheckResponse validate(@AuthenticationPrincipal String userId) {

@@ -82,6 +82,8 @@ class TV01CheckoutSheetTest {
 		var response = assertIssues("PRICE_CHANGED");
 		assertThat(response.issues().get(0).cartPrice()).isEqualByComparingTo("100000");
 		assertThat(response.issues().get(0).currentPrice()).isEqualByComparingTo("110000");
+		// PBL6-48: giỏ cập nhật sang giá hiện tại để người mua đặt lại được
+		verify(cart).refreshPrice(BUYER, PRODUCT, VARIANT, new java.math.BigDecimal("110000"));
 	}
 
 	@Test
@@ -100,6 +102,7 @@ class TV01CheckoutSheetTest {
 		givenDefaultItem(2);
 		givenVariant("110000", 1, SHOP);
 		var response = assertIssues("PRICE_CHANGED", "OUT_OF_STOCK");
+		verify(cart).refreshPrice(BUYER, PRODUCT, VARIANT, new java.math.BigDecimal("110000"));
 		assertThat(response.issues()).allSatisfy(issue -> {
 			assertThat(issue.productId()).isEqualTo(PRODUCT);
 			assertThat(issue.variantId()).isEqualTo(VARIANT);
@@ -129,6 +132,8 @@ class TV01CheckoutSheetTest {
 		givenDefaultItem(2);
 		givenVariant("110000", 1, "shop-2");
 		assertIssues("SHOP_CHANGED");
+		// PBL6-48: giỏ sửa sang gian hàng thật để lần đặt lại không bị order-service trả 409
+		verify(cart).refreshShop(BUYER, PRODUCT, VARIANT, "shop-2");
 	}
 
 	@ParameterizedTest(name = "UT-CHK-08 missingPrice={0}")

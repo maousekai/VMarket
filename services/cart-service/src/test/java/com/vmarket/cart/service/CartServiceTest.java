@@ -52,6 +52,7 @@ class CartServiceTest {
 	private StringRedisTemplate redis;
 	private ValueOperations<String, String> ops;
 	private CartService cartService;
+	private FakeProductCatalog catalog;
 
 	@BeforeEach
 	@SuppressWarnings("unchecked")
@@ -65,12 +66,14 @@ class CartServiceTest {
 		when(ops.get(anyString())).thenAnswer(inv -> store.get(inv.getArgument(0)));
 		when(redis.delete(anyString())).thenAnswer(inv -> store.remove(inv.getArgument(0)) != null);
 
-		cartService = new CartService(redis, JsonMapper.builder().build(), new CartProperties(), BehaviorTracker.disabled());
+		catalog = new FakeProductCatalog();
+		cartService = new CartService(redis, JsonMapper.builder().build(), new CartProperties(), catalog, BehaviorTracker.disabled());
 	}
 
-	private static AddCartItemRequest add(String productId, String variantId, String shopId,
+	private AddCartItemRequest add(String productId, String variantId, String shopId,
 			int quantity, String price) {
-		return new AddCartItemRequest(productId, variantId, shopId, quantity, new BigDecimal(price));
+		catalog.list(productId, variantId, shopId, new BigDecimal(price));
+		return new AddCartItemRequest(productId, variantId, shopId, quantity);
 	}
 
 	@Test
@@ -80,6 +83,105 @@ class CartServiceTest {
 		assertThat(response.groups()).isEmpty();
 		assertThat(response.totalQuantity()).isZero();
 		assertThat(response.totalAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+	}
+
+	/** PBL6-48: đơn giá và gian hàng lấy từ product-service, không từ request. */
+	@Test
+	void addItemUsesCatalogPriceAndShop() {
+		catalog.list("p1", null, "shop-that", new BigDecimal("99000"));
+
+		CartResponse response = cartService.addItem("user-1", new AddCartItemRequest("p1", null, "shop-gia", 2));
+
+		assertThat(response.groups()).singleElement().satisfies(group -> {
+			assertThat(group.shopId()).isEqualTo("shop-that");
+			assertThat(group.items().get(0).unitPrice()).isEqualByComparingTo("99000");
+		});
+		assertThat(response.totalAmount()).isEqualByComparingTo("198000");
+	}
+
+	@Test
+	void addItemUsesVariantPrice() {
+		catalog.list("p1", "v-red", "shop-1", new BigDecimal("120000"));
+		catalog.list("p1", "v-blue", "shop-1", new BigDecimal("130000"));
+
+		CartResponse response = cartService.addItem("user-1", new AddCartItemRequest("p1", "v-blue", "shop-1", 1));
+
+		assertThat(response.totalAmount()).isEqualByComparingTo("130000");
+	}
+
+	@Test
+	void addItemRejectsUnknownProductOrVariant() {
+		catalog.list("p1", "v-red", "shop-1", new BigDecimal("120000"));
+
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p-khong-co", null, "shop-1", 1)))
+				.isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.getCode()).isEqualTo("PRODUCT_NOT_FOUND"));
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p1", "v-khong-co", "shop-1", 1)))
+				.isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.getCode()).isEqualTo("PRODUCT_NOT_FOUND"));
+		// Sản phẩm nhiều biến thể mà không chọn biến thể
+		catalog.list("p1", "v-blue", "shop-1", new BigDecimal("130000"));
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p1", null, "shop-1", 1)))
+				.isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.getCode()).isEqualTo("VARIANT_REQUIRED"));
+		assertThat(store).doesNotContainKey("cart:user-1");
+	}
+
+	@Test
+	void addItemWhenCatalogDownReturns503AndStoresNothing() {
+		catalog.list("p1", null, "shop-1", new BigDecimal("1000"));
+		catalog.down = true;
+
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p1", null, "shop-1", 1)))
+				.isInstanceOfSatisfying(ApiException.class, ex -> {
+					assertThat(ex.getCode()).isEqualTo("PRODUCT_CATALOG_UNAVAILABLE");
+					assertThat(ex.getStatus().value()).isEqualTo(503);
+				});
+		assertThat(store).doesNotContainKey("cart:user-1");
+	}
+
+	/** Thiếu shopId từ product-service: không lấy shopId của request, trả 503. */
+	@Test
+	void addItemWithoutCatalogShopReturns503() {
+		catalog.list("p1", null, null, new BigDecimal("1000"));
+
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p1", null, "shop-gia", 1)))
+				.isInstanceOfSatisfying(ApiException.class,
+						ex -> assertThat(ex.getCode()).isEqualTo("PRODUCT_CATALOG_UNAVAILABLE"));
+		assertThat(store).doesNotContainKey("cart:user-1");
+	}
+
+	/** Giá 0: order-service không bán được, nên cart cũng không nhận vào giỏ. */
+	@Test
+	void addItemWithZeroCatalogPriceIsRejected() {
+		catalog.list("p1", null, "shop-1", BigDecimal.ZERO);
+
+		assertThatThrownBy(() -> cartService.addItem("user-1", new AddCartItemRequest("p1", null, "shop-1", 1)))
+				.isInstanceOfSatisfying(ApiException.class,
+						ex -> assertThat(ex.getCode()).isEqualTo("PRODUCT_CATALOG_UNAVAILABLE"));
+		assertThat(store).doesNotContainKey("cart:user-1");
+	}
+
+	@Test
+	void refreshShopMovesOnlyThatLineToTheRealShop() {
+		cartService.addItem("user-1", add("p1", null, "shop-1", 2, "100000"));
+		cartService.addItem("user-1", add("p2", null, "shop-1", 1, "50000"));
+
+		cartService.refreshShop("user-1", "p1", null, "shop-2");
+
+		assertThat(cartService.items("user-1"))
+				.extracting(CartService.StoredItem::productId, CartService.StoredItem::shopId)
+				.containsExactlyInAnyOrder(
+						org.assertj.core.groups.Tuple.tuple("p1", "shop-2"),
+						org.assertj.core.groups.Tuple.tuple("p2", "shop-1"));
+	}
+
+	@Test
+	void refreshPriceUpdatesOnlyThatLine() {
+		cartService.addItem("user-1", add("p1", null, "shop-1", 2, "100000"));
+		cartService.addItem("user-1", add("p2", null, "shop-1", 1, "50000"));
+
+		cartService.refreshPrice("user-1", "p1", null, new BigDecimal("110000"));
+
+		CartResponse response = cartService.getCart("user-1");
+		assertThat(response.totalAmount()).isEqualByComparingTo("270000");
 	}
 
 	@Test

@@ -62,6 +62,7 @@ class BehaviorTrackerTest {
 	private DirectExecutor executor;
 	private ValueOperations<String, String> ops;
 	private CartService cartService;
+	private FakeProductCatalog catalog;
 
 	@BeforeEach
 	@SuppressWarnings("unchecked")
@@ -74,12 +75,14 @@ class BehaviorTrackerTest {
 		when(ops.get(anyString())).thenAnswer(inv -> store.get(inv.getArgument(0)));
 		publisher = mock(EventPublisher.class);
 		executor = new DirectExecutor();
-		cartService = new CartService(redis, JsonMapper.builder().build(), new CartProperties(),
+		catalog = new FakeProductCatalog();
+		cartService = new CartService(redis, JsonMapper.builder().build(), new CartProperties(), catalog,
 				new BehaviorTracker(publisher, executor));
 	}
 
-	private static AddCartItemRequest add(String productId, int quantity) {
-		return new AddCartItemRequest(productId, null, "shop-1", quantity, new BigDecimal("100000"));
+	private AddCartItemRequest add(String productId, int quantity) {
+		catalog.list(productId, null, "shop-1", new BigDecimal("100000"));
+		return new AddCartItemRequest(productId, null, "shop-1", quantity);
 	}
 
 	@Test
@@ -104,6 +107,15 @@ class BehaviorTrackerTest {
 		doThrow(new RedisConnectionFailureException("down")).when(ops).set(anyString(), anyString(), any(Duration.class));
 
 		assertThatThrownBy(() -> cartService.addItem("buyer-1", add("p1", 1))).isInstanceOf(CartStorageException.class);
+		verify(publisher, never()).publish(any(), any());
+	}
+
+	@Test
+	void catalogFailureDoesNotPublish() {
+		AddCartItemRequest request = add("p1", 1);
+		catalog.down = true;
+
+		assertThatThrownBy(() -> cartService.addItem("buyer-1", request)).isInstanceOf(ApiException.class);
 		verify(publisher, never()).publish(any(), any());
 	}
 
