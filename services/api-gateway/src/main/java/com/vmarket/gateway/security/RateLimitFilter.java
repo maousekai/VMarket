@@ -1,6 +1,7 @@
 package com.vmarket.gateway.security;
 
 import java.io.IOException;
+import java.util.Collections;
 import static com.vmarket.gateway.config.SearchContract.RATE_LIMITED_CODE;
 import static com.vmarket.gateway.config.SearchContract.RATE_LIMITED_MESSAGE;
 
@@ -24,12 +25,12 @@ import jakarta.servlet.http.HttpServletResponse;
  * Rate limit cơ bản (fixed-window theo IP) chạy trước tầng xác thực để che luôn
  * các endpoint public (vd đăng nhập) khỏi bị brute-force.
  *
- * <p>Khoá đếm là địa chỉ client THỰC: {@code getRemoteAddr()} — KHÔNG dùng
- * {@code X-Forwarded-For} vì gateway là điểm biên (network edge), header này do
- * client tự đặt được, kẻ tấn công chỉ cần xoay XFF là né per-IP limit. Khi tương
- * lai đặt reverse-proxy đáng tin trước gateway mới bật tin cậy XFF (kèm cơ chế
- * trusted-proxy). Preflight OPTIONS được bỏ qua để không làm hỏng CORS (do
- * {@code CorsConfig} xử lý).
+ * <p>Khoá đếm là IP client thật do {@link ClientIpResolver} xác định: mặc định
+ * {@code getRemoteAddr()}; {@code X-Forwarded-For} chỉ được tin khi kết nối đến từ
+ * proxy nằm trong {@code app.rate-limit.trusted-proxies} (vd nginx của frontend),
+ * nên client gọi thẳng gateway không thể xoay XFF để né giới hạn. Bộ đếm là
+ * {@link RateLimiter} (RAM hoặc Redis, xem {@code RateLimitConfig}). Preflight
+ * OPTIONS được bỏ qua để không làm hỏng CORS (do {@code CorsConfig} xử lý).
  *
  * <p><b>Miễn trừ rate limit (L-2):</b> {@code /actuator/**} và {@code /error} được bỏ
  * qua để không làm gián đoạn health check và giám sát hệ thống.
@@ -41,13 +42,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
 	private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 	private static final java.util.List<String> EXEMPT_PATHS = java.util.List.of("/actuator/**", "/error");
 
-	private final InMemoryRateLimiter limiter;
+	private static final String XFF_HEADER = "X-Forwarded-For";
+
+	private final RateLimiter limiter;
+	private final ClientIpResolver clientIpResolver;
 	private final org.springframework.util.AntPathMatcher pathMatcher = new org.springframework.util.AntPathMatcher();
 
-	public RateLimitFilter(RateLimitProperties properties) {
-		this.limiter = properties.isEnabled()
-				? new InMemoryRateLimiter(properties.getCapacity(), properties.getWindowSeconds())
-				: null;
+	public RateLimitFilter(RateLimitProperties properties, RateLimiter limiter, ClientIpResolver clientIpResolver) {
+		this.limiter = properties.isEnabled() ? limiter : null;
+		this.clientIpResolver = clientIpResolver;
 	}
 
 	@Override
@@ -58,7 +61,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 			return;
 		}
 
-		String clientIp = resolveClientIp(request);
+		String clientIp = ClientIpResolver.bucketKey(resolveClientIp(request));
 		if (!limiter.tryAcquire(clientIp)) {
 			log.warn("Rate limit vượt ngưỡng cho client {}", clientIp);
 			writeError(request, response);
@@ -78,7 +81,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 	}
 
 	private String resolveClientIp(HttpServletRequest request) {
-		return request.getRemoteAddr();
+		return clientIpResolver.resolve(request.getRemoteAddr(), Collections.list(request.getHeaders(XFF_HEADER)));
 	}
 
 	private void writeError(HttpServletRequest request, HttpServletResponse response) throws IOException {
