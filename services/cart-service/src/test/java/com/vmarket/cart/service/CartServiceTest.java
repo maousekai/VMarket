@@ -65,7 +65,7 @@ class CartServiceTest {
 		when(ops.get(anyString())).thenAnswer(inv -> store.get(inv.getArgument(0)));
 		when(redis.delete(anyString())).thenAnswer(inv -> store.remove(inv.getArgument(0)) != null);
 
-		cartService = new CartService(redis, JsonMapper.builder().build(), new CartProperties());
+		cartService = new CartService(redis, JsonMapper.builder().build(), new CartProperties(), BehaviorTracker.disabled());
 	}
 
 	private static AddCartItemRequest add(String productId, String variantId, String shopId,
