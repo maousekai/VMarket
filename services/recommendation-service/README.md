@@ -54,17 +54,17 @@ Personalized IDs use a separate hashed-user/category/limit namespace and a 60-se
 
 Ranking uses SQL for grouped interactions and peer counts, plus ordinary Python scoring. It issues no per-candidate database calls and retains compact scalar scores rather than full candidate descriptions. Exact content work still scales with eligible candidates and content seeds; indexed candidates/precomputed tokens remain a measured scaling follow-up. No trained model or periodic retraining is implemented.
 
-### Producer verification gaps (PR #35 follow-up)
+### Behaviour producers (PBL6-37)
 
-Source audit on 2026-10-22 found a shared `USER_BEHAVIOR_TRACKED` event-name constant, but no publishing call for it in Gateway, frontend, Cart, Order or Payment. Consumer fixtures verify receipt handling and ranking only. FR-REC-03 remains partial; approved PR-2 scope is consumer-only.
+FR-REC-03 now has a producer for each action. All of them publish `UserBehaviorTracked {userId, productId, action}` to `vmarket.events`, and the existing consumer path above handles them unchanged.
 
-| Action | Current business path | Missing release evidence |
+| Action | Producer | Rules |
 | --- | --- | --- |
-| view | ProductController.detail delegates to ProductService.detail; frontend App.jsx has no product-detail route or tracking call; Gateway has no behavior publisher | An authenticated real product view emits the correct user/product and original occurrence time; missing/failed views and forged user headers do not create attributed behavior |
-| add_to_cart | CartController.addItem passes the authenticated principal and validated request to CartService.addItem, which saves Redis state without publishing behavior | A successful cart write emits one event; rejected/failed writes emit none; payload identity comes from verified auth and the actual product, with a defined retry/delivery policy |
-| purchase | OrderService.placeOrder persists PENDING orders and clears checkout items after commit; Payment has no implemented successful-purchase producer | Business owners first define the successful purchase transition, including COD, cancellation and refund handling; order creation alone must not become purchase |
+| view | This service: `POST /api/ai/recommendations/events` with `{productId, action:"view"}` (`event_publisher.py`) | Requires a valid access token; `userId` is the JWT subject, never the body or `X-User-*`. Only `view` is accepted from clients. Guests are not tracked. Broker failure returns 503 `EVENT_UNAVAILABLE`; the web client ignores it. |
+| add_to_cart | Cart Service `BehaviorTracker`, after `CartService.addItem` saves Redis | Best-effort on a bounded background queue: rejected or failed cart writes publish nothing, and a slow or down broker never fails or delays the cart request. Events can be lost while the broker is down. |
+| purchase | Order Service `OrderDeliveryBridge`, through the order outbox | Business rule: an order counts as purchased when it becomes `DELIVERED` (COD and prepaid alike). One event per distinct product of the order, in the same transaction as the status change. Orders cancelled or returned before delivery never publish. Later returns/refunds do not retract the purchase. |
 
-For the producer follow-up, agree the trusted publishing component with the SRS Gateway/Clients ownership before coding. Run real business HTTP operations through Gateway and the relevant services, then assert the RabbitMQ envelope/payload, PostgreSQL history/receipt and authenticated recommendation result. Preserve eventId and timestamp across retries and verify redelivery adds no duplicate history. Include failure paths and cancellation/refund cases. Browser clients must never receive broker credentials. These tests cannot be completed by replacing absent producers with fixture publishers; none are claimed as passing here.
+`OrderPlaced`/`OrderStatusChanged` are still acknowledged and ignored by this consumer. Browser clients never receive broker credentials.
 
 ## Deployment checklist
 
@@ -73,7 +73,7 @@ For the producer follow-up, agree the trusted publishing component with the SRS 
 - [ ] Assign an operations owner and register python manage.py cleanup once daily with the service's database environment and working directory. Record the scheduler/job definition and owner in the deployment record; cleanup is not automatic until this is done.
 - [ ] Run cleanup once in staging, record its successful exit and removed-history/receipt counts, and alert on subsequent failures or missed daily executions. Verify the 90-day history limit plus daily scheduling interval and retained-history receipt protection. Exercise the controlled erasure/restore procedure with a staging account.
 - [ ] Before raising traffic, repeat the HTTP/resource benchmark below and the producer follow-up on the intended staging topology. Use measured limits to scope indexed candidate retrieval/precomputed features separately.
-- [ ] Keep FR-REC-03 marked consumer-only. Track real view, add-to-cart and successful-purchase producers plus live client/Gateway/Cart/Order tests separately; confirm cancellation/refund rules before adding any new action or interpreting order messages as purchases.
+- [ ] Before enabling the producers, verify on staging that a signed-in product view, an add-to-cart and a DELIVERED order each reach RabbitMQ, PostgreSQL history and the user's /for-you result.
 - [ ] Configure alerts for a nonzero rabbitmqDeadLetters count or recommendation_dead_letters_pending warning and document who fixes/replays the DLQ.
 - [ ] Verify DOWN/503 when PostgreSQL is unavailable and successful probes while recommendation workers are busy. Catalog statistics may lag 30 seconds; PostgreSQL readiness is checked every probe.
 
