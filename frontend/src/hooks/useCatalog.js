@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import useRemoteData from './useRemoteData'
 import { browseProducts, listCategories, PRODUCT_SORT } from '../services/api/productApi'
 import { getForYou } from '../services/api/recommendationApi'
+import { isSearchUnavailable, searchProducts, SEARCH_SORT } from '../services/api/searchApi'
 import { getPublicShop } from '../services/api/shopApi'
 import { sortTree } from '../utils/category'
 
@@ -72,14 +73,49 @@ export function useCategoryTree() {
 export const SEARCH_PAGE_SIZE = 20
 
 /**
- * Ket qua duyet / loc tu Product Service (tam thoi, truoc khi co Search Service).
- * `filters` = {keyword, categoryId, minPrice, maxPrice, minRating, sort, page}.
+ * Ket qua trang /search. `filters` = {keyword, categoryId, minPrice, maxPrice, minRating, sort, page}.
+ * - Co tu khoa: AI Search (xep theo do lien quan). Search tam ngung thi tim co ban theo ten o
+ *   Product Service va danh dau `fallback` (UC-03 luong thay the).
+ * - Khong co tu khoa (duyet danh muc, ban chay...): Product Service nhu truoc.
  */
 export function useProductSearch(filters) {
   const key = JSON.stringify(filters)
-  const load = useCallback(
-    () => browseProducts({ ...JSON.parse(key), size: SEARCH_PAGE_SIZE }),
-    [key],
-  )
+  const load = useCallback(async () => {
+    const { keyword, minRating, ...rest } = JSON.parse(key)
+    if (!keyword) {
+      return browseProducts({ ...rest, minRating, size: SEARCH_PAGE_SIZE })
+    }
+    try {
+      return {
+        ...(await searchProducts({ keyword, ...rest, size: SEARCH_PAGE_SIZE })),
+        fallback: false,
+      }
+    } catch (error) {
+      if (!isSearchUnavailable(error)) throw error
+      // Product Service khong co "lien quan": dung ban chay, gan nhat voi cach Search xep hang.
+      const sort = rest.sort === SEARCH_SORT.relevance ? PRODUCT_SORT.bestSelling : rest.sort
+      const page = await browseProducts({ keyword, ...rest, sort, size: SEARCH_PAGE_SIZE })
+      return { ...page, fallback: true }
+    }
+  }, [key])
   return useRemoteData(load, key)
+}
+
+const FALLBACK_BEST_SELLER_COUNT = 8
+
+/**
+ * San pham ban chay goi y khi tim khong co ket qua (UC-03): theo danh muc dang loc, neu
+ * khong loc thi toan san. `enabled=false` thi khong goi API.
+ */
+export function useBestSellers(categoryId, enabled) {
+  const load = useCallback(async () => {
+    if (!enabled) return []
+    const page = await browseProducts({
+      categoryId: categoryId || undefined,
+      sort: PRODUCT_SORT.bestSelling,
+      size: FALLBACK_BEST_SELLER_COUNT,
+    })
+    return page?.content ?? []
+  }, [categoryId, enabled])
+  return useRemoteData(load, `best-sellers:${enabled ? categoryId || 'all' : 'off'}`)
 }
