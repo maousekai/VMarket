@@ -88,9 +88,10 @@ describe('ImageSearchDialog', () => {
   it('previews, searches and opens a similar product', async () => {
     renderDialog()
     choose(image())
-    expect(screen.getByRole('dialog', { name: 'Kiểm tra ảnh' })).toHaveTextContent(
-      'polo-navy.jpg · 2,4 MB',
-    )
+    const dialog = screen.getByRole('dialog', { name: 'Kiểm tra ảnh' })
+    expect(dialog).toHaveTextContent('Ảnh đã chọn · 2,4 MB')
+    // The file name is not shown (long hashed names used to widen the dialog).
+    expect(dialog).not.toHaveTextContent('polo-navy.jpg')
     fireEvent.click(screen.getByRole('button', { name: 'Tìm sản phẩm tương đồng' }))
     expect(await screen.findByRole('dialog', { name: 'Sản phẩm tương đồng' })).toBeInTheDocument()
     expect(searchByImage).toHaveBeenCalledWith(

@@ -444,7 +444,7 @@ export default function ImageSearchDialog({ onClose }) {
     },
     preview: {
       title: 'Kiểm tra ảnh',
-      description: file ? `Ảnh đã chọn · ${file.name} · ${formatMegabytes(file.size)}` : '',
+      description: file ? `Ảnh đã chọn · ${formatMegabytes(file.size)}` : '',
       body: (
         <>
           {thumbnail}

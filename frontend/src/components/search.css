@@ -167,39 +167,14 @@
   font-size: 18px;
 }
 
-/* ---- Nut noi "Tim bang anh" (canh "Tro ly VMarket") ---- */
-.image-search-launcher {
-  position: fixed;
-  right: 24px;
-  bottom: 84px;
-  z-index: 40;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 18px;
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-full);
-  background: var(--color-surface);
-  color: var(--color-primary);
-  font: inherit;
-  font-weight: 600;
-  box-shadow: 0 8px 24px rgb(4 66 127 / 18%);
-  cursor: pointer;
-}
-.image-search-launcher:hover {
-  background: var(--color-primary-soft);
-}
-.image-search-launcher:focus-visible {
-  outline: 3px solid var(--color-accent);
-  outline-offset: 2px;
-}
-/* Nhu tro ly: an khi co hop thoai hoac khung chat dang mo. */
-body:has(.modal-backdrop) .image-search-launcher,
-body:has(.chat-panel) .image-search-launcher {
-  display: none;
-}
-
 /* ---- Hop thoai tim bang anh ---- */
+/* Ten file / tu khoa dai lien mach (vd ten bam SHA) khong duoc day rong hop thoai. */
+.modal:has(.image-search) {
+  overflow-x: hidden;
+}
+.modal:has(.image-search) .account-subtitle {
+  overflow-wrap: anywhere;
+}
 .image-search {
   display: grid;
   gap: 12px;
@@ -366,11 +341,4 @@ body:has(.chat-panel) .image-search-launcher {
 }
 .image-search__category {
   display: grid;
-}
-
-/* Dien thoai: nut camera trong o tim kiem da du, bo nut noi de khong che noi dung. */
-@media (max-width: 480px) {
-  .image-search-launcher {
-    display: none;
-  }
 }
