@@ -139,7 +139,10 @@ export default function CheckoutPage() {
       if (blocking) {
         navigate('/cart', {
           replace: true,
-          state: { message: 'Giỏ hàng vừa thay đổi giá hoặc tồn kho, vui lòng kiểm tra lại.' },
+          state: {
+            validation: check,
+            message: 'Giỏ hàng vừa thay đổi giá hoặc tồn kho, vui lòng kiểm tra lại.',
+          },
         })
         return
       }
@@ -162,6 +165,25 @@ export default function CheckoutPage() {
       })
     } catch (failure) {
       const apiError = getApiError(failure)
+      if (apiError.code === 'PRICE_CHANGED' || apiError.code === 'PRODUCT_UNAVAILABLE') {
+        // Gia/san pham doi giua luc kiem tra va luc dat (PBL6-48): /validate cap nhat gio sang
+        // gia moi, nguoi mua xem lai trong gio roi dat lai.
+        // Mang ket qua validate ve gio: /validate da ghi gia moi vao gio nen goi lai se khong
+        // con issue PRICE_CHANGED, gio phai hien tu ket qua nay ("gia cu -> gia moi").
+        const recheck = await validateCart().catch(() => null)
+        await Promise.allSettled([cart.refresh()])
+        navigate('/cart', {
+          replace: true,
+          state: {
+            validation: recheck,
+            message:
+              apiError.code === 'PRICE_CHANGED'
+                ? 'Giá sản phẩm vừa thay đổi. Giỏ hàng đã cập nhật giá mới, vui lòng kiểm tra lại rồi đặt hàng.'
+                : 'Có sản phẩm không còn bán, vui lòng kiểm tra lại giỏ hàng.',
+          },
+        })
+        return
+      }
       idempotency.current.reuse = apiError.retryable
       setError(apiError.message)
       setSubmitting('')

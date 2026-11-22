@@ -20,8 +20,10 @@ import com.vmarket.cart.dto.AddCartItemRequest;
 import com.vmarket.cart.dto.CartGroupDto;
 import com.vmarket.cart.dto.CartItemDto;
 import com.vmarket.cart.dto.CartResponse;
+import com.vmarket.cart.dto.ProductSnapshot;
 import com.vmarket.cart.exception.ApiException;
 import com.vmarket.cart.exception.CartStorageException;
+import com.vmarket.cart.exception.ProductCatalogUnavailableException;
 
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.ObjectMapper;
@@ -64,14 +66,17 @@ public class CartService {
 	private final StringRedisTemplate redis;
 	private final ObjectMapper objectMapper;
 	private final CartProperties properties;
+	private final ProductCatalogClient productCatalogClient;
 
 	/** Một lock cho mỗi userId đang hoạt động. */
 	private final Map<String, ReentrantLock> locks = new ConcurrentHashMap<>();
 
-	public CartService(StringRedisTemplate redis, ObjectMapper objectMapper, CartProperties properties) {
+	public CartService(StringRedisTemplate redis, ObjectMapper objectMapper, CartProperties properties,
+			ProductCatalogClient productCatalogClient) {
 		this.redis = redis;
 		this.objectMapper = objectMapper;
 		this.properties = properties;
+		this.productCatalogClient = productCatalogClient;
 	}
 
 	/**
@@ -83,9 +88,16 @@ public class CartService {
 
 	/**
 	 * Thêm một item vào giỏ. Nếu đã có cùng {@code productId + variantId} thì
-	 * cộng dồn số lượng và cập nhật giá snapshot theo giá vừa thêm.
+	 * cộng dồn số lượng và cập nhật giá snapshot theo giá hiện tại.
+	 *
+	 * <p>Đơn giá và gian hàng lấy từ product-service (PBL6-48), không lấy từ request:
+	 * sản phẩm/biến thể không tồn tại → 404 {@code PRODUCT_NOT_FOUND}; product-service
+	 * không trả lời hoặc thiếu giá → 503 {@code PRODUCT_CATALOG_UNAVAILABLE}.
 	 */
 	public CartResponse addItem(String userId, AddCartItemRequest request) {
+		// Gọi product-service TRƯỚC khi giữ lock: không giữ lock của người dùng trong lúc
+		// chờ mạng.
+		CatalogPrice catalog = currentPrice(request.productId(), normalizeVariant(request.variantId()));
 		ReentrantLock lock = lockFor(userId);
 		lock.lock();
 		try {
@@ -104,8 +116,8 @@ public class CartService {
 				}
 				int newQuantity = (int) merged;
 				items.set(items.indexOf(existing), new StoredItem(
-						existing.productId(), existing.variantId(), existing.shopId(),
-						newQuantity, request.unitPrice(), existing.addedAt(), now));
+						existing.productId(), existing.variantId(), catalog.shopId(),
+						newQuantity, catalog.price(), existing.addedAt(), now));
 				log.debug("addItem: cộng dồn productId={} variantId={} → quantity={}",
 						request.productId(), request.variantId(), newQuantity);
 			} else {
@@ -116,12 +128,97 @@ public class CartService {
 							"Giỏ hàng đã đạt tối đa " + CartLimits.MAX_ITEMS_PER_CART + " sản phẩm");
 				}
 				items.add(new StoredItem(request.productId(), normalizeVariant(request.variantId()),
-						request.shopId(), request.quantity(), request.unitPrice(), now, now));
+						catalog.shopId(), request.quantity(), catalog.price(), now, now));
 				log.debug("addItem: thêm mới productId={} variantId={}",
 						request.productId(), request.variantId());
 			}
 			save(userId, new CartDocument(items));
 			return toResponse(userId, items);
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/** Giá và gian hàng hiện tại của một dòng hàng theo product-service. */
+	private record CatalogPrice(BigDecimal price, String shopId) {
+	}
+
+	private CatalogPrice currentPrice(String productId, String variantId) {
+		ProductSnapshot product;
+		try {
+			product = productCatalogClient.findProduct(productId).orElse(null);
+		} catch (ProductCatalogUnavailableException ex) {
+			throw ApiException.unavailable("PRODUCT_CATALOG_UNAVAILABLE",
+					"Chưa lấy được giá sản phẩm, vui lòng thử lại sau");
+		}
+		if (product == null) {
+			throw ApiException.notFound("PRODUCT_NOT_FOUND", "Sản phẩm không tồn tại");
+		}
+		BigDecimal price = product.priceFor(variantId);
+		if (price == null) {
+			if (variantId != null) {
+				throw ApiException.notFound("PRODUCT_NOT_FOUND", "Biến thể sản phẩm không tồn tại");
+			}
+			// Sản phẩm có nhiều biến thể mà không chọn biến thể: không biết lấy giá nào.
+			throw ApiException.badRequest("VARIANT_REQUIRED", "Hãy chọn phân loại sản phẩm");
+		}
+		// Giá 0 cũng là dữ liệu lỗi: order-service coi giá <= 0 là không bán được
+		// (PRODUCT_UNAVAILABLE), nên nhận vào giỏ thì người mua không bao giờ đặt được.
+		if (price.signum() <= 0) {
+			throw ApiException.unavailable("PRODUCT_CATALOG_UNAVAILABLE",
+					"Dữ liệu giá sản phẩm không hợp lệ, vui lòng thử lại sau");
+		}
+		// Gian hàng nhận tiền không bao giờ lấy từ request: thiếu shopId là phản hồi sai
+		// hợp đồng, không đoán.
+		if (product.shopId() == null || product.shopId().isBlank()) {
+			throw ApiException.unavailable("PRODUCT_CATALOG_UNAVAILABLE",
+					"Dữ liệu sản phẩm không hợp lệ, vui lòng thử lại sau");
+		}
+		return new CatalogPrice(price, product.shopId());
+	}
+
+	/**
+	 * Cập nhật giá snapshot của một dòng sang giá hiện tại (sau khi validate phát hiện
+	 * giá đổi), để người mua đặt lại được với giá mới (PBL6-48). Dòng không còn trong
+	 * giỏ thì bỏ qua.
+	 */
+	public void refreshPrice(String userId, String productId, String variantId, BigDecimal currentPrice) {
+		ReentrantLock lock = lockFor(userId);
+		lock.lock();
+		try {
+			List<StoredItem> items = new ArrayList<>(load(userId).items());
+			StoredItem existing = findItem(items, productId, variantId);
+			if (existing == null || existing.unitPrice().compareTo(currentPrice) == 0) {
+				return;
+			}
+			items.set(items.indexOf(existing), new StoredItem(
+					existing.productId(), existing.variantId(), existing.shopId(),
+					existing.quantity(), currentPrice, existing.addedAt(), Instant.now()));
+			save(userId, new CartDocument(items));
+		} finally {
+			lock.unlock();
+		}
+	}
+
+	/**
+	 * Cập nhật gian hàng của một dòng sang gian hàng thật theo product-service (sau khi
+	 * validate phát hiện lệch). Dòng cũ có {@code shopId} sai bị order-service từ chối
+	 * (409), nên không sửa ở đây thì người mua đặt lại vẫn lỗi mãi. Dòng không còn
+	 * trong giỏ thì bỏ qua.
+	 */
+	public void refreshShop(String userId, String productId, String variantId, String currentShopId) {
+		ReentrantLock lock = lockFor(userId);
+		lock.lock();
+		try {
+			List<StoredItem> items = new ArrayList<>(load(userId).items());
+			StoredItem existing = findItem(items, productId, variantId);
+			if (existing == null || currentShopId.equals(existing.shopId())) {
+				return;
+			}
+			items.set(items.indexOf(existing), new StoredItem(
+					existing.productId(), existing.variantId(), currentShopId,
+					existing.quantity(), existing.unitPrice(), existing.addedAt(), Instant.now()));
+			save(userId, new CartDocument(items));
 		} finally {
 			lock.unlock();
 		}

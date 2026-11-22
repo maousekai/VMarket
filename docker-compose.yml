@@ -582,6 +582,8 @@ services:
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       # Lay shopId cua seller (GET /api/shops/me) cho API /api/orders/seller/**.
       SHOP_SERVICE_URL: http://shop-service:8083
+      # Dinh gia lai tung dong hang luc dat (PBL6-48), khong tin gia trong gio.
+      PRODUCT_SERVICE_URL: http://product-service:8084
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${ORDER_SERVICE_PORT:-8086}:8086"

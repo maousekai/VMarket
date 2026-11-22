@@ -51,8 +51,10 @@ import java.util.Optional;
  *       thuộc người đang gọi.
  *   <li>Đọc giỏ từ cart-service bằng {@code X-User-Id} đã xác thực.
  *   <li>Kiểm tra giỏ không rỗng.
- *   <li>Chụp từng item thành {@link OrderItem} với giá đã có trong giỏ (snapshot của cart-service,
- *       không hỏi lại product-service — giá chốt là giá đã hiện cho người dùng khi thêm vào giỏ).
+ *   <li>Định giá lại từng dòng bằng giá hiện tại của product-service ({@link OrderPricing},
+ *       PBL6-48). Giá trong giỏ khác giá hiện tại → 409 {@code PRICE_CHANGED}, không tạo đơn;
+ *       người mua xem giá mới (cart cập nhật khi validate) rồi đặt lại.
+ *   <li>Chụp từng item thành {@link OrderItem} với giá vừa định lại.
  *   <li>Lưu đơn + item trong MỘT transaction. <b>Sau khi commit</b>, xoá từng item đã checkout khỏi
  *       giỏ (không xoá toàn bộ, tránh mất item thêm trong lúc checkout). Xoá hỏng chỉ log cảnh báo,
  *       không làm hỏng đơn đã tạo.
@@ -72,6 +74,7 @@ public class OrderService {
     private final CartServiceClient cartServiceClient;
     private final com.vmarket.order.event.Outbox outbox;
     private final OrderCreator orderCreator;
+    private final OrderPricing orderPricing;
 
     /**
      * Đặt hàng từ giỏ hiện có (FR-ORDER-01, PBL6-52).
@@ -133,16 +136,20 @@ public class OrderService {
             throw ApiException.badRequest("CART_EMPTY", "Giỏ hàng đang trống, không thể đặt hàng");
         }
 
-        // 3. Thực hiện tạo đơn trong transaction độc lập (REQUIRES_NEW)
+        // 3. Định giá lại từng dòng từ product-service (PBL6-48): giá trong giỏ chỉ là snapshot.
+        // Lệch giá → 409 PRICE_CHANGED, không tạo đơn.
+        List<CartItemView> pricedItems = OrderPricing.apply(cartItems, orderPricing.reprice(cartItems));
+
+        // 4. Thực hiện tạo đơn trong transaction độc lập (REQUIRES_NEW)
         OrderResponse response;
         try {
             response = orderCreator.createOrderInTransaction(
-                    userId, address, cartItems, trimmedKey, request);
+                    userId, address, pricedItems, trimmedKey, request);
         } catch (DataIntegrityViolationException ex) {
             return recoverIdempotentOrderOrThrow(userId, trimmedKey, ex);
         }
 
-        // 4. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
+        // 5. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
         removeCheckoutItemsFromCart(userId, response.id(), cartItems);
 
         return response;
@@ -201,12 +208,26 @@ public class OrderService {
                     "CART_EMPTY", "Không có sản phẩm nào được chọn trong giỏ để đặt hàng");
         }
 
-        Map<String, OrderResponse> orders = new LinkedHashMap<>();
-        previous.forEach(order -> orders.put(order.id(), order));
+        // Định giá lại MỌI dòng của các đơn sắp tạo trước khi tạo đơn nào (PBL6-48): lệch giá ở
+        // một gian hàng thì không gian hàng nào được tạo đơn.
+        Map<String, Optional<Order>> existingByShop = new LinkedHashMap<>();
+        List<CartItemView> toCreate = new ArrayList<>();
         for (Map.Entry<String, List<CartItemView>> group : byShop.entrySet()) {
             String key = shopKey(checkoutKey, group.getKey());
             Optional<Order> existing =
                     key == null ? Optional.empty() : orderRepository.findByUserIdAndIdempotencyKey(userId, key);
+            existingByShop.put(group.getKey(), existing);
+            if (existing.isEmpty()) {
+                toCreate.addAll(group.getValue());
+            }
+        }
+        Map<String, CartItemView> priced = orderPricing.reprice(toCreate);
+
+        Map<String, OrderResponse> orders = new LinkedHashMap<>();
+        previous.forEach(order -> orders.put(order.id(), order));
+        for (Map.Entry<String, List<CartItemView>> group : byShop.entrySet()) {
+            String key = shopKey(checkoutKey, group.getKey());
+            Optional<Order> existing = existingByShop.get(group.getKey());
             OrderResponse response;
             if (existing.isPresent()) {
                 response = OrderResponse.from(existing.get());
@@ -214,7 +235,8 @@ public class OrderService {
                 try {
                     response =
                             orderCreator.createOrderInTransaction(
-                                    userId, address, group.getValue(), key, request.toPlaceOrder());
+                                    userId, address, OrderPricing.apply(group.getValue(), priced), key,
+                                    request.toPlaceOrder());
                 } catch (DataIntegrityViolationException ex) {
                     response = recoverIdempotentOrderOrThrow(userId, key, ex);
                 }

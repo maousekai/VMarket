@@ -188,6 +188,8 @@ describe('CartPage', () => {
     expect(
       within(screen.getByRole('region', { name: 'Gốm Mộc' })).getByText('Sản phẩm đã hết hàng.'),
     ).toBeInTheDocument()
+    // /validate ghi gia moi vao gio nen trang tai lai gio sau khi validate bi chan
+    await waitFor(() => expect(getCart.mock.calls.length).toBeGreaterThanOrEqual(2))
     fireEvent.click(within(apparel).getByRole('button', { name: 'Cập nhật giá mới' }))
     await waitFor(() =>
       expect(addCartItem).toHaveBeenCalledWith(
@@ -200,6 +202,27 @@ describe('CartPage', () => {
       ),
     )
     expect(within(apparel).queryByText(/Giá đã đổi từ/)).not.toBeInTheDocument()
+  })
+
+  it('shows the price change carried back from checkout without validating again', async () => {
+    const validation = {
+      ok: false,
+      issues: [
+        {
+          productId: 'p1',
+          variantId: 'v1',
+          type: 'PRICE_CHANGED',
+          cartPrice: 249000,
+          currentPrice: 259000,
+        },
+      ],
+    }
+    renderWithCart(<CartPage />, {
+      path: { pathname: '/cart', state: { validation, message: 'Giá sản phẩm vừa thay đổi.' } },
+    })
+    const apparel = await screen.findByRole('region', { name: 'Danang Apparel' })
+    expect(await within(apparel).findByText(/Giá đã đổi từ/)).toBeInTheDocument()
+    expect(validateCart).not.toHaveBeenCalled()
   })
 
   it('removes the selected items after confirmation', async () => {
@@ -280,7 +303,7 @@ describe('AddToCartActions', () => {
   const product = { id: 'p1', shopId: 's1' }
   const variant = { id: 'v1', price: 249000 }
 
-  it('adds the selected variant with its current price', async () => {
+  it('adds the selected variant without sending a price', async () => {
     addCartItem.mockResolvedValue(cartOf(polo))
     renderWithCart(<AddToCartActions product={product} variant={variant} quantity={2} />, {
       path: '/products/p1',
@@ -292,7 +315,6 @@ describe('AddToCartActions', () => {
       variantId: 'v1',
       shopId: 's1',
       quantity: 2,
-      unitPrice: 249000,
     })
   })
 

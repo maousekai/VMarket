@@ -25,7 +25,7 @@ function issueText(issue) {
         ? `Chỉ còn ${issue.availableStock} sản phẩm.`
         : 'Sản phẩm đã hết hàng.'
     case 'SHOP_CHANGED':
-      return 'Sản phẩm đã chuyển sang gian hàng khác, hãy xoá và thêm lại.'
+      return 'Sản phẩm đã chuyển sang gian hàng khác, giỏ hàng đã cập nhật. Vui lòng kiểm tra lại.'
     default:
       return 'Sản phẩm không còn được bán.'
   }
@@ -135,7 +135,11 @@ export default function CartPage() {
   const [selected, setSelected] = useState(
     () => new Set(location.state?.select ? [location.state.select] : []),
   )
-  const [validation, setValidation] = useState(null)
+  // Tu trang thanh toan quay ve (gia doi / 409) thi hien ngay ket qua validate da co:
+  // /validate da cap nhat gia trong gio nen validate lai se mat thong tin "gia cu -> moi".
+  const [validation, setValidation] = useState(() =>
+    Array.isArray(location.state?.validation?.issues) ? location.state.validation : null,
+  )
   const [checking, setChecking] = useState(false)
   const [pageError, setPageError] = useState('')
   const [fixing, setFixing] = useState('')
@@ -179,6 +183,10 @@ export default function CartPage() {
       if (!blocking) {
         saveCheckoutLines(keys)
         navigate('/checkout', { state: { lines: keys } })
+      } else {
+        // /validate da ghi gia moi / gian hang that vao gio: tai lai de dong hang va nhom
+        // gian hang hien dung, trong khi canh bao van giu tu ket qua validate o tren.
+        await cart.refresh()
       }
     } catch (failure) {
       setPageError(getApiError(failure).message)
@@ -264,7 +272,7 @@ export default function CartPage() {
         </h1>
         <Link to="/">‹ Tiếp tục mua sắm</Link>
       </div>
-      {location.state?.message && !validation && (
+      {location.state?.message && !validation?.issues?.length && (
         <p className="account-notice account-notice--warning" role="status">
           {location.state.message}
         </p>

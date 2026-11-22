@@ -23,6 +23,7 @@ const sent = () => adapter.mock.calls[0][0]
 
 describe('cart API', () => {
   it('adds an item with the buyer token', async () => {
+    // Gia do server lay tu Product Service (PBL6-48): client khong gui gia du caller co truyen.
     await addCartItem({ productId: 'p1', shopId: 's1', quantity: 2, unitPrice: 1000 })
     expect(sent().url).toBe('/api/cart/items')
     expect(JSON.parse(sent().data)).toEqual({
@@ -30,7 +31,6 @@ describe('cart API', () => {
       variantId: null,
       shopId: 's1',
       quantity: 2,
-      unitPrice: 1000,
     })
     expect(sent().headers.get('Authorization')).toBe('Bearer token-1')
   })
