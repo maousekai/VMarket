@@ -261,3 +261,10 @@
     flex-wrap: wrap;
   }
 }
+
+/* "Xem thêm sản phẩm tương tự" (PBL6-37) */
+.pdp-similar__more {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}

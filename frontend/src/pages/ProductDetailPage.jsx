@@ -1,18 +1,21 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useContext, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import AddToCartActions from '../components/AddToCartActions'
 import ProductGrid from '../components/ProductGrid'
 import ProductReviews from '../components/ProductReviews'
 import SectionError from '../components/SectionError'
 import StarIcon from '../components/StarIcon'
-import { useCategoryTree } from '../hooks/useCatalog'
+import { SIMILAR_MAX, useCategoryTree, useSimilarProducts } from '../hooks/useCatalog'
 import useRemoteData from '../hooks/useRemoteData'
 import { getApiError } from '../services/api/apiClient'
 import { getProduct } from '../services/api/productApi'
+import { trackView } from '../services/api/recommendationApi'
+import { AuthContext } from '../auth/useAuth'
 import { getPublicShop } from '../services/api/shopApi'
 import { findPath } from '../utils/category'
 import { formatMoney } from '../utils/formatMoney'
 import { imageUrlOrEmpty } from '../utils/shop'
+import { forgetViewed, markViewed, rememberViewedCategory } from '../utils/viewHistory'
 import {
   attributeGroups,
   findVariant,
@@ -195,6 +198,41 @@ function Specs({ product, categoryPath }) {
   )
 }
 
+/** "Sản phẩm tương tự" (FR-REC-02): Recommendation, du phong bang danh sach cua Product Service. */
+function SimilarProducts({ productId, fallback }) {
+  const [limit, setLimit] = useState(10)
+  const similar = useSimilarProducts(productId, fallback, limit)
+  const [shown, setShown] = useState(null)
+  // Giu luoi cu trong luc tai them de trang khong nhay ve trang thai "dang tai".
+  if (similar.status === 'ready' && shown !== similar.data) setShown(similar.data)
+  const data = similar.status === 'ready' ? similar.data : shown
+  if (!data?.products.length) return null
+  const canLoadMore =
+    data.source === 'recommendation' && data.products.length >= limit && limit < SIMILAR_MAX
+  return (
+    <section className="home-section" aria-labelledby="pdp-similar">
+      <div className="section-header">
+        <div className="section-header__title">
+          <h2 id="pdp-similar">Sản phẩm tương tự</h2>
+        </div>
+      </div>
+      <ProductGrid status="ready" products={data.products} />
+      {canLoadMore && (
+        <div className="pdp-similar__more">
+          <button
+            type="button"
+            className="button button--secondary"
+            disabled={similar.status === 'loading'}
+            onClick={() => setLimit(SIMILAR_MAX)}
+          >
+            {similar.status === 'loading' ? 'Đang tải…' : 'Xem thêm sản phẩm tương tự'}
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function ProductDetailView({ detail, categoryTree, renderActions }) {
   const { product, similarProducts = [] } = detail
   const categoryPath = findPath(categoryTree, product.categoryId)
@@ -251,16 +289,7 @@ export function ProductDetailView({ detail, categoryTree, renderActions }) {
 
       <ProductReviews productId={product.id} />
 
-      {similarProducts.length > 0 && (
-        <section className="home-section" aria-labelledby="pdp-similar">
-          <div className="section-header">
-            <div className="section-header__title">
-              <h2 id="pdp-similar">Sản phẩm tương tự</h2>
-            </div>
-          </div>
-          <ProductGrid status="ready" products={similarProducts} />
-        </section>
-      )}
+      <SimilarProducts key={product.id} productId={product.id} fallback={similarProducts} />
     </>
   )
 }
@@ -272,6 +301,17 @@ export default function ProductDetailPage({ renderActions = defaultActions }) {
   const load = useCallback(() => getProduct(productId), [productId])
   const detail = useRemoteData(load, productId)
   const tree = useCategoryTree()
+  const userId = useContext(AuthContext)?.session?.userId || null
+  const viewed = detail.status === 'ready' ? detail.data.product : null
+
+  // FR-REC-03: ghi nhan luot xem cua nguoi da dang nhap, mot lan moi san pham trong phien.
+  // Khach khong bi theo doi; chi nho danh muc vua xem de goi y trang chu (FR-REC-04).
+  useEffect(() => {
+    if (!viewed) return
+    rememberViewedCategory(viewed.categoryId)
+    if (!userId || !markViewed(userId, viewed.id)) return
+    trackView(viewed.id).catch(() => forgetViewed(userId, viewed.id))
+  }, [viewed, userId])
 
   let body
   if (detail.status === 'loading') {
