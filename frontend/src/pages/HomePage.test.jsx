@@ -41,27 +41,51 @@ function renderHome(session = null) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
+  getForYou.mockResolvedValue([])
   browseProducts.mockResolvedValue({ content: [product('best-1'), product('best-2', 'shop-2')] })
   getPublicShop.mockImplementation(async (id) => ({ id, name: `Gian ${id}`, province: 'Đà Nẵng' }))
 })
 
 describe('HomePage', () => {
-  it('shows best sellers to guests without calling recommendations', async () => {
+  it('shows guests the cold-start picks from Recommendation', async () => {
+    getForYou.mockResolvedValue([product('popular-1')])
     renderHome()
-    expect(await screen.findByRole('heading', { name: 'Bán chạy tại Đà Nẵng' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: 'Sản phẩm popular-1' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Bán chạy tại Đà Nẵng' })).toBeInTheDocument()
+    expect(screen.getByText('Gợi ý cho khách mới')).toBeInTheDocument()
+    expect(getForYou).toHaveBeenCalledWith({ limit: 8, categoryId: undefined })
+  })
+
+  it('leans guest picks towards the category they just viewed, topped up with popular ones', async () => {
+    sessionStorage.setItem('vmarket.lastViewedCategory', JSON.stringify('c9'))
+    getForYou.mockImplementation(async ({ categoryId }) =>
+      categoryId ? [product('cat-1')] : [product('cat-1'), product('popular-2')],
+    )
+    renderHome()
+    expect(await screen.findByRole('link', { name: 'Sản phẩm popular-2' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Sản phẩm cat-1' })).toHaveLength(1)
+    expect(getForYou).toHaveBeenCalledWith({ limit: 8, categoryId: 'c9' })
+  })
+
+  it('shows Product Service best sellers to guests when Recommendation has nothing', async () => {
+    renderHome()
     expect(await screen.findByRole('link', { name: 'Sản phẩm best-1' })).toBeInTheDocument()
     expect(screen.getByText('Gợi ý cho khách mới')).toBeInTheDocument()
-    expect(getForYou).not.toHaveBeenCalled()
     expect(browseProducts).toHaveBeenCalledWith(expect.objectContaining({ sort: 'BEST_SELLING' }))
   })
 
   it('shows personal picks to signed-in users', async () => {
     getForYou.mockResolvedValue([product('mine-1')])
+    sessionStorage.setItem('vmarket.lastViewedCategory', JSON.stringify('c9'))
     renderHome({ userId: 'buyer-1', status: 'ACTIVE', roles: ['BUYER'] })
     expect(
       await screen.findByRole('heading', { name: 'Sản phẩm dành cho bạn' }),
     ).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: 'Sản phẩm mine-1' })).toBeInTheDocument()
+    expect(screen.getByText('Gợi ý dành cho bạn')).toBeInTheDocument()
+    // Personal ranking is never narrowed to the last viewed category.
+    expect(getForYou).toHaveBeenCalledWith({ limit: 8, categoryId: undefined })
   })
 
   it('falls back to best sellers when recommendations fail or are empty', async () => {
