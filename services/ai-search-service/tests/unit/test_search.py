@@ -120,7 +120,12 @@ class SearchChecks(unittest.TestCase):
     def test_minio_origin_and_encoded_path_rejection(self):
         origin = "http://localhost:9000"
         self.assertEqual(object_key(origin + "/vmarket-media/products/abc.jpg", origin, "vmarket-media"), "products/abc.jpg")
-        for url in ("https://evil/products/x.jpg", origin + "/vmarket-media/products/../x.jpg", origin + "/vmarket-media/products/%2e%2e.jpg", origin + "/vmarket-media/products/x.jpg?q=1", "http://user@localhost:9000/vmarket-media/products/x.jpg"):
+        # Seller uploads from Product Service live under products/<sellerId>/.
+        self.assertEqual(object_key(origin + "/vmarket-media/products/01M721N31R/ab12.jpg", origin, "vmarket-media"),
+                         "products/01M721N31R/ab12.jpg")
+        for url in ("https://evil/products/x.jpg", origin + "/vmarket-media/products/a/b/x.jpg",
+                    origin + "/vmarket-media/products//x.jpg", origin + "/vmarket-media/products/a/../x.jpg",
+                    origin + "/vmarket-media/avatars/a/x.jpg", origin + "/vmarket-media/products/../x.jpg", origin + "/vmarket-media/products/%2e%2e.jpg", origin + "/vmarket-media/products/x.jpg?q=1", "http://user@localhost:9000/vmarket-media/products/x.jpg"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 object_key(url, origin, "vmarket-media")
 
