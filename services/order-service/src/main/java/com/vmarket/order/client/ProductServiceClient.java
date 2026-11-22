@@ -75,10 +75,11 @@ public class ProductServiceClient {
 			if (variantId == null || variantId.isBlank()) {
 				return variants.size() == 1 ? variants.get(0).price() : null;
 			}
+			// Không map sang price trước findFirst: giá null làm findFirst ném NPE (500).
 			return variants.stream()
 					.filter(v -> variantId.equals(v.id()))
-					.map(Variant::price)
 					.findFirst()
+					.map(Variant::price)
 					.orElse(null);
 		}
 	}
