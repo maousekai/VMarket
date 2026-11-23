@@ -68,7 +68,8 @@ jobs:
           echo "::warning::apt mirror unreachable, installing Chromium without system deps"
           npx playwright install chromium
       - name: Build and start isolated Java 17/PostgreSQL stack
-        run: docker compose -p vmarket-auth-e2e -f frontend/e2e/compose.yml up -d --build --wait --wait-timeout 300
+        # Serialize Docker builds to reduce simultaneous Maven Central requests (HTTP 429).
+        run: docker compose --parallel 1 -p vmarket-auth-e2e -f frontend/e2e/compose.yml up -d --build --wait --wait-timeout 300
       - run: npm run test:e2e
         working-directory: frontend
       - uses: actions/upload-artifact@v4
