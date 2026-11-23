@@ -161,12 +161,59 @@ class CartControllerTest {
 	 */
 	@Test
 	void routeCongKhai_khoaNoiBoDung_vanTra401() throws Exception {
-		mockMvc.perform(get("/api/cart")
+		// Route ngoài ba route chuyển tiếp (thêm / sửa / validate) không bao giờ nhận khoá.
+		mockMvc.perform(post("/api/cart/items")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"productId\":\"p1\",\"quantity\":1}")
 						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
 						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+		mockMvc.perform(post("/api/cart/validate")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/cart/items/p1")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
 
+		verifyNoInteractions(cartService, checkoutService);
+	}
+
+	/**
+	 * Chuyển tiếp PBL6-50: order-service bản cũ gọi {@code /api/cart} kèm khoá vẫn chạy,
+	 * để deploy/rollback cart và order lệch nhau không làm hỏng đặt hàng.
+	 */
+	@Test
+	void routeChuyenTiep_orderServiceBanCu_vanDocVaXoaGioDuoc() throws Exception {
+		when(cartService.getCart("user-1")).thenReturn(sampleCart());
+		when(cartService.removeItem("user-1", "p1", "v1")).thenReturn(sampleCart());
+
+		mockMvc.perform(get("/api/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.userId").value("user-1"));
+		mockMvc.perform(delete("/api/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+		mockMvc.perform(delete("/api/cart/items/p1").param("variantId", "v1")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+
+		verify(cartService).clearCart("user-1");
+		verify(cartService).removeItem("user-1", "p1", "v1");
+	}
+
+	@Test
+	void routeChuyenTiep_saiKhoa_tra401() throws Exception {
+		mockMvc.perform(get("/api/cart")
+						.header(InternalApiProperties.HEADER, "wrong-key-wrong-key-wrong-key-wrong-key")
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
 		verifyNoInteractions(cartService);
 	}
 

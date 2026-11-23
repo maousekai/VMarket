@@ -72,12 +72,14 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 
 	private final SecretKey key;
 	private final byte[] internalApiKey;
+	private final boolean legacyCartPathsEnabled;
 
 	public CartAuthenticationFilter(CartJwtProperties jwtProperties, InternalApiProperties internalApiProperties) {
 		// Keys.hmacShaKeyFor bắt buộc khoá >= 32 byte cho HS256 và ném lỗi ngay lúc
 		// khởi động nếu secret quá ngắn — fail sớm, đúng chỗ.
 		this.key = Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));
 		this.internalApiKey = internalApiProperties.getApiKey().getBytes(StandardCharsets.UTF_8);
+		this.legacyCartPathsEnabled = internalApiProperties.isLegacyCartPathsEnabled();
 	}
 
 	@Override
@@ -88,9 +90,10 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 			String token = extractBearer(request);
 			if (token != null) {
 				authenticateWithToken(token);
-			} else if (isInternalPath(request)) {
-				// Khoá nội bộ CHỈ có hiệu lực trên /internal/** (PBL6-50): route công
-				// khai /api/cart/** luôn đòi access token, kể cả khi khoá bị lộ.
+			} else if (isInternalPath(request)
+					|| (legacyCartPathsEnabled && isLegacyInternalCall(request))) {
+				// Khoá nội bộ CHỈ có hiệu lực trên /internal/** (PBL6-50), cộng ba route
+				// order-service bản cũ gọi trong giai đoạn chuyển tiếp.
 				authenticateInternalCall(request);
 			}
 		}
@@ -151,11 +154,33 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 	 * nơi không hiểu khác nhau về một path lạ.
 	 */
 	static boolean isInternalPath(HttpServletRequest request) {
-		String path = request.getServletPath();
-		if (request.getPathInfo() != null) {
-			path = path + request.getPathInfo();
-		}
+		String path = servletPath(request);
 		return path.equals(INTERNAL_PREFIX) || path.startsWith(INTERNAL_PREFIX + "/");
+	}
+
+	/**
+	 * CHUYỂN TIẾP (PBL6-50): đúng ba lời gọi của order-service bản cũ. Xem
+	 * {@link InternalApiProperties#isLegacyCartPathsEnabled()}.
+	 */
+	public static boolean isLegacyInternalCall(HttpServletRequest request) {
+		String path = servletPath(request);
+		String method = request.getMethod();
+		if ("GET".equals(method)) {
+			return path.equals(LEGACY_CART_PATH);
+		}
+		if ("DELETE".equals(method)) {
+			return path.equals(LEGACY_CART_PATH) || LEGACY_REMOVE_ITEM.matcher(path).matches();
+		}
+		return false;
+	}
+
+	private static final String LEGACY_CART_PATH = "/api/cart";
+	private static final java.util.regex.Pattern LEGACY_REMOVE_ITEM =
+			java.util.regex.Pattern.compile("/api/cart/items/[^/]+");
+
+	private static String servletPath(HttpServletRequest request) {
+		String path = request.getServletPath();
+		return request.getPathInfo() != null ? path + request.getPathInfo() : path;
 	}
 
 	private void setAuthentication(String userId, List<SimpleGrantedAuthority> authorities) {

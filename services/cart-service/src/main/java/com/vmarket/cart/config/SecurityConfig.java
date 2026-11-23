@@ -57,7 +57,9 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(HttpSecurity http,
 			CorsConfigurationSource corsConfigurationSource,
 			CartAuthenticationFilter cartAuthenticationFilter,
+			InternalApiProperties internalApiProperties,
 			ObjectMapper objectMapper) throws Exception {
+		boolean legacyCartPaths = internalApiProperties.isLegacyCartPathsEnabled();
 		http
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
 				.csrf(csrf -> csrf.disable())
@@ -70,6 +72,13 @@ public class SecurityConfig {
 						// token của người dùng bị 403 (PBL6-50).
 						.requestMatchers(CartAuthenticationFilter.INTERNAL_PREFIX + "/**")
 						.hasAuthority(CartAuthenticationFilter.INTERNAL_AUTHORITY)
+						// CHUYỂN TIẾP (PBL6-50): ba route order-service bản cũ gọi nhận cả
+						// người dùng lẫn cuộc gọi nội bộ, cho tới khi tắt cờ.
+						.requestMatchers(request -> legacyCartPaths
+								&& CartAuthenticationFilter.isLegacyInternalCall(request))
+						.access((authentication, context) -> new AuthorizationDecision(
+								isUserAuthentication(authentication.get())
+										|| isInternalAuthentication(authentication.get())))
 						// Ngược lại: danh tính tạo từ khoá nội bộ không bao giờ dùng được
 						// route công khai, kể cả khi hai nơi kiểm path lệch nhau sau này.
 						.anyRequest().access((authentication, context) ->
@@ -81,6 +90,14 @@ public class SecurityConfig {
 						.authenticationEntryPoint(unauthorizedEntryPoint(objectMapper))
 						.accessDeniedHandler(accessDeniedHandler(objectMapper)));
 		return http.build();
+	}
+
+	/** Danh tính tạo từ khoá nội bộ đúng. */
+	static boolean isInternalAuthentication(Authentication authentication) {
+		return authentication != null && authentication.isAuthenticated()
+				&& !(authentication instanceof AnonymousAuthenticationToken)
+				&& authentication.getAuthorities().stream()
+						.anyMatch(a -> CartAuthenticationFilter.INTERNAL_AUTHORITY.equals(a.getAuthority()));
 	}
 
 	/** Đã đăng nhập bằng access token (không ẩn danh, không phải danh tính nội bộ). */
