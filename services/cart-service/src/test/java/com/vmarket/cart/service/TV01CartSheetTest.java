@@ -61,7 +61,7 @@ class TV01CartSheetTest {
 		doAnswer(inv -> store.put(inv.getArgument(0), inv.getArgument(1)))
 				.when(ops).set(anyString(), anyString(), any(Duration.class));
 		catalog = new FakeProductCatalog();
-		service = new CartService(redis, mapper, new CartProperties(), catalog);
+		service = new CartService(redis, mapper, new CartProperties(), catalog, BehaviorTracker.disabled());
 	}
 
 	@AfterEach

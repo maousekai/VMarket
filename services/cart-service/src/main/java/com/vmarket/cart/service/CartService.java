@@ -67,16 +67,18 @@ public class CartService {
 	private final ObjectMapper objectMapper;
 	private final CartProperties properties;
 	private final ProductCatalogClient productCatalogClient;
+	private final BehaviorTracker behaviorTracker;
 
 	/** Một lock cho mỗi userId đang hoạt động. */
 	private final Map<String, ReentrantLock> locks = new ConcurrentHashMap<>();
 
 	public CartService(StringRedisTemplate redis, ObjectMapper objectMapper, CartProperties properties,
-			ProductCatalogClient productCatalogClient) {
+			ProductCatalogClient productCatalogClient, BehaviorTracker behaviorTracker) {
 		this.redis = redis;
 		this.objectMapper = objectMapper;
 		this.properties = properties;
 		this.productCatalogClient = productCatalogClient;
+		this.behaviorTracker = behaviorTracker;
 	}
 
 	/**
@@ -98,6 +100,13 @@ public class CartService {
 		// Gọi product-service TRƯỚC khi giữ lock: không giữ lock của người dùng trong lúc
 		// chờ mạng.
 		CatalogPrice catalog = currentPrice(request.productId(), normalizeVariant(request.variantId()));
+		CartResponse response = addItemLocked(userId, request, catalog);
+		// Chỉ phát khi giỏ đã lưu thành công (lỗi giá/giới hạn/Redis ném trước dòng này).
+		behaviorTracker.addedToCart(userId, request.productId());
+		return response;
+	}
+
+	private CartResponse addItemLocked(String userId, AddCartItemRequest request, CatalogPrice catalog) {
 		ReentrantLock lock = lockFor(userId);
 		lock.lock();
 		try {

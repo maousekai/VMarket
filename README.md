@@ -98,6 +98,9 @@ docker compose up -d postgres redis
 # text semantic là opt-in (TEXT_EMBEDDING_ENABLED) — xem services/ai-search-service/README.md
 docker compose --profile search up -d --build ai-search-service api-gateway
 
+# Recommendation (gợi ý trang chủ, sản phẩm tương tự): migrate Flyway -> service -> nạp catalog
+docker compose up -d --build recommendation-service recommendation-init api-gateway
+
 # Loki + Promtail + Prometheus + Grafana (~0.9GB) chỉ bật khi cần xem log/dashboard
 docker compose --profile monitoring up -d
 

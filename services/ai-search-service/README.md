@@ -339,8 +339,9 @@ Increasing budgets requires new latency/resource measurements. Logs include oper
 exception type, upstream status and source location; URLs, credentials and payloads
 are deliberately excluded.
 
-Images use immutable `products/<content-sha256>.<jpg|jpeg|png|webp>` keys. A changed image
-gets a different key. Runtime URLs must exactly match `MINIO_PUBLIC_ORIGIN`, the bucket
+Images use immutable `products/<content-sha256>.<jpg|jpeg|png|webp>` keys, or
+`products/<sellerId>/<content-sha256>.<ext>` for seller uploads from Product Service (one
+plain folder level only). A changed image gets a different key. Runtime URLs must exactly match `MINIO_PUBLIC_ORIGIN`, the bucket
 and this prefix; encoded/traversing/query-bearing/userinfo URLs are rejected. Downloads
 use S3 `GetObject` on fixed `MINIO_ENDPOINT`, never an event-controlled HTTP host. Read
 and query decoding share a single CPU slot, enforce 10 MB/static JPEG-PNG-WebP/25 MP

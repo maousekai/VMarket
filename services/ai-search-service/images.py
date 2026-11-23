@@ -24,7 +24,10 @@ def object_key(url, origin, bucket):
     if (parsed.scheme != trusted.scheme or parsed.netloc != trusted.netloc or parsed.username
             or parsed.password or parsed.query or parsed.fragment or trusted.path not in {"", "/"}):
         raise ValueError("Image origin rejected")
-    match = re.fullmatch(rf"/{re.escape(bucket)}/(products/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp))", parsed.path)
+    # Product uploads use products/<sellerId>/<sha256>.<ext> (ProductMediaService.mediaPrefix);
+    # fixtures use products/<sha256>.<ext>. One plain folder level is allowed, nothing else.
+    match = re.fullmatch(rf"/{re.escape(bucket)}/(products/(?:[A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp))",
+                         parsed.path)
     if not match:
         raise ValueError("Image key rejected")
     return match[1]

@@ -1,9 +1,11 @@
 import { useCallback } from 'react'
 import useRemoteData from './useRemoteData'
 import { browseProducts, listCategories, PRODUCT_SORT } from '../services/api/productApi'
-import { getForYou } from '../services/api/recommendationApi'
+import { getForYou, getSimilar } from '../services/api/recommendationApi'
+import { isSearchUnavailable, searchProducts, SEARCH_SORT } from '../services/api/searchApi'
 import { getPublicShop } from '../services/api/shopApi'
 import { sortTree } from '../utils/category'
+import { lastViewedCategory } from '../utils/viewHistory'
 
 const HOME_PRODUCT_COUNT = 8
 const FEATURED_SHOP_COUNT = 8
@@ -23,22 +25,52 @@ export function useTopCategories() {
 }
 
 /**
- * Luoi san pham trang chu. Nguoi da dang nhap thu goi y ca nhan truoc; neu Recommendation
- * loi hoac chua co du lieu (cold start) thi dung danh sach ban chay de trang khong trong.
+ * Luoi san pham trang chu (PBL6-37). Recommendation phuc vu ca khach lan nguoi da dang nhap:
+ * - Da dang nhap: goi y ca nhan theo hanh vi (user moi chua co lich su -> pho bien).
+ * - Khach: pho bien, uu tien danh muc vua xem trong phien (FR-REC-04), bu bang pho bien toan san.
+ * Recommendation loi/rong thi dung ban chay cua Product Service de trang khong trong.
+ * `ready=false` (dang khoi phuc phien): chua tai, tranh goi mot luot "khach" roi goi lai.
  */
-export function useHomeProducts(userId) {
+export function useHomeProducts(userId, ready = true) {
   const load = useCallback(async () => {
-    if (userId) {
-      try {
-        const items = await getForYou({ limit: HOME_PRODUCT_COUNT })
-        if (items.length) return { source: 'personal', products: items }
-      } catch {
-        // Fall through to best sellers: personal picks are an enhancement, not a requirement.
+    if (!ready) return new Promise(() => {})
+    try {
+      const categoryId = (!userId && lastViewedCategory()) || undefined
+      let products = await getForYou({ limit: HOME_PRODUCT_COUNT, categoryId })
+      if (categoryId && products.length < HOME_PRODUCT_COUNT) {
+        const seen = new Set(products.map((product) => product.id))
+        const popular = await getForYou({ limit: HOME_PRODUCT_COUNT })
+        products = [...products, ...popular.filter((product) => !seen.has(product.id))].slice(
+          0,
+          HOME_PRODUCT_COUNT,
+        )
       }
+      if (products.length) return { source: userId ? 'personal' : 'popular', products }
+    } catch {
+      // Fall through to best sellers: recommendations are an enhancement, not a requirement.
     }
     return { source: 'popular', products: await bestSelling(HOME_PRODUCT_COUNT) }
-  }, [userId])
-  return useRemoteData(load, userId || 'guest')
+  }, [userId, ready])
+  return useRemoteData(load, ready ? userId || 'guest' : 'restoring-session')
+}
+
+const SIMILAR_PAGE = 10
+export const SIMILAR_MAX = 20
+
+/**
+ * "Sản phẩm tương tự" tu Recommendation (noi dung + gia + danh muc). Service chua biet san
+ * pham (404) hoac dang loi thi dung danh sach cung danh muc cua Product Service (`fallback`).
+ */
+export function useSimilarProducts(productId, fallback, limit = SIMILAR_PAGE) {
+  const fallbackKey = JSON.stringify(fallback ?? [])
+  const load = useCallback(async () => {
+    try {
+      return { source: 'recommendation', products: await getSimilar(productId, { limit }) }
+    } catch {
+      return { source: 'catalog', products: JSON.parse(fallbackKey) }
+    }
+  }, [productId, limit, fallbackKey])
+  return useRemoteData(load, `similar:${productId}:${limit}:${fallbackKey}`)
 }
 
 /**
@@ -72,14 +104,49 @@ export function useCategoryTree() {
 export const SEARCH_PAGE_SIZE = 20
 
 /**
- * Ket qua duyet / loc tu Product Service (tam thoi, truoc khi co Search Service).
- * `filters` = {keyword, categoryId, minPrice, maxPrice, minRating, sort, page}.
+ * Ket qua trang /search. `filters` = {keyword, categoryId, minPrice, maxPrice, minRating, sort, page}.
+ * - Co tu khoa: AI Search (xep theo do lien quan). Search tam ngung thi tim co ban theo ten o
+ *   Product Service va danh dau `fallback` (UC-03 luong thay the).
+ * - Khong co tu khoa (duyet danh muc, ban chay...): Product Service nhu truoc.
  */
 export function useProductSearch(filters) {
   const key = JSON.stringify(filters)
-  const load = useCallback(
-    () => browseProducts({ ...JSON.parse(key), size: SEARCH_PAGE_SIZE }),
-    [key],
-  )
+  const load = useCallback(async () => {
+    const { keyword, minRating, ...rest } = JSON.parse(key)
+    if (!keyword) {
+      return browseProducts({ ...rest, minRating, size: SEARCH_PAGE_SIZE })
+    }
+    try {
+      return {
+        ...(await searchProducts({ keyword, ...rest, size: SEARCH_PAGE_SIZE })),
+        fallback: false,
+      }
+    } catch (error) {
+      if (!isSearchUnavailable(error)) throw error
+      // Product Service khong co "lien quan": dung ban chay, gan nhat voi cach Search xep hang.
+      const sort = rest.sort === SEARCH_SORT.relevance ? PRODUCT_SORT.bestSelling : rest.sort
+      const page = await browseProducts({ keyword, ...rest, sort, size: SEARCH_PAGE_SIZE })
+      return { ...page, fallback: true }
+    }
+  }, [key])
   return useRemoteData(load, key)
+}
+
+const FALLBACK_BEST_SELLER_COUNT = 8
+
+/**
+ * San pham ban chay goi y khi tim khong co ket qua (UC-03): theo danh muc dang loc, neu
+ * khong loc thi toan san. `enabled=false` thi khong goi API.
+ */
+export function useBestSellers(categoryId, enabled) {
+  const load = useCallback(async () => {
+    if (!enabled) return []
+    const page = await browseProducts({
+      categoryId: categoryId || undefined,
+      sort: PRODUCT_SORT.bestSelling,
+      size: FALLBACK_BEST_SELLER_COUNT,
+    })
+    return page?.content ?? []
+  }, [categoryId, enabled])
+  return useRemoteData(load, `best-sellers:${enabled ? categoryId || 'all' : 'off'}`)
 }

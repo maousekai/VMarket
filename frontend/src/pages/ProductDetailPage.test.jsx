@@ -7,12 +7,17 @@ import { AuthContext } from '../auth/useAuth'
 import { getProduct, listCategories } from '../services/api/productApi'
 import { getPublicShop } from '../services/api/shopApi'
 import { getProductRatingSummary, getProductReviews } from '../services/api/reviewApi'
+import { getSimilar, trackView } from '../services/api/recommendationApi'
 
 vi.mock('../services/api/productApi', () => ({
   getProduct: vi.fn(),
   listCategories: vi.fn(),
 }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
+vi.mock('../services/api/recommendationApi', () => ({
+  getSimilar: vi.fn(),
+  trackView: vi.fn(),
+}))
 vi.mock('../services/api/reviewApi', () => ({
   getProductRatingSummary: vi.fn(),
   getProductReviews: vi.fn(),
@@ -51,9 +56,9 @@ const product = {
   ],
 }
 
-const renderPage = (props = {}) =>
+const renderPage = (props = {}, session = null) =>
   render(
-    <AuthContext.Provider value={{ session: null, bootstrapState: 'ready' }}>
+    <AuthContext.Provider value={{ session, bootstrapState: 'ready' }}>
       <MemoryRouter initialEntries={['/products/p1']}>
         <Routes>
           <Route path="/products/:productId" element={<ProductDetailPage {...props} />} />
@@ -62,8 +67,21 @@ const renderPage = (props = {}) =>
     </AuthContext.Provider>,
   )
 
+const card = (id) => ({
+  id,
+  name: `Tương tự ${id}`,
+  imageUrls: [],
+  minPrice: 1,
+  maxPrice: 1,
+  currency: 'VND',
+  ratingCount: 0,
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
+  getSimilar.mockResolvedValue([])
+  trackView.mockResolvedValue(undefined)
   listCategories.mockResolvedValue([
     { id: 'c1', name: 'Thời trang', children: [{ id: 'c1a', name: 'Áo polo', children: [] }] },
   ])
@@ -163,5 +181,59 @@ describe('ProductDetailPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Sản phẩm không còn được bán' }),
     ).toBeInTheDocument()
+  })
+
+  it('shows similar products from Recommendation and loads more on demand', async () => {
+    getSimilar.mockImplementation(async (id, { limit }) =>
+      Array.from({ length: limit }, (_, index) => card(`r${index + 1}`)),
+    )
+    renderPage()
+    expect(await screen.findByRole('link', { name: 'Tương tự r10' })).toBeInTheDocument()
+    expect(getSimilar).toHaveBeenCalledWith('p1', { limit: 10 })
+    fireEvent.click(screen.getByRole('button', { name: 'Xem thêm sản phẩm tương tự' }))
+    expect(await screen.findByRole('link', { name: 'Tương tự r20' })).toBeInTheDocument()
+    expect(getSimilar).toHaveBeenLastCalledWith('p1', { limit: 20 })
+    expect(screen.queryByRole('button', { name: 'Xem thêm sản phẩm tương tự' })).toBeNull()
+  })
+
+  it('falls back to the catalog list when Recommendation does not know the product', async () => {
+    getSimilar.mockRejectedValue({ response: { status: 404 } })
+    getProduct.mockResolvedValue({ product, similarProducts: [card('c1')] })
+    renderPage()
+    expect(await screen.findByRole('link', { name: 'Tương tự c1' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Xem thêm sản phẩm tương tự' })).toBeNull()
+  })
+
+  it('hides the section when nothing is similar', async () => {
+    renderPage()
+    await screen.findByRole('heading', { name: 'Áo Polo Cotton' })
+    await waitFor(() => expect(getSimilar).toHaveBeenCalled())
+    expect(screen.queryByRole('heading', { name: 'Sản phẩm tương tự' })).toBeNull()
+  })
+
+  it('records one view per product per session for signed-in buyers', async () => {
+    const { unmount } = renderPage({}, { userId: 'buyer-1' })
+    await waitFor(() => expect(trackView).toHaveBeenCalledWith('p1'))
+    unmount()
+    renderPage({}, { userId: 'buyer-1' })
+    await screen.findByRole('heading', { name: 'Áo Polo Cotton' })
+    expect(trackView).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not track guests but remembers the category they viewed', async () => {
+    renderPage()
+    await screen.findByRole('heading', { name: 'Áo Polo Cotton' })
+    expect(trackView).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('vmarket.lastViewedCategory'))).toBe('c1a')
+  })
+
+  it('retries a view that could not be recorded on the next visit', async () => {
+    trackView.mockRejectedValueOnce(new Error('down'))
+    const { unmount } = renderPage({}, { userId: 'buyer-1' })
+    await waitFor(() => expect(trackView).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(sessionStorage.getItem('vmarket.viewed.buyer-1')).toBe('[]'))
+    unmount()
+    renderPage({}, { userId: 'buyer-1' })
+    await waitFor(() => expect(trackView).toHaveBeenCalledTimes(2))
   })
 })

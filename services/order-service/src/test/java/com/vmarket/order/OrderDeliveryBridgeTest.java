@@ -137,6 +137,54 @@ class OrderDeliveryBridgeTest {
     }
 
     @Test
+    void deliveredOrderRecordsOnePurchasePerProductForRecommendation() {
+        for (String[] line : new String[][] {{"P1", "V1"}, {"P1", "V2"}, {"P2", null}}) {
+            OrderItem item = new OrderItem();
+            item.setOrder(order);
+            item.setShopId("SHOP_A");
+            item.setProductId(line[0]);
+            item.setVariantId(line[1]);
+            item.setQuantity(1);
+            item.setUnitPrice(new BigDecimal("50000"));
+            item.setLineTotal(new BigDecimal("50000"));
+            order.getItems().add(item);
+        }
+        orders.saveAndFlush(order);
+
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "IN_TRANSIT", 1));
+        assertThat(behaviorPayloads()).isEmpty();
+
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "DELIVERED", 2));
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "DELIVERED", 3));
+        assertThat(behaviorPayloads())
+                .containsExactlyInAnyOrder(
+                        "{\"userId\":\"buyer\",\"productId\":\"P1\",\"action\":\"purchase\"}",
+                        "{\"userId\":\"buyer\",\"productId\":\"P2\",\"action\":\"purchase\"}");
+    }
+
+    @Test
+    void cancelledBeforeDeliveryRecordsNoPurchase() {
+        OrderItem item = new OrderItem();
+        item.setOrder(order);
+        item.setShopId("SHOP_A");
+        item.setProductId("P1");
+        item.setQuantity(1);
+        item.setUnitPrice(new BigDecimal("50000"));
+        item.setLineTotal(new BigDecimal("50000"));
+        order.getItems().add(item);
+        orders.saveAndFlush(order);
+
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "RETURNED", 1));
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "DELIVERED", 2));
+        assertThat(behaviorPayloads()).isEmpty();
+    }
+
+    private java.util.List<String> behaviorPayloads() {
+        return jdbc.queryForList(
+                "select payload from event_outbox where event_type = 'UserBehaviorTracked'", String.class);
+    }
+
+    @Test
     void multiShopOrder_handoffClaimFails_whenNotAllShopsConfirmed() throws Exception {
         Order multiOrder = new Order();
         multiOrder.setUserId("buyer");

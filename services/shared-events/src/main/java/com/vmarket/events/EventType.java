@@ -52,7 +52,7 @@ public final class EventType {
 	public static final String RETURN_REQUESTED = "ReturnRequested";
 	public static final String RETURN_RESOLVED = "ReturnResolved";
 
-	/** Gateway / Clients phát khi ghi nhận hành vi xem, thêm giỏ, mua của người dùng → Recommendation huấn luyện gợi ý. */
+	/** Hành vi xem (Recommendation), thêm giỏ (Cart), mua (Order) → Recommendation huấn luyện gợi ý. Xem {@link UserBehaviorTracked}. */
 	public static final String USER_BEHAVIOR_TRACKED = "UserBehaviorTracked";
 
 	private EventType() {
