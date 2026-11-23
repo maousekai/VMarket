@@ -267,6 +267,25 @@ class JwtAuthenticationFilterTest {
 		}
 	}
 
+	/** PBL6-50: mã hoá %xx hỏng bị từ chối 400, không thành 500 và không tới service đích. */
+	@Test
+	void malformedPercentEncoding_isRejectedWith400() throws Exception {
+		String valid = token(Instant.now(), Instant.now().plusSeconds(60));
+		for (String path : java.util.List.of("/api/products/%ZZ/internal/test", "/api/products/%2/internal/test",
+				"/api/products/abc%", "/api/cart/%G1")) {
+			for (String auth : java.util.Arrays.asList(null, "Bearer " + valid)) {
+				MockHttpServletResponse res = new MockHttpServletResponse();
+				AtomicReference<HttpServletRequest> downstream = new AtomicReference<>();
+
+				filter.doFilter(request("GET", path, auth), res, (r, s) -> downstream.set((HttpServletRequest) r));
+
+				assertThat(res.getStatus()).as(path + " auth=" + (auth != null)).isEqualTo(400);
+				assertThat(res.getContentAsString()).contains("\"code\":\"INVALID_PATH\"");
+				assertThat(downstream.get()).as(path).isNull();
+			}
+		}
+	}
+
 	@Test
 	void authProtectedEndpoint_withoutToken_rejected() throws Exception {
 		MockHttpServletResponse res = new MockHttpServletResponse();

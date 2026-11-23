@@ -97,7 +97,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
-		if (isInternalApiRequest(request)) {
+		boolean internal;
+		try {
+			internal = isInternalApiRequest(request);
+		} catch (IllegalArgumentException ex) {
+			// %xx hỏng (vd %ZZ, %2): không giải mã được thì không biết path thật, từ chối
+			// thay vì để exception thành 500 (PBL6-50).
+			writeError(response, HttpStatus.BAD_REQUEST.value(), "INVALID_PATH", "Đường dẫn không hợp lệ");
+			return;
+		}
+		if (internal) {
 			// Defense-in-depth (PBL6-15 Review 3): endpoint nội bộ giữa các service
 			// (vd /api/products/internal/**) KHÔNG được lộ qua cửa công khai của
 			// gateway. Trả 404 như resource không tồn tại để không dò được sự tồn tại.
