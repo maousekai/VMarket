@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vmarket.order.exception.ApiException;
 import com.vmarket.order.client.CartServiceClient;
 import com.vmarket.order.service.OrderService;
 import com.vmarket.order.client.UserServiceClient;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -610,6 +612,46 @@ class OrderApiTest {
                                 .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("PENDING"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
+
+    /**
+     * PBL6-50: cart-service bản cũ chưa có /internal/cart (404) hoặc từ chối khoá (401) thì
+     * đọc giỏ thất bại TRƯỚC khi tạo đơn: không có đơn nào, không xoá giỏ.
+     */
+    @Test
+    void placeOrderWhenCartReadFails_createsNoOrderAndTouchesNoCart() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenThrow(new ApiException("CART_SERVICE_ERROR", HttpStatus.BAD_GATEWAY, "cart lỗi"));
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error.code").value("CART_SERVICE_ERROR"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+        verify(cartServiceClient, never()).removeCartItem(anyString(), anyString(), any());
+        verify(cartServiceClient, never()).clearCart(anyString());
+    }
+
+    /** Xoá giỏ sau khi tạo đơn thất bại toàn bộ (vd cart 401/404): đơn vẫn được tạo. */
+    @Test
+    void placeOrderWhenEveryCartItemRemovalFails_orderStillCreated() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(false);
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated());
 
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
     }

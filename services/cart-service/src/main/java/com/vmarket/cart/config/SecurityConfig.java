@@ -57,9 +57,7 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(HttpSecurity http,
 			CorsConfigurationSource corsConfigurationSource,
 			CartAuthenticationFilter cartAuthenticationFilter,
-			InternalApiProperties internalApiProperties,
 			ObjectMapper objectMapper) throws Exception {
-		boolean legacyCartPaths = internalApiProperties.isLegacyCartPathsEnabled();
 		http
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
 				.csrf(csrf -> csrf.disable())
@@ -74,8 +72,7 @@ public class SecurityConfig {
 						.hasAuthority(CartAuthenticationFilter.INTERNAL_AUTHORITY)
 						// CHUYỂN TIẾP (PBL6-50): ba route order-service bản cũ gọi nhận cả
 						// người dùng lẫn cuộc gọi nội bộ, cho tới khi tắt cờ.
-						.requestMatchers(request -> legacyCartPaths
-								&& CartAuthenticationFilter.isLegacyInternalCall(request))
+						.requestMatchers(cartAuthenticationFilter::acceptsLegacyInternalCall)
 						.access((authentication, context) -> new AuthorizationDecision(
 								isUserAuthentication(authentication.get())
 										|| isInternalAuthentication(authentication.get())))

@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -99,8 +100,10 @@ class InternalKeyProxyIntegrationTest {
 				.compact();
 	}
 
+	private static final HttpClient CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+
 	private HttpResponse<String> send(HttpRequest.Builder builder) throws Exception {
-		return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+		return CLIENT.send(builder.timeout(Duration.ofSeconds(10)).build(), HttpResponse.BodyHandlers.ofString());
 	}
 
 	private URI uri(String path) {
@@ -160,13 +163,27 @@ class InternalKeyProxyIntegrationTest {
 			int before = forwarded.get();
 			String response = sendRaw("GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:" + port
 					+ "\r\nConnection: close\r\n\r\n");
+			// Qua server thật, Tomcat từ chối %xx hỏng (400) trước cả filter; body INVALID_PATH
+			// của filter (khi chạy sau một connector dễ dãi hơn) đã chốt ở JwtAuthenticationFilterTest.
 			assertThat(response).as(path).startsWith("HTTP/1.1 400");
 			assertThat(forwarded.get()).as(path).isEqualTo(before);
 		}
 	}
 
+	/** Path nội bộ mã hoá %xx vẫn bị chặn 404 khi đi qua proxy thật, không tới service. */
+	@Test
+	void encodedInternalPathIsBlockedThroughProxy() throws Exception {
+		for (String path : List.of("/api/products/%69nternal/search-snapshots", "/api/cart/%69nternal/x")) {
+			int before = forwarded.get();
+			String response = sendRaw("GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:" + port
+					+ "\r\nConnection: close\r\n\r\n");
+			assertThat(response).as(path).startsWith("HTTP/1.1 404");
+			assertThat(forwarded.get()).as(path).isEqualTo(before);
+		}
+	}
+
 	private String sendRaw(String request) throws IOException {
-		try (Socket socket = new Socket("127.0.0.1", port);
+		try (Socket socket = newSocket();
 				BufferedReader in = new BufferedReader(
 						new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
 			OutputStream out = socket.getOutputStream();
@@ -174,5 +191,12 @@ class InternalKeyProxyIntegrationTest {
 			out.flush();
 			return in.lines().reduce("", (a, b) -> a + b + "\n");
 		}
+	}
+
+	/** Có timeout đọc: server không đóng kết nối thì test fail thay vì treo. */
+	private Socket newSocket() throws IOException {
+		Socket socket = new Socket("127.0.0.1", port);
+		socket.setSoTimeout(5_000);
+		return socket;
 	}
 }

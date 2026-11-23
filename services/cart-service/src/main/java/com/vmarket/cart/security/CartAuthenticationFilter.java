@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 import javax.crypto.SecretKey;
 
@@ -70,6 +71,10 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 	/** Tiền tố route nội bộ — nơi duy nhất chấp nhận khoá {@code X-Internal-Api-Key}. */
 	public static final String INTERNAL_PREFIX = "/internal";
 
+	/** CHUYỂN TIẾP (PBL6-50): route order-service bản cũ gọi. */
+	private static final String LEGACY_CART_PATH = "/api/cart";
+	private static final Pattern LEGACY_REMOVE_ITEM = Pattern.compile("/api/cart/items/[^/]+");
+
 	private final SecretKey key;
 	private final byte[] internalApiKey;
 	private final boolean legacyCartPathsEnabled;
@@ -80,6 +85,10 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 		this.key = Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));
 		this.internalApiKey = internalApiProperties.getApiKey().getBytes(StandardCharsets.UTF_8);
 		this.legacyCartPathsEnabled = internalApiProperties.isLegacyCartPathsEnabled();
+		if (legacyCartPathsEnabled) {
+			log.warn("Chuyển tiếp PBL6-50 đang BẬT: khoá nội bộ còn được nhận trên GET/DELETE /api/cart. "
+					+ "Đặt CART_LEGACY_INTERNAL_PATHS_ENABLED=false khi mọi order-service đã gọi /internal/cart");
+		}
 	}
 
 	@Override
@@ -90,8 +99,7 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 			String token = extractBearer(request);
 			if (token != null) {
 				authenticateWithToken(token);
-			} else if (isInternalPath(request)
-					|| (legacyCartPathsEnabled && isLegacyInternalCall(request))) {
+			} else if (isInternalPath(request) || acceptsLegacyInternalCall(request)) {
 				// Khoá nội bộ CHỈ có hiệu lực trên /internal/** (PBL6-50), cộng ba route
 				// order-service bản cũ gọi trong giai đoạn chuyển tiếp.
 				authenticateInternalCall(request);
@@ -159,10 +167,15 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 	}
 
 	/**
-	 * CHUYỂN TIẾP (PBL6-50): đúng ba lời gọi của order-service bản cũ. Xem
-	 * {@link InternalApiProperties#isLegacyCartPathsEnabled()}.
+	 * CHUYỂN TIẾP (PBL6-50): cờ đang bật VÀ là một trong ba lời gọi của order-service bản
+	 * cũ. Nơi DUY NHẤT quyết định — {@code SecurityConfig} gọi lại hàm này, để filter và
+	 * tầng phân quyền không hiểu khác nhau. Xem {@link InternalApiProperties#isLegacyCartPathsEnabled()}.
 	 */
-	public static boolean isLegacyInternalCall(HttpServletRequest request) {
+	public boolean acceptsLegacyInternalCall(HttpServletRequest request) {
+		return legacyCartPathsEnabled && isLegacyInternalCall(request);
+	}
+
+	static boolean isLegacyInternalCall(HttpServletRequest request) {
 		String path = servletPath(request);
 		String method = request.getMethod();
 		if ("GET".equals(method)) {
@@ -173,10 +186,6 @@ public class CartAuthenticationFilter extends OncePerRequestFilter {
 		}
 		return false;
 	}
-
-	private static final String LEGACY_CART_PATH = "/api/cart";
-	private static final java.util.regex.Pattern LEGACY_REMOVE_ITEM =
-			java.util.regex.Pattern.compile("/api/cart/items/[^/]+");
 
 	private static String servletPath(HttpServletRequest request) {
 		String path = request.getServletPath();

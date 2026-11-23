@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -271,9 +272,9 @@ class JwtAuthenticationFilterTest {
 	@Test
 	void malformedPercentEncoding_isRejectedWith400() throws Exception {
 		String valid = token(Instant.now(), Instant.now().plusSeconds(60));
-		for (String path : java.util.List.of("/api/products/%ZZ/internal/test", "/api/products/%2/internal/test",
+		for (String path : List.of("/api/products/%ZZ/internal/test", "/api/products/%2/internal/test",
 				"/api/products/abc%", "/api/cart/%G1")) {
-			for (String auth : java.util.Arrays.asList(null, "Bearer " + valid)) {
+			for (String auth : Arrays.asList(null, "Bearer " + valid)) {
 				MockHttpServletResponse res = new MockHttpServletResponse();
 				AtomicReference<HttpServletRequest> downstream = new AtomicReference<>();
 

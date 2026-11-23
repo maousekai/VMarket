@@ -97,16 +97,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
-		boolean internal;
+		// PHẢI chạy đầu tiên: giải mã path một lần, mọi rule chặn (deny list, role rule)
+		// dùng lại kết quả này. %xx hỏng (vd %ZZ, %2) thì không biết path thật -> từ chối
+		// 400 thay vì để exception thành 500 hoặc rơi vào nhánh "token sai" (PBL6-50).
+		List<String> paths;
 		try {
-			internal = isInternalApiRequest(request);
+			paths = pathVariants(request);
 		} catch (IllegalArgumentException ex) {
-			// %xx hỏng (vd %ZZ, %2): không giải mã được thì không biết path thật, từ chối
-			// thay vì để exception thành 500 (PBL6-50).
 			writeError(response, HttpStatus.BAD_REQUEST.value(), "INVALID_PATH", "Đường dẫn không hợp lệ");
 			return;
 		}
-		if (internal) {
+		if (isInternalApiRequest(paths)) {
 			// Defense-in-depth (PBL6-15 Review 3): endpoint nội bộ giữa các service
 			// (vd /api/products/internal/**) KHÔNG được lộ qua cửa công khai của
 			// gateway. Trả 404 như resource không tồn tại để không dò được sự tồn tại.
@@ -129,7 +130,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		String token = header.substring(BEARER_PREFIX.length()).trim();
 		try {
 			Claims claims = jwtService.parse(token);
-			if (!hasRequiredRole(request, claims)) {
+			if (!hasRequiredRole(request, paths, claims)) {
 				writeError(response, HttpStatus.FORBIDDEN.value(), "FORBIDDEN_ROLE",
 						"Tài khoản không có vai trò phù hợp để truy cập tài nguyên này");
 				return;
@@ -146,8 +147,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * bị chặn ở gateway. Service-to-service gọi trực tiếp qua URL nội bộ, không
 	 * bao giờ đi qua cổng công khai (PBL6-15 Review 3, defense-in-depth).
 	 */
-	private boolean isInternalApiRequest(HttpServletRequest request) {
-		List<String> paths = pathVariants(request);
+	private boolean isInternalApiRequest(List<String> paths) {
 		for (String pattern : securityProperties.getInternalDenyPaths()) {
 			if (matchesAny(pattern, paths)) {
 				return true;
@@ -192,10 +192,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * {@code /api/shops/**}) khai báo trước một rule hẹp hơn, khắt khe hơn (vd chỉ
 	 * {@code POST /api/shops/*\/approve}) sẽ vô hiệu hoá rule hẹp đó.
 	 */
-	private boolean hasRequiredRole(HttpServletRequest request, Claims claims) {
-		// Khớp trên mọi cách hiểu của path: "/api/shops/%61pprove" không được né rule
-		// của "/api/shops/*/approve" (PBL6-50).
-		List<String> paths = pathVariants(request);
+	private boolean hasRequiredRole(HttpServletRequest request, List<String> paths, Claims claims) {
+		// Khớp trên mọi cách hiểu của path (pathVariants): "/api/shops/%61pprove" không
+		// được né rule của "/api/shops/*/approve" (PBL6-50).
 		List<RoleRule> matched = securityProperties.getRoleRequiredPaths().stream()
 				.filter(rule -> matchesAny(rule.getPattern(), paths))
 				.filter(rule -> rule.getMethods().isEmpty()
