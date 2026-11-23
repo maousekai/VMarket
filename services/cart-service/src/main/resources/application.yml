@@ -39,6 +39,9 @@ app:
   # nằm ở application-dev.yml.
   internal-api:
     api-key: ${INTERNAL_API_KEY}
+    # Chuyển tiếp PBL6-50: còn nhận khoá nội bộ trên 3 route /api/cart mà order-service
+    # bản cũ gọi. Đặt false sau khi order-service mới (gọi /internal/cart) đã chạy hết.
+    legacy-cart-paths-enabled: ${CART_LEGACY_INTERNAL_PATHS_ENABLED:true}
 
 # JWT - cart-service TỰ verify token do auth-service ký (HS256, khoá đối xứng nên
 # hai bên phải dùng CHUNG một chuỗi bí mật). Dùng chung prefix `auth.jwt` và chung
