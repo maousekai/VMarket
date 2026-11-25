@@ -32,3 +32,11 @@ export const deleteMyShopMedia = async (url) => {
 export async function discardUploaded(urls, remove) {
   await Promise.allSettled(urls.filter(Boolean).map((url) => remove(url)))
 }
+
+// Product images (PBL6-28): uploaded before the product is saved; imageUrls on the product
+// decides which ones are kept. The server refuses to delete an image a product still uses.
+export const uploadProductImage = (file) => upload('/api/products/seller/media', file)
+
+export const deleteProductMedia = async (url) => {
+  await apiClient.delete('/api/products/seller/media', { params: { url } })
+}

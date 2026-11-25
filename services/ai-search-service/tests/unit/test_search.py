@@ -5,7 +5,7 @@ import threading
 import tempfile
 import unittest
 from dataclasses import replace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from pathlib import Path
 
 import httpx
@@ -120,7 +120,12 @@ class SearchChecks(unittest.TestCase):
     def test_minio_origin_and_encoded_path_rejection(self):
         origin = "http://localhost:9000"
         self.assertEqual(object_key(origin + "/vmarket-media/products/abc.jpg", origin, "vmarket-media"), "products/abc.jpg")
-        for url in ("https://evil/products/x.jpg", origin + "/vmarket-media/products/../x.jpg", origin + "/vmarket-media/products/%2e%2e.jpg", origin + "/vmarket-media/products/x.jpg?q=1", "http://user@localhost:9000/vmarket-media/products/x.jpg"):
+        # Seller uploads from Product Service live under products/<sellerId>/.
+        self.assertEqual(object_key(origin + "/vmarket-media/products/01M721N31R/ab12.jpg", origin, "vmarket-media"),
+                         "products/01M721N31R/ab12.jpg")
+        for url in ("https://evil/products/x.jpg", origin + "/vmarket-media/products/a/b/x.jpg",
+                    origin + "/vmarket-media/products//x.jpg", origin + "/vmarket-media/products/a/../x.jpg",
+                    origin + "/vmarket-media/avatars/a/x.jpg", origin + "/vmarket-media/products/../x.jpg", origin + "/vmarket-media/products/%2e%2e.jpg", origin + "/vmarket-media/products/x.jpg?q=1", "http://user@localhost:9000/vmarket-media/products/x.jpg"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 object_key(url, origin, "vmarket-media")
 
@@ -184,6 +189,7 @@ class SearchChecks(unittest.TestCase):
 
 
 class LLMChecks(unittest.IsolatedAsyncioTestCase):
+    @patch("main.HEALTH_CACHE_SECONDS", 0)
     async def test_health_and_image_search_share_readiness(self):
         client = Mock()
         store = SearchStore(Settings(), client)
@@ -256,6 +262,38 @@ class LLMChecks(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await expander.expand_query("áo"), [])
             self.assertFalse(expander.busy)
         finally: await expander.client.aclose()
+
+    async def test_slow_expansion_keeps_embedding_and_unready_index_skips_encoder(self):
+        fp = "text-fp"
+        store = Mock()
+        store.keyword.return_value = {"results": []}
+        store.cached_meta.return_value = ("index", {"searchSchema": 2, "textFingerprint": fp,
+            "textCalibration": {"fingerprint": fp, "validated": True, "threshold": 0.5}})
+        async def slow(_):
+            await asyncio.sleep(1)
+            return ["late"]
+        expander = Mock(expand_query=slow)
+        embeddings = Mock(fingerprint=fp, query=AsyncMock(return_value=[1.0] + [0.0] * 383))
+        app = create_app(replace(Settings(), llm_timeout_ms=20, text_enabled=True), store, Mock(), expander, run_workers=False,
+                         text_embeddings=embeddings)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            self.assertEqual((await client.get("/api/ai/search?keyword=ao")).status_code, 200)
+            self.assertEqual(store.keyword.call_args.args[1:], ([], [1.0] + [0.0] * 383, fp))
+
+            store.cached_meta.return_value = ("index", {"searchSchema": 1})
+            embeddings.query.reset_mock()
+            self.assertEqual((await client.get("/api/ai/search?keyword=ao")).status_code, 200)
+            embeddings.query.assert_not_called()
+            self.assertEqual(store.keyword.call_args.args[1:], ([],))
+
+    async def test_public_health_probes_dependencies_once_per_cache_window(self):
+        store = Mock()
+        store.meta.return_value = ("index", {})
+        app = create_app(replace(Settings(), llm_enabled=False), store, Mock(ready=False), run_workers=False)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            for _ in range(3):
+                self.assertEqual((await client.get("/api/ai/search/health")).status_code, 200)
+        self.assertEqual(store.meta.call_count, 1)
 
     async def test_invalid_provider_message_keeps_keyword_search_available(self):
         settings = replace(Settings(), llm_url="https://provider.test/v1", llm_key="test", llm_model="test", external_text=True)

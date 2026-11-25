@@ -78,6 +78,7 @@ describe('Admin sidebar', () => {
     expect(links.map((link) => link.textContent)).toEqual([
       'Tổng quan',
       'Kiểm duyệt sản phẩm',
+      'Kiểm duyệt đánh giá',
       'Giám sát đơn hàng',
       'Phê duyệt gian hàng',
       'Điều phối Shipper',
@@ -90,6 +91,7 @@ describe('Admin sidebar', () => {
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
       '/admin',
       '/admin/products',
+      '/admin/reviews',
       '/admin/orders',
       '/admin/shops',
       '/admin/shippers',
@@ -116,9 +118,9 @@ describe('Admin sidebar', () => {
 
   it('navigates when a section is chosen and moves the highlight', () => {
     view('/admin/users')
-    fireEvent.click(nav().getByRole('link', { name: 'Giám sát đơn hàng' }))
-    expect(screen.getByRole('heading', { name: 'Giám sát đơn hàng' })).toBeTruthy()
-    expect(current()).toEqual(['Giám sát đơn hàng'])
+    fireEvent.click(nav().getByRole('link', { name: 'Điều phối Shipper' }))
+    expect(screen.getByRole('heading', { name: 'Điều phối Shipper' })).toBeTruthy()
+    expect(current()).toEqual(['Điều phối Shipper'])
     fireEvent.click(nav().getByRole('link', { name: 'Quản lý người dùng' }))
     expect(screen.getByText('trang Quản lý người dùng')).toBeTruthy()
     expect(current()).toEqual(['Quản lý người dùng'])
@@ -144,7 +146,7 @@ describe('Admin sidebar', () => {
     view('/admin/khong-co')
     expect(screen.getByRole('heading', { name: 'Không tìm thấy trang' })).toBeTruthy()
     expect(screen.getAllByRole('main')).toHaveLength(1)
-    expect(nav().getAllByRole('link')).toHaveLength(10)
+    expect(nav().getAllByRole('link')).toHaveLength(11)
     fireEvent.click(screen.getByRole('link', { name: 'Về trang tổng quan' }))
     expect(screen.getByRole('heading', { name: 'Tổng quan nền tảng' })).toBeTruthy()
   })

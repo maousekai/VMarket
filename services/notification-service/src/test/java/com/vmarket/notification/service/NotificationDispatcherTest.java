@@ -31,6 +31,7 @@ class NotificationDispatcherTest {
 	private final NotificationRepository repository = mock(NotificationRepository.class);
 	private final PushService push = mock(PushService.class);
 	private final EmailService email = mock(EmailService.class);
+	private final NotificationPreferenceService preferences = mock(NotificationPreferenceService.class);
 	private final Clock clock = Clock.fixed(Instant.parse("2026-11-05T10:00:00Z"), ZoneOffset.UTC);
 	private NotificationDispatcher dispatcher;
 
@@ -41,7 +42,22 @@ class NotificationDispatcherTest {
 
 	@BeforeEach
 	void setUp() {
-		dispatcher = new NotificationDispatcher(repository, push, email, clock);
+		dispatcher = new NotificationDispatcher(repository, push, email, preferences, clock);
+		when(preferences.allowsEmail(any(), any())).thenReturn(true);
+		when(preferences.allowsPush(any(), any())).thenReturn(true);
+	}
+
+	@Test
+	void disabledChannelsStillStoreInAppNotification() {
+		when(repository.existsByDedupKey(any())).thenReturn(false);
+		when(preferences.allowsEmail("buyer-1", NotificationType.ORDER_PLACED)).thenReturn(false);
+		when(preferences.allowsPush("buyer-1", NotificationType.ORDER_PLACED)).thenReturn(false);
+
+		dispatcher.deliver("buyer-1", withEmail, envelope);
+
+		verify(repository).insert(any(Notification.class));
+		verify(push, never()).sendToUser(any(), any(), any(), anyMap());
+		verify(email, never()).send(any(), any(), any(), any());
 	}
 
 	@Test

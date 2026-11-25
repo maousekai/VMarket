@@ -1,6 +1,9 @@
 package com.vmarket.shop.client;
 
+import java.time.Instant;
 import java.util.List;
+
+import org.springframework.http.MediaType;
 
 import org.springframework.web.client.RestClient;
 
@@ -50,6 +53,33 @@ public class ProductServiceClient {
 			log.warn("Không đọc được snapshot sản phẩm {}: {}", productId, ex.getMessage());
 			return null;
 		}
+	}
+
+	/**
+	 * Đẩy trạng thái gian hàng đã duyệt sang product-service (khoá nội bộ đã gắn sẵn).
+	 *
+	 * @return {@code false} khi product-service lỗi / chưa sẵn sàng — lần sau thử lại
+	 */
+	public boolean reconcileShopAccess(List<ShopAccessSnapshot> shops) {
+		try {
+			restClient.post()
+					.uri("/api/products/internal/shop-access/reconcile")
+					.contentType(MediaType.APPLICATION_JSON)
+					.body(new ShopAccessSyncRequest(shops))
+					.retrieve()
+					.toBodilessEntity();
+			return true;
+		} catch (RuntimeException ex) {
+			log.warn("Không đối soát được quyền đăng bán sang product-service: {}", ex.getMessage());
+			return false;
+		}
+	}
+
+	public record ShopAccessSnapshot(String shopId, String sellerId, boolean active, Instant updatedAt,
+			String shopName) {
+	}
+
+	public record ShopAccessSyncRequest(List<ShopAccessSnapshot> shops) {
 	}
 
 	public record ProductPage(List<ProductView> content, long totalElements) {

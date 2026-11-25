@@ -6,6 +6,14 @@ export const registerShop = async (shop) => (await apiClient.post('/api/shops', 
 
 export const updateMyShop = async (shop) => (await apiClient.put('/api/shops/me', shop)).data
 
+export const updateMyBankAccount = async ({ bankCode, bankAccountNumber }) =>
+  (
+    await apiClient.put('/api/shops/me/bank-account', {
+      bankCode: bankCode.trim(),
+      bankAccountNumber: bankAccountNumber.trim(),
+    })
+  ).data
+
 export const resubmitMyShop = async () => (await apiClient.post('/api/shops/me/resubmit')).data
 
 export const getMyStatusHistory = async () =>

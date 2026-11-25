@@ -55,6 +55,7 @@ class OrderReturnApiTest {
 	@Autowired private OutboxRepository outboxRepository;
 	@Autowired private com.vmarket.order.service.OrderCompletionJob completionJob;
 	@Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+	@Autowired private com.vmarket.order.config.InternalApiProperties internalApi;
 
 	@MockitoBean private UserServiceClient userServiceClient;
 	@MockitoBean private CartServiceClient cartServiceClient;
@@ -98,18 +99,49 @@ class OrderReturnApiTest {
 		order.setDistrict("Hải Châu");
 		order.setWard("Thạch Thang");
 		order.setStreetAddress("123 Lê Duẩn");
-		order.setTotalAmount(new BigDecimal("300000.00"));
+		order.setTotalAmount(new BigDecimal("150000.00"));
 
 		OrderItem item = new OrderItem();
 		item.setOrder(order);
 		item.setProductId("01JBQ9PROD0000000000000001");
 		item.setShopId(SHOP_ID);
-		item.setQuantity(2);
+		item.setQuantity(1);
 		item.setUnitPrice(new BigDecimal("150000.00"));
-		item.setLineTotal(new BigDecimal("300000.00"));
+		item.setLineTotal(new BigDecimal("150000.00"));
 		order.getItems().add(item);
 
 		return orderRepository.save(order);
+	}
+
+	@Test
+	void buyerCreatesReturn_partOfOrder_isRejected() throws Exception {
+		Order order = createDeliveredOrder();
+		OrderItem second = new OrderItem();
+		second.setOrder(order);
+		second.setProductId("01JBQ9PROD0000000000000002");
+		second.setShopId(SHOP_ID);
+		second.setQuantity(1);
+		second.setUnitPrice(new BigDecimal("50000.00"));
+		second.setLineTotal(new BigDecimal("50000.00"));
+		order.getItems().add(second);
+		order = orderRepository.save(order);
+		String firstId = order.getItems().stream()
+				.filter(i -> i.getProductId().endsWith("1")).findFirst().orElseThrow().getId();
+
+		String body = """
+				{
+				  "reason": "Sản phẩm bị lỗi",
+				  "evidenceUrls": ["https://img/1.jpg"],
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(firstId);
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("WHOLE_ORDER_RETURN_REQUIRED"));
 	}
 
 	@Test
@@ -331,6 +363,43 @@ class OrderReturnApiTest {
 	}
 
 	@Test
+	void internalEndpointListsProductsOfResolvedReturnsOnly() throws Exception {
+		Order order = createDeliveredOrder();
+		String orderItemId = order.getItems().get(0).getId();
+		String internal = "/internal/orders/" + order.getId() + "/returned-products";
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{ "reason": "Đổi kích thước",
+						  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }] }
+						""".formatted(orderItemId)))
+				.andExpect(status().isCreated());
+		String returnId = returnRepository.findAll().get(0).getId();
+
+		// Chưa chốt: chưa có sản phẩm nào được tính là đã trả.
+		mockMvc.perform(get(internal).header("X-Internal-Api-Key", internalApi.getApiKey()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.productIds").isEmpty());
+
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/accept")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken()).param("shopId", SHOP_ID))
+				.andExpect(status().isOk());
+		mockMvc.perform(post("/api/orders/seller/returns/" + returnId + "/confirm-receipt")
+				.header(HttpHeaders.AUTHORIZATION, sellerToken()).param("shopId", SHOP_ID))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(get(internal).header("X-Internal-Api-Key", internalApi.getApiKey()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.orderId").value(order.getId()))
+				.andExpect(jsonPath("$.productIds[0]").value("01JBQ9PROD0000000000000001"));
+		mockMvc.perform(get(internal).header("X-Internal-Api-Key", "wrong-key"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get(internal)).andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void sellerCannotConfirmReceiptWhenDisputed() throws Exception {
 		Order order = createDeliveredOrder();
 		String orderItemId = order.getItems().get(0).getId();
@@ -496,7 +565,7 @@ class OrderReturnApiTest {
 	}
 
 	@Test
-	void orderComplete_thenBuyerDisputes_returnsConflict() throws Exception {
+	void orderComplete_thenBuyerCanStillDispute() throws Exception {
 		Order order = createDeliveredOrder();
 		String orderItemId = order.getItems().get(0).getId();
 
@@ -529,13 +598,32 @@ class OrderReturnApiTest {
 				.header(HttpHeaders.AUTHORIZATION, buyerToken()))
 				.andExpect(status().isOk());
 
-		// 4. Buyer cố khiếu nại Return sau khi đơn đã COMPLETED -> bị chặn 409 ORDER_ALREADY_COMPLETED
+		// 4. Đơn đã COMPLETED vẫn khiếu nại được yêu cầu bị từ chối
 		mockMvc.perform(post("/api/orders/returns/" + returnId + "/dispute")
 				.header(HttpHeaders.AUTHORIZATION, buyerToken())
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"reason\":\"Vẫn muốn khiếu nại\"}"))
-				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.error.code").value("ORDER_ALREADY_COMPLETED"));
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("DISPUTED"));
+	}
+
+	@Test
+	void completedOrderCanStillBeReturnedWithinSevenDays() throws Exception {
+		Order order = createDeliveredOrder();
+		order.setStatus(OrderStatus.COMPLETED);
+		orderRepository.save(order);
+		String body = """
+				{
+				  "reason": "Hàng lỗi sau khi dùng thử",
+				  "items": [{ "orderItemId": "%s", "productId": "01JBQ9PROD0000000000000001", "quantity": 1 }]
+				}
+				""".formatted(order.getItems().get(0).getId());
+
+		mockMvc.perform(post("/api/orders/" + order.getId() + "/returns")
+				.header(HttpHeaders.AUTHORIZATION, buyerToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body))
+				.andExpect(status().isCreated());
 	}
 
 	@Test

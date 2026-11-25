@@ -38,6 +38,19 @@ class Behavior(BaseModel):
         return value
 
 
+class ViewEvent(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    productId: str = Field(min_length=1, max_length=128)
+    action: Literal["view"]
+
+    @field_validator("productId")
+    @classmethod
+    def validate_id(cls, value):
+        if not valid_id(value):
+            raise ValueError("Invalid product ID")
+        return value
+
+
 class Snapshot(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
     id: str = Field(min_length=1, max_length=128)

@@ -1,5 +1,117 @@
 # PBL6-21 implementation verification
 
+## Main Compose integration — 2026-11-09
+
+Elasticsearch, `ai-search-service`, its private `ai-search-text` component and the
+one-shot `ai-search-init` now belong to **`docker-compose.yml`**, without a Search
+profile or overlay. The obsolete `docker-compose.search.yml` was removed. Gateway
+routing uses Compose DNS, `http://ai-search-service:8100`. Model mounts remain
+read-only; resource/no-swap limits are retained. The private encoder has no host port.
+Initial catch-up creates an index/alias only on an empty ES volume, binds durable
+events before exporting Product snapshots, and never supplies synthetic calibration.
+Existing index schema and calibration are preserved on later catch-up runs.
+
+Started only the main Compose services needed for Search: Elasticsearch, RabbitMQ,
+MongoDB/replica initialization, MinIO, Product, Search init/API/text and gateway.
+Existing named volumes were reused; stale container network references were repaired
+by recreating those containers, without deleting stored data. No temporary replacement
+Elasticsearch, broker or Product HTTP stub was used. Search has a separate scoped
+MinIO `s3:GetObject` credential in its ignored service `.env`; no root credential is
+passed to Search. The existing 26 Product snapshots were synchronized successfully.
+
+Fresh checks on this integration:
+
+- **35 offline tests passed**, including main-Compose wiring, empty-volume initialization
+  without invented calibration, and preservation of existing index/model metadata.
+- **17 Elasticsearch integration tests passed against the main Compose ES container**,
+  using disposable indexes and preserving the active catalog alias.
+- **Real main-stack workflow passed inside the existing Search container:** reserved
+  one existing product unit via Product's authenticated inventory API, observed the
+  actual Mongo transactional outbox/RabbitMQ update in Search and through guest gateway
+  search, then released the reservation in `finally` and verified original stock restored.
+  Product revisions advanced **2 → 3 → 4**; synchronization took approximately
+  **601 ms** on reserve and **1,019 ms** on release. Unchanged text vectors were preserved.
+  No order, seller account, shop or fake product was created. A released reservation
+  remains as the normal audit record.
+- Native text probing returned a valid 384-dimensional vector. Internal Product snapshot
+  and embedding routes remained blocked at the gateway. The media reader was denied
+  bucket listing. The real catalog is available through keyword Search; missing validated
+  image/text calibration is reported honestly as unavailable.
+
+Reproduce the workflow from PowerShell at the repository root:
+
+```powershell
+docker compose up -d --build ai-search-service api-gateway
+Get-Content -Raw services/ai-search-service/tests/system/test_main_compose.py | docker compose exec -T -e SEARCH_MAIN_COMPOSE_MUTATION=true ai-search-service python -
+```
+
+This integration does not override the semantic quality, image calibration or 200-user
+capacity gates recorded below. Main services were left running for use; unrelated
+services and monitoring remained stopped.
+
+## FR-SRCH-06 implementation — 2026-11-09
+
+FR-SRCH-06 is implemented inside AI Search, on the existing public Search endpoint.
+The private native text companion uses the same repository/image and has no public
+gateway route. **Functional integration passes; deployment acceptance does not.**
+
+| Check | Result |
+| --- | --- |
+| Offline Python suite | 32 passed in Docker with networking disabled and a 512 MiB/no-swap cap. Includes malformed/overflowing vectors, fingerprints, cloud opt-in, provider failure/cache/timeout, private endpoint auth/input bounds, expired requests, HTTP disconnects retaining the native slot, partial ES results, and post-calibration revision checks. |
+| Elasticsearch 8.19 integration | 17 passed. Legacy strict writes and explicit schema-1-to-schema-2 rebuild, semantic/lexical union, exact totals, all sorts/pagination, real-variant price gaps/category descendants, tombstones, durable retries, overload without spending attempts, interleaved metadata/image/text completions and failed rebuild alias preservation. |
+| Gateway Maven tests | 64 passed, zero skipped: `services/mvnw.cmd -pl api-gateway -am test`. No Java source changes. |
+| Focused live system smoke | Passed with real native E5 inference, Elasticsearch, RabbitMQ, Search API and cached gateway image. An authenticated HTTP Product snapshot stub emits existing Product events; actual Product/Mongo mutations are not covered by this smoke. Validates asynchronous vector indexing, text update/hide, public search/filtering, image upload, guest gateway routing and lexical fallback on invalid semantic calibration. |
+| Maximum image alongside text | Passed: 5000×5000 RGBA PNG padded to exactly 10,000,000 bytes through the real API alongside ten native text inferences. No MinIO needed because disposable catalog snapshots have no images. Existing image integration covers vector retrieval separately. |
+| Local Postman collection | 10 assertions passed through the gateway on the final packaged image: guest routing, fixture hybrid union, price gap, pagination, shared validation envelope and blocked internal routes. Run `tests/postman/semantic-search.postman_collection.json` with `--reporters cli --no-report-events`; no account or cloud publication required. |
+| Build/configuration | Final Search image built successfully; Compose overlay validation and generated Search contract check passed. Code graph refreshed with `graphify update . --no-cluster`. |
+
+Only explicitly named disposable test containers were started: ES, RabbitMQ, native
+text, Search API, gateway, plus short-lived test runners. PostgreSQL, MongoDB, Redis,
+MinIO, Ollama, frontend, recommendation and unrelated business services stayed off.
+Model files were downloaded only by the explicit maintenance command, pinned to
+revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`, checked against Hugging Face
+artifact hashes, and mounted read-only for runtime. The native container warmed
+inference before readiness and ran with offline model loading, one CPU and 1 GiB/no swap.
+
+The first disposable ES startup at the existing 1 GiB cap exited 137. Repeating at
+the **same cap**, with a 384 MiB heap, one declared processor, ML disabled and GeoIP
+downloads disabled, passed the suite. These settings are in the opt-in Search overlay
+and Search CI. ES still runs close to its cap; no extra allocation was authorized.
+On the final packaged-image rerun, measured native peak was **762,793,984 bytes** (71.0% of 1 GiB),
+Search API peak **518,574,080 bytes**, and both reported zero OOM/OOM-kill events.
+The maximum image leaves little API memory headroom. Focused service consumption
+does not demonstrate the entire project's <7,000,000,000-byte limit including WSL overhead.
+
+The supplied small Vietnamese fixture set **failed real-model quality gates**.
+Calibration selected threshold 0.8286672 without using held-out outcomes. Held-out
+hybrid Recall@5 was **0.70** (required ≥0.80), recall on lexical-miss queries **0.5714**
+(required ≥0.80), and unrelated false acceptance **0.70** (required ≤0.10).
+The held-out lexical baseline Recall@5 was 0.30. Hybrid improved retrieval but did
+not meet acceptance. The lexical branch can itself admit unrelated fuzzy matches;
+the hybrid union preserves existing keyword behavior. Synthetic calibration was used
+only in disposable integration indexes and must never be copied into a deployment.
+`text-quality` fails and maintenance rebuild preserves the active alias when quality fails.
+
+Two short **200-user** diagnostic probes used ten fixture products, all text-search
+requests, one-second think time and a catalog text mutation every two seconds.
+Each phase launched requests for five seconds and waited for in-flight requests:
+
+| Query-cache phase | Requests / HTTP 200 | p95 | Maximum | Completed semantic searches |
+| --- | --- | --- | --- | --- |
+| Bypassed with distinct, semantically equivalent spacing | 313 / 313 | 7.163 s | 8.121 s | 297/313 = 94.89% |
+| Warm | 369 / 369 | 6.539 s | 7.336 s | 369/369 = 100% |
+
+These diagnostic probes preceded the final deadline/disconnect and metadata-race fixes;
+they establish a capacity failure, not a final-image capacity pass. Latency includes client/gateway queuing; HTTPX per-operation timeouts are not an
+end-to-end load deadline. Both phases **failed** the ≤1-second requirement; uncached
+semantic execution also fell below 95%. Successful lexical fallbacks do not qualify
+semantic capacity. This is a focused short probe, not sustained full-stack/endpoint-mix
+qualification. Resource caps, model, quality gates and provider selection were not
+automatically relaxed. Full production catalog/200-user qualification and real Product
+mutation end-to-end checks remain outstanding; deployment stays gated.
+
+The older evidence below concerns FR-SRCH-01–05 and is retained as historical context.
+
 Recorded 2026-10-02 on Windows 11 / Docker Desktop, branch
 `PBL6-21-ai-search-service`. Implemented FR-SRCH-01–05 only. These are local
 verification results; remote CI and PR review are separate acceptance checks.

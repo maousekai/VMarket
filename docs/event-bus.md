@@ -165,7 +165,7 @@ park phía outbox của Product Catalog (xem `§7`).
 | `CodCollected` | Delivery | Payment (PBL6-19) |
 | `ReviewCreated` | Review | Product (Notification chờ payload có `shopId`/`sellerId`) |
 | `ReturnRequested` / `ReturnResolved` | Order | Payment, Product, Notification |
-| `UserBehaviorTracked` | Gateway / Clients | Recommendation |
+| `UserBehaviorTracked` | Recommendation (view), Cart (add_to_cart), Order (purchase) | Recommendation |
 
 `ProductCreated` and `ProductUpdated` schema v4 carry integer `price`/`maxPrice` and
 variant prices in VND minor units, plus ISO `currency: "VND"` at product and variant
@@ -210,22 +210,20 @@ xử lý cả `reinstated=true`. `ShopSuspended` **không** thu hồi role — n
 không `ACTIVE`. Queue khai báo với `EVENTS_LISTEN=true`; test tắt consumer bằng
 `EVENTS_LISTEN=false`.
 
-### 5.2. `UserBehaviorTracked` (PBL6-24, consumer contract)
+### 5.2. `UserBehaviorTracked` (PBL6-24 consumer, PBL6-37 producers)
 
-Producer theo SRS vẫn là **Gateway / Clients**; Recommendation chỉ nhận sự kiện.
-PR-2 định nghĩa payload và triển khai consumer, không bổ sung producer hay public
-tracking endpoint. Các message trong integration test là fixture, không chứng minh
-đã có luồng tracking thực tế. Việc publish phải qua thành phần tin cậy có quyền
-truy cập broker; không cấp broker credentials cho browser.
+Recommendation nhận sự kiện; producer được bổ sung ở PBL6-37. Browser không bao giờ
+nói chuyện trực tiếp với broker: mọi sự kiện đều do một service tin cậy phát.
 
-Kiểm tra source ngày 2026-10-22: mới có tên event trong shared-events; chưa có
-publisher cho view/add_to_cart/purchase trong Gateway, frontend, Cart, Order hoặc
-Payment. Phạm vi PR-2 chỉ gồm consumer. Checklist producer và
-kiểm thử business HTTP → broker → history → recommendation nằm trong
-[README Recommendation](../services/recommendation-service/README.md#producer-verification-gaps-pr-35-follow-up).
-Order hiện tạo PENDING rồi xóa item đã checkout khỏi giỏ sau commit; đây chưa phải
-thời điểm mua thành công. Cần thống nhất nghiệp vụ purchase/COD/cancel/refund trước
-khi triển khai producer; không đổi owner Gateway/Clients trong SRS bằng suy đoán.
+| action | Producer | Thời điểm |
+|---|---|---|
+| `view` | Recommendation (`POST /api/ai/recommendations/events`, bắt buộc JWT) | Người dùng đã đăng nhập mở trang chi tiết sản phẩm; `userId` = `sub` của token |
+| `add_to_cart` | Cart (`BehaviorTracker`, best-effort, bất đồng bộ) | Sau khi thêm vào giỏ lưu thành công |
+| `purchase` | Order (outbox trong `OrderDeliveryBridge`) | Đơn chuyển sang `DELIVERED` (cả COD và trả trước); mỗi sản phẩm khác nhau trong đơn một sự kiện |
+
+Quy tắc nghiệp vụ purchase (chốt ở PBL6-37): đơn huỷ hoặc hoàn trước khi giao không
+bao giờ phát; trả hàng/hoàn tiền sau khi giao không thu hồi sự kiện. Recommendation vẫn
+bỏ qua `OrderPlaced`/`OrderStatusChanged`, không suy ra purchase từ chúng.
 
 ```json
 {

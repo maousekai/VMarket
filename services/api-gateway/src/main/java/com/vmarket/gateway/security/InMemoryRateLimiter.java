@@ -5,8 +5,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Bộ giới hạn tốc độ fixed-window theo khoá (thường là client IP), lưu trong bộ
- * nhớ của gateway instance. Đơn giản, không phụ thuộc hạ tầng ngoài — phù hợp
- * yêu cầu "rate limiting cơ bản" của PBL6-38.
+ * nhớ của gateway instance. Dùng khi {@code app.rate-limit.store=memory}, và là
+ * phương án dự phòng của {@link RedisRateLimiter} khi Redis không khả dụng.
  *
  * <p>Mỗi khoá giữ một "bucket" gồm {@code window} (định danh cửa sổ hiện tại) và
  * bộ đếm. Khi cửa sổ trôi sang mới thì reset đếm về 0. Thao tác trên một bucket
@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p><b>Dọn dẹp bộ nhớ (M-2):</b> Khi cửa sổ thời gian chuyển sang mới, các bucket
  * thuộc cửa sổ cũ được dọn dẹp (evict) để tránh rò rỉ bộ nhớ vô hạn theo thời gian.
  */
-public class InMemoryRateLimiter {
+public class InMemoryRateLimiter implements RateLimiter {
 
 	private static final class Bucket {
 		private long window;
@@ -47,6 +47,7 @@ public class InMemoryRateLimiter {
 	 *
 	 * @return {@code true} nếu còn hạn mức, {@code false} nếu vượt ngưỡng.
 	 */
+	@Override
 	public boolean tryAcquire(String key) {
 		long now = System.currentTimeMillis() / 1000;
 		long windowId = now / windowSeconds;

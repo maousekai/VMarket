@@ -16,6 +16,8 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/product-service/**"
+      # PBL6-28: anh san pham dung thu vien upload dung chung
+      - "services/shared-media/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
       - "services/pom.xml"
       - "services/mvnw"
@@ -26,6 +28,7 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/product-service/**"
+      - "services/shared-media/**"
       - "services/pom.xml"
       - "services/mvnw"
       - ".github/workflows/product-service.yml"

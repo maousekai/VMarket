@@ -44,30 +44,50 @@ public class ShopAccessService {
 
 	@Transactional
 	public void approve(String shopId, String sellerId, Instant sourceUpdatedAt, boolean reconciliation) {
-		applySnapshot(shopId, sellerId, true, sourceUpdatedAt, reconciliation);
+		approve(shopId, sellerId, null, sourceUpdatedAt, reconciliation);
+	}
+
+	@Transactional
+	public void approve(String shopId, String sellerId, String shopName, Instant sourceUpdatedAt,
+			boolean reconciliation) {
+		applySnapshot(shopId, sellerId, shopName, true, sourceUpdatedAt, reconciliation);
 	}
 
 	@Transactional
 	public void suspend(String shopId, Instant sourceUpdatedAt, boolean reconciliation) {
 		ShopCatalogAccess existing = shopRepository.findById(shopId).orElse(null);
 		String sellerId = existing == null ? null : existing.getSellerId();
-		applySnapshot(shopId, sellerId, false, sourceUpdatedAt, reconciliation);
+		applySnapshot(shopId, sellerId, null, false, sourceUpdatedAt, reconciliation);
 	}
 
 	@Transactional
 	public void reconcile(String shopId, String sellerId, boolean active, Instant sourceUpdatedAt) {
-		applySnapshot(shopId, sellerId, active, sourceUpdatedAt, true);
+		reconcile(shopId, sellerId, null, active, sourceUpdatedAt);
 	}
 
-	private void applySnapshot(String shopId, String sellerId, boolean active,
+	@Transactional
+	public void reconcile(String shopId, String sellerId, String shopName, boolean active,
+			Instant sourceUpdatedAt) {
+		applySnapshot(shopId, sellerId, shopName, active, sourceUpdatedAt, true);
+	}
+
+	private void applySnapshot(String shopId, String sellerId, String shopName, boolean active,
 			Instant sourceUpdatedAt, boolean reconciliation) {
 		// ponytail: one transaction keeps shop and products atomic; gate reads by shop access if large catalogs exceed Mongo's transaction limit.
 		Instant sourceTime = sourceUpdatedAt == null ? Instant.now() : sourceUpdatedAt;
 		ShopCatalogAccess current = shopRepository.findById(shopId).orElse(null);
-		if (current != null && current.getUpdatedAt() != null && sourceTime.isBefore(current.getUpdatedAt())) return;
+		if (current != null && current.getUpdatedAt() != null && sourceTime.isBefore(current.getUpdatedAt())) {
+			// Ảnh chụp cũ không đổi trạng thái, nhưng vẫn bổ sung tên shop nếu bản ghi chưa có.
+			if (shopName != null && !shopName.equals(current.getShopName())) {
+				current.setShopName(shopName);
+				shopRepository.save(current);
+			}
+			return;
+		}
 		String owner = sellerId == null && current != null ? current.getSellerId() : sellerId;
 		ShopCatalogAccess saved = new ShopCatalogAccess(shopId, owner, active, sourceTime,
 				reconciliation ? Instant.now() : current == null ? null : current.getReconciledAt());
+		saved.setShopName(shopName != null ? shopName : current == null ? null : current.getShopName());
 		shopRepository.save(saved);
 		projections.synchronizeShopProducts(shopId, active);
 	}

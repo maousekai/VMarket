@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { StarRow } from '../components/ReviewParts'
+import { formatRating } from '../utils/review'
+import useRemoteData from '../hooks/useRemoteData'
 import { getApiError } from '../services/api/apiClient'
 import { listProducts } from '../services/api/productApi'
+import { getShopRatingSummary } from '../services/api/reviewApi'
 import { getPublicShop } from '../services/api/shopApi'
 import { formatDate } from '../utils/formatDate'
 import { formatCurrency, imageUrlOrEmpty } from '../utils/shop'
@@ -89,6 +93,13 @@ function priceLabel(product) {
 
 export default function ShopPublicPage() {
   const { shopId } = useParams()
+  // Diem gian hang tinh tu cac danh gia dang hien (FR-SHOP-03 / FR-REV-02); loi thi bo qua.
+  const loadRating = useCallback(() => getShopRatingSummary(shopId), [shopId])
+  const rating = useRemoteData(loadRating, shopId)
+  const ratingCount = rating.status === 'ready' ? Number(rating.data?.count) || 0 : 0
+  const ratingLabel = ratingCount
+    ? `${formatRating(rating.data.average)} (${ratingCount} đánh giá)`
+    : 'Chưa có đánh giá'
   const activeShopRef = useRef(shopId)
   const [shopState, setShopState] = useState({ status: 'loading', shop: null, error: null })
   const [products, setProducts] = useState(initialProducts)
@@ -209,6 +220,12 @@ export default function ShopPublicPage() {
             <p>{shop.description || 'Gian hàng đang cập nhật giới thiệu.'}</p>
             <ul className="shop-hero__meta">
               <li>{shop.province}</li>
+              {rating.status === 'ready' && (
+                <li>
+                  {ratingCount > 0 && <StarRow value={rating.data.average} size={12} />}{' '}
+                  {ratingLabel}
+                </li>
+              )}
               {shop.approvedAt && <li>Hoạt động từ {formatDate(shop.approvedAt)}</li>}
               <li>{products.status === 'ready' ? `${products.total} sản phẩm` : '—'}</li>
             </ul>
@@ -252,7 +269,15 @@ export default function ShopPublicPage() {
                     <ProductImage product={product} />
                   </div>
                   <div className="shop-product-card__body">
-                    <h3>{product.name}</h3>
+                    <h3>
+                      {/* The link stretches over the whole card so the card is one click target. */}
+                      <Link
+                        className="shop-product-card__link"
+                        to={`/products/${encodeURIComponent(product.id)}`}
+                      >
+                        {product.name}
+                      </Link>
+                    </h3>
                     <strong>{priceLabel(product)}</strong>
                     <p>
                       {product.soldCount > 0 ? `Đã bán ${product.soldCount}` : 'Sản phẩm mới'}
@@ -300,6 +325,10 @@ export default function ShopPublicPage() {
                   <dd>{formatDate(shop.approvedAt)}</dd>
                 </div>
               )}
+              <div>
+                <dt>Đánh giá</dt>
+                <dd>{rating.status === 'ready' ? ratingLabel : '—'}</dd>
+              </div>
               <div>
                 <dt>Đang bán</dt>
                 <dd>{products.status === 'ready' ? `${products.total} sản phẩm` : '—'}</dd>

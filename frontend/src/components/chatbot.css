@@ -1,0 +1,297 @@
+/* Chatbot widget (PBL6-31, Figma UC-09) */
+.chat-launcher {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--gradient-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgb(4 66 127 / 30%);
+  cursor: pointer;
+}
+.chat-launcher:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.chat-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, calc(100vw - 32px));
+  height: min(600px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 16px 48px rgb(17 24 39 / 20%);
+}
+.chat-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--gradient-primary);
+  color: #fff;
+}
+.chat-panel__head strong {
+  display: block;
+  font-size: 16px;
+}
+.chat-panel__head small {
+  opacity: 0.85;
+  font-size: 12px;
+}
+.chat-panel__tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-panel__head .chat-text-button {
+  color: #fff;
+}
+.chat-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 15%);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--color-background);
+}
+.chat-message {
+  display: grid;
+  gap: 6px;
+  max-width: 85%;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.chat-message p {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.chat-message--assistant {
+  align-self: flex-start;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.chat-message--user {
+  align-self: flex-end;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
+.chat-typing {
+  color: var(--color-subtle);
+  font-style: italic;
+}
+.chat-muted {
+  color: var(--color-subtle);
+  font-size: 13px;
+}
+.chat-suggestions {
+  display: grid;
+  gap: 6px;
+}
+.chat-suggestions button {
+  justify-self: start;
+  padding: 6px 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-sources {
+  padding-top: 6px;
+  border-top: 1px dashed var(--color-border);
+  font-size: 12px;
+}
+.chat-sources strong {
+  color: var(--color-subtle);
+}
+.chat-sources ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+.chat-link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.chat-ticket {
+  color: #047857;
+  font-size: 13px;
+  font-weight: 600;
+}
+.chat-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+}
+.chat-error p {
+  margin: 0;
+}
+
+.chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+}
+.chat-form textarea {
+  flex: 1;
+  min-height: 42px;
+  max-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 14px;
+  resize: none;
+}
+.chat-primary {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--gradient-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.chat-panel__foot {
+  display: flex;
+  justify-content: center;
+  padding: 0 12px 10px;
+}
+.chat-text-button {
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-text-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-history {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 14px;
+}
+.chat-history__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-history__list,
+.chat-history__tickets {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-history__list button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-history__list small,
+.chat-history__tickets small {
+  color: var(--color-subtle);
+  font-size: 12px;
+}
+.chat-history__tickets li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+.chat-history__tickets p {
+  margin: 0;
+}
+
+/* Modal cua trang (vd viet danh gia) nam trong stacking context cua layout: an tro ly de khong de len. */
+body:has(.modal-backdrop) .chat-launcher,
+body:has(.modal-backdrop) .chat-panel {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .chat-launcher {
+    right: 16px;
+    bottom: 16px;
+  }
+  .chat-panel {
+    right: 16px;
+    bottom: 16px;
+    height: calc(100vh - 32px);
+  }
+}

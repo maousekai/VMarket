@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -154,16 +155,117 @@ class CartControllerTest {
 		verify(cartService).getCart("user-1");
 	}
 
-	/** Đường service-to-service: khoá nội bộ đúng + {@code X-User-Id} → dùng được. */
+	/**
+	 * PBL6-50: route công khai bỏ qua khoá nội bộ — kể cả khoá ĐÚNG kèm
+	 * {@code X-User-Id} cũng 401, để khoá bị lộ không mạo danh được người dùng.
+	 */
 	@Test
-	void khoaNoiBoDung_choPhepDocGioCuaUserId() throws Exception {
+	void routeCongKhai_khoaNoiBoDung_vanTra401() throws Exception {
+		// Route ngoài ba route chuyển tiếp (thêm / sửa / validate) không bao giờ nhận khoá.
+		mockMvc.perform(post("/api/cart/items")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"productId\":\"p1\",\"quantity\":1}")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+		mockMvc.perform(post("/api/cart/validate")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/cart/items/p1")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+
+		verifyNoInteractions(cartService, checkoutService);
+	}
+
+	/**
+	 * Chuyển tiếp PBL6-50: order-service bản cũ gọi {@code /api/cart} kèm khoá vẫn chạy,
+	 * để deploy/rollback cart và order lệch nhau không làm hỏng đặt hàng.
+	 */
+	@Test
+	void routeChuyenTiep_orderServiceBanCu_vanDocVaXoaGioDuoc() throws Exception {
 		when(cartService.getCart("user-1")).thenReturn(sampleCart());
+		when(cartService.removeItem("user-1", "p1", "v1")).thenReturn(sampleCart());
 
 		mockMvc.perform(get("/api/cart")
 						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
 						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("user-1"));
+		mockMvc.perform(delete("/api/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+		mockMvc.perform(delete("/api/cart/items/p1").param("variantId", "v1")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+
+		verify(cartService).clearCart("user-1");
+		verify(cartService).removeItem("user-1", "p1", "v1");
+	}
+
+	@Test
+	void routeChuyenTiep_saiKhoa_tra401() throws Exception {
+		mockMvc.perform(get("/api/cart")
+						.header(InternalApiProperties.HEADER, "wrong-key-wrong-key-wrong-key-wrong-key")
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+		verifyNoInteractions(cartService);
+	}
+
+	/** Đường service-to-service: {@code /internal/cart} + khoá nội bộ đúng + {@code X-User-Id}. */
+	@Test
+	void routeNoiBo_khoaNoiBoDung_choPhepDocGioCuaUserId() throws Exception {
+		when(cartService.getCart("user-1")).thenReturn(sampleCart());
+
+		mockMvc.perform(get("/internal/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.userId").value("user-1"));
+	}
+
+	@Test
+	void routeNoiBo_xoaGioVaXoaItem() throws Exception {
+		when(cartService.removeItem("user-1", "p1", "v1")).thenReturn(sampleCart());
+
+		mockMvc.perform(delete("/internal/cart")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+		mockMvc.perform(delete("/internal/cart/items/p1").param("variantId", "v1")
+						.header(InternalApiProperties.HEADER, internalApiProperties.getApiKey())
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isOk());
+
+		verify(cartService).clearCart("user-1");
+		verify(cartService).removeItem("user-1", "p1", "v1");
+	}
+
+	@Test
+	void routeNoiBo_saiKhoaHoacThieuKhoa_tra401() throws Exception {
+		mockMvc.perform(get("/internal/cart").header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/internal/cart")
+						.header(InternalApiProperties.HEADER, "khong-phai-khoa-that")
+						.header(InternalApiProperties.USER_ID_HEADER, "user-1"))
+				.andExpect(status().isUnauthorized());
+
+		verifyNoInteractions(cartService);
+	}
+
+	/** Access token của người dùng không gọi được route nội bộ. */
+	@Test
+	void routeNoiBo_tokenNguoiDung_tra403() throws Exception {
+		mockMvc.perform(get("/internal/cart").header(HttpHeaders.AUTHORIZATION, tokenFor("user-1")))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+
+		verifyNoInteractions(cartService);
 	}
 
 	// ------------------------------------------------------------ mapping & lỗi
@@ -206,6 +308,22 @@ class CartControllerTest {
 								"""))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.totalAmount").value(200000));
+	}
+
+	/** PBL6-48: client cũ còn gửi unitPrice (kể cả 0) → request vẫn hợp lệ, giá bị bỏ qua. */
+	@Test
+	void themItem_giaDoClientGui_biBoQua() throws Exception {
+		when(cartService.addItem(eq("user-1"), any())).thenReturn(sampleCart());
+
+		mockMvc.perform(post("/api/cart/items")
+						.header(HttpHeaders.AUTHORIZATION, tokenFor("user-1"))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"productId":"p1","shopId":"shop-1","quantity":2,"unitPrice":0}
+								"""))
+				.andExpect(status().isCreated());
+
+		verify(cartService).addItem("user-1", new com.vmarket.cart.dto.AddCartItemRequest("p1", null, "shop-1", 2));
 	}
 
 	@Test

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { validateShop } from '../auth/validation'
+import { validateBankAccount, validateShop } from '../auth/validation'
 import AccountField from './AccountField'
+import BankSelect from './BankSelect'
 import ImageUploadField from './ImageUploadField'
 import { DA_NANG_PROVINCE, DA_NANG_WARD_GROUPS } from '../data/daNangAddress'
 import { getApiError } from '../services/api/apiClient'
@@ -24,6 +25,8 @@ const emptyValues = {
   province: DA_NANG_PROVINCE,
   ward: '',
   streetAddress: '',
+  bankCode: '',
+  bankAccountNumber: '',
 }
 
 const shopValuesFrom = (shop) => ({
@@ -37,6 +40,8 @@ const shopValuesFrom = (shop) => ({
   province: shop?.province || DA_NANG_PROVINCE,
   ward: shop?.ward || '',
   streetAddress: shop?.streetAddress || '',
+  bankCode: shop?.bankCode || '',
+  bankAccountNumber: shop?.bankAccountNumber || '',
 })
 
 // PUT /api/shops/me replaces the whole profile. District is deliberately sent as null:
@@ -58,6 +63,8 @@ function shopRequestBody(values) {
   }
 }
 
+const BANK_HINT = 'Tài khoản nhận tiền bán hàng. Bạn có thể đổi sau ở mục Thông tin thanh toán.'
+
 export default function ShopForm({
   initial,
   onSubmit,
@@ -66,6 +73,7 @@ export default function ShopForm({
   disabled = false,
   actions,
   notice,
+  withBank = false,
 }) {
   const [values, setValues] = useState(() => (initial ? shopValuesFrom(initial) : emptyValues))
   const [fieldErrors, setFieldErrors] = useState({})
@@ -135,7 +143,7 @@ export default function ShopForm({
   async function handleSubmit(event) {
     event.preventDefault()
     if (saving || disabled) return
-    const errors = validateShop(values)
+    const errors = { ...validateShop(values), ...(withBank ? validateBankAccount(values) : {}) }
     setFieldErrors(errors)
     setError('')
     if (Object.keys(errors).length) {
@@ -149,6 +157,10 @@ export default function ShopForm({
       // Files are uploaded only now, when the user has committed to saving. If a
       // later upload or the save itself fails, remove whatever already landed.
       const body = shopRequestBody(values)
+      if (withBank) {
+        body.bankCode = values.bankCode.trim()
+        body.bankAccountNumber = values.bankAccountNumber.trim()
+      }
       if (logoFile) {
         setUploadStage('uploading')
         const result = await uploadMyShopLogo(logoFile)
@@ -337,6 +349,32 @@ export default function ShopForm({
           {...field('streetAddress')}
         />
       </section>
+
+      {withBank && (
+        <section className="shop-form__section" aria-labelledby="shop-bank-heading">
+          <div>
+            <h2 id="shop-bank-heading">Thông tin thanh toán</h2>
+            <p>{BANK_HINT}</p>
+          </div>
+          <div className="shop-form__row">
+            <BankSelect
+              required
+              value={values.bankCode}
+              disabled={disabled || saving}
+              error={fieldErrors.bankCode}
+              onChange={(code) => onImageChange('bankCode', code)}
+            />
+            <AccountField
+              label="Số tài khoản"
+              required
+              inputMode="numeric"
+              maxLength={19}
+              placeholder="Ví dụ: 0123456789"
+              {...field('bankAccountNumber')}
+            />
+          </div>
+        </section>
+      )}
 
       {!disabled && (
         <div className="account-actions">

@@ -64,7 +64,7 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
       CART_SERVICE_URL: http://cart-service:8085
       USER_SERVICE_URL: http://user-service:8082
-      # No PayOS switch exists in order-service: the test scripts only ever send COD.
+      # No VNPay switch exists in order-service: the test scripts only ever send COD.
     depends_on:
       postgres: { condition: service_healthy }
       cart-service: { condition: service_started }

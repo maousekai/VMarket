@@ -47,4 +47,22 @@ class ProductCatalogQueryTest {
 		org.mockito.Mockito.verify(mongoTemplate).count(countQuery.capture(), eq(Product.class));
 		assertThat(countQuery.getValue().getQueryObject().getBoolean("categoryVisible")).isTrue();
 	}
+
+	@Test
+	void keywordAlsoMatchesProductsOfShopsWithThatName() {
+		com.vmarket.product.model.ShopCatalogAccess shop = new com.vmarket.product.model.ShopCatalogAccess(
+				"shop-van-a", "seller-1", true, java.time.Instant.now());
+		shop.setShopName("Shop giày Văn A");
+		when(mongoTemplate.find(any(Query.class), eq(com.vmarket.product.model.ShopCatalogAccess.class)))
+				.thenReturn(List.of(shop));
+		when(mongoTemplate.count(any(Query.class), eq(Product.class))).thenReturn(0L);
+		when(mongoTemplate.find(any(Query.class), eq(Product.class))).thenReturn(List.of());
+
+		new ProductCatalogQuery(mongoTemplate).search("Văn A", null, null, null, null, null, "NEWEST", 0, 20);
+
+		ArgumentCaptor<Query> countQuery = ArgumentCaptor.forClass(Query.class);
+		org.mockito.Mockito.verify(mongoTemplate).count(countQuery.capture(), eq(Product.class));
+		Object anyOf = countQuery.getValue().getQueryObject().get("$or");
+		org.assertj.core.api.Assertions.assertThat(anyOf).asString().contains("name").contains("shop-van-a");
+	}
 }

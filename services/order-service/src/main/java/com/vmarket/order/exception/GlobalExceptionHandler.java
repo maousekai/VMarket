@@ -11,6 +11,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.vmarket.order.dto.ErrorResponse;
@@ -57,6 +59,20 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ErrorResponse> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
 		return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
 				.body(ErrorResponse.of("METHOD_NOT_ALLOWED", "Phương thức HTTP không được hỗ trợ cho địa chỉ này"));
+	}
+
+	/** Upload ảnh minh chứng thiếu part {@code file}. */
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	public ResponseEntity<ErrorResponse> handleMissingPart(MissingServletRequestPartException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("MEDIA_FILE_REQUIRED", "Vui lòng chọn file ảnh"));
+	}
+
+	/** File vượt giới hạn multipart của service (6 MB). */
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex) {
+		return ResponseEntity.badRequest()
+				.body(ErrorResponse.of("MEDIA_FILE_TOO_LARGE", "File ảnh vượt quá dung lượng cho phép"));
 	}
 
 	/** Path không tồn tại — chỉ xảy ra với request đã qua được security. */

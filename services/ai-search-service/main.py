@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import tempfile
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,21 +16,26 @@ from diagnostics import log_failure
 from images import ImageEncoder
 from llm import Expander
 from schemas import MAX_BODY, MAX_FILE, SearchError, error_response, image_too_large, parse_query
-from search import SearchStore, image_threshold
+from search import SearchStore, image_threshold, text_threshold
+from semantic import TextEmbeddings
 from settings import ROOT, Settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("elastic_transport.transport").setLevel(logging.WARNING)
 logging.getLogger("pika").setLevel(logging.WARNING)
+HEALTH_CACHE_SECONDS = 5
 
 
-def create_app(settings=None, store=None, encoder=None, expander=None, run_workers=True):
+def create_app(settings=None, store=None, encoder=None, expander=None, run_workers=True, text_embeddings=None):
     settings = settings or Settings.load()
     store = store or SearchStore(settings)
     encoder = encoder or ImageEncoder(settings)
     expander = expander or Expander(settings)
+    text_embeddings = text_embeddings or TextEmbeddings(settings)
     workers = Workers(store, encoder) if run_workers else None
+    if workers:
+        workers.text_embeddings = text_embeddings
 
     @asynccontextmanager
     async def lifespan(app):
@@ -47,10 +53,12 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
         if workers:
             await asyncio.to_thread(workers.close)
         await expander.client.aclose()
+        await text_embeddings.close()
         store.client.close()
 
     app = FastAPI(title="VMarket AI Search", version="1.0.0", lifespan=lifespan)
     app.state.store, app.state.encoder, app.state.expander = store, encoder, expander
+    app.state.text_embeddings = text_embeddings
     app.state.image_busy = False
     app.add_middleware(CORSMiddleware, allow_origins=[s.strip() for s in settings.cors.split(",") if s.strip()],
                        allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
@@ -68,11 +76,39 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
             log_failure("search_dependency_failed", error)
             raise SearchError(503, "SEARCH_UNAVAILABLE", "Search dependency unavailable") from None
 
+    async def within(awaitable, seconds, fallback):
+        # Each enrichment has its own deadline: a slow LLM must not discard a finished embedding.
+        try:
+            async with asyncio.timeout(seconds):
+                return await awaitable
+        except TimeoutError:
+            return fallback
+
+    async def embed_if_usable(keyword):
+        # Only pay for CPU inference when the index can actually use the vector.
+        if not settings.text_configured:
+            return None
+        try:
+            _, meta = await asyncio.to_thread(store.cached_meta)
+        except Exception:
+            return None  # store.keyword reports the real dependency failure.
+        if text_threshold(meta, text_embeddings.fingerprint) is None:
+            return None
+        return await text_embeddings.query(keyword)
+
     @app.get(SEARCH_PATH)
     async def keyword_search(request: Request):
         params = parse_query(request.query_params, "keyword")
-        terms = await expander.expand_query(params["keyword"])
-        return await dependency_call(store.keyword, params, terms)
+        keyword = params['keyword']
+        terms, vector = await asyncio.gather(within(expander.expand_query(keyword), settings.llm_timeout_ms / 1000, []),
+                                             within(embed_if_usable(keyword), settings.text_query_ms / 1000, None))
+        try:
+            async with asyncio.timeout(settings.dependency_timeout):
+                if vector is None:
+                    return await dependency_call(store.keyword, params, terms)
+                return await dependency_call(store.keyword, params, terms, vector, text_embeddings.fingerprint)
+        except TimeoutError:
+            raise SearchError(503, 'SEARCH_UNAVAILABLE', 'Search deadline exceeded') from None
 
     @app.get(SUGGESTIONS_PATH)
     async def suggestions(request: Request):
@@ -111,18 +147,33 @@ def create_app(settings=None, store=None, encoder=None, expander=None, run_worke
             else:
                 release(native)
 
+    health_cache = {}
+
     @app.get(HEALTH_PATH)
     async def health():
+        # Public endpoint: probe ES/encoder at most once per HEALTH_CACHE_SECONDS whatever the request rate.
+        cached = health_cache.get('value')
+        if cached and time.monotonic() - cached[0] < HEALTH_CACHE_SECONDS:
+            return cached[1]
+        value = await check_health()
+        health_cache['value'] = (time.monotonic(), value)
+        return value
+
+    async def check_health():
         text = image = "unavailable"
+        semantic = 'unavailable'
         try:
             _, meta = await asyncio.to_thread(store.meta)
             text = "ready"
+            if text_threshold(meta, text_embeddings.fingerprint) is not None and settings.text_configured:
+                if await text_embeddings.probe():
+                    semantic = 'ready' if not workers or workers.text_lag_ms == 0 else 'degraded'
             if encoder.ready:
                 image_threshold(meta, encoder.fingerprint)
                 image = "ready"
         except Exception as error:
             log_failure("search_health_degraded", error)
-        return {"status": "UP", "text": text, "image": image,
+        return {"status": "UP", "text": text, "image": image, 'semantic': semantic,
                 "synchronization": "ready" if workers and workers.synchronization_ready else "degraded",
                 "llm": "configured" if settings.llm_configured else "degraded"}
 

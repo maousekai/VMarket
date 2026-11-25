@@ -124,6 +124,12 @@
 			<version>${project.version}</version>
 		</dependency>
 		<dependency>
+			<!-- Ảnh đánh giá lưu trên MinIO (reviews/{buyerId}/...), dùng chung xử lý ảnh với các service khác. -->
+			<groupId>com.vmarket</groupId>
+			<artifactId>shared-media</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security-test</artifactId>
 			<scope>test</scope>

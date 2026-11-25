@@ -60,10 +60,10 @@ public class OrderCreator {
         order.setUserId(userId);
         order.setPaymentMethod(request.paymentMethod() == null ? "COD" : request.paymentMethod());
         order.setStatus(
-                "PAYOS".equals(order.getPaymentMethod())
+                "VNPAY".equals(order.getPaymentMethod())
                         ? OrderStatus.WAITING_PAYMENT
                         : OrderStatus.PENDING);
-        if ("PAYOS".equals(order.getPaymentMethod())) {
+        if ("VNPAY".equals(order.getPaymentMethod())) {
             order.setPaymentExpiresAt(clock.instant().plus(paymentTiming.getTtl()));
         }
         order.setRecipientName(address.recipientName());

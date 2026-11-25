@@ -39,4 +39,14 @@ public class InternalApiProperties {
 	@NotBlank
 	@Size(min = 32, message = "INTERNAL_API_KEY phải >= 32 ký tự")
 	private String apiKey;
+
+	/**
+	 * CHUYỂN TIẾP (PBL6-50, một bản phát hành): vẫn nhận khoá nội bộ trên đúng ba route
+	 * order-service bản cũ gọi ({@code GET /api/cart}, {@code DELETE /api/cart},
+	 * {@code DELETE /api/cart/items/{productId}}), để deploy/rollback cart và order lệch
+	 * nhau không làm hỏng đặt hàng. Gateway đã bỏ khoá do client gửi, nên route công
+	 * khai không dùng được khoá từ bên ngoài. Tắt ({@code CART_LEGACY_INTERNAL_PATHS_ENABLED=false})
+	 * khi mọi order-service đã gọi {@code /internal/cart}; bản sau gỡ hẳn.
+	 */
+	private boolean legacyCartPathsEnabled = true;
 }

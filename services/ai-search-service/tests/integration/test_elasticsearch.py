@@ -2,6 +2,7 @@
 import time
 import unittest
 import uuid
+import os
 from types import SimpleNamespace
 from unittest.mock import patch
 from dataclasses import replace
@@ -27,7 +28,7 @@ class ElasticsearchChecks(unittest.TestCase):
     def setUpClass(cls):
         cls.name = "vmarket-products-v1-test-" + uuid.uuid4().hex
         cls.alias = "search-test-" + uuid.uuid4().hex
-        cls.settings = replace(Settings(), alias=cls.alias)
+        cls.settings = replace(Settings(), alias=cls.alias, es_url=os.getenv('ELASTICSEARCH_URL', Settings().es_url), text_enabled=False)
         cls.client = Elasticsearch(cls.settings.es_url, request_timeout=5, max_retries=0)
         cls.client.info()  # Missing infrastructure is a failed integration run, never a silent pass.
         cls.client.indices.create(index=cls.name, body=index_definition("test-fp"))

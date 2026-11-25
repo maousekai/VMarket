@@ -1,8 +1,8 @@
 # ============================================================
 # VMarket - Docker Compose (HA TANG CHUNG + API GATEWAY + FRONTEND)
 # ============================================================
-# - Ha tang: PostgreSQL, MongoDB, Redis, RabbitMQ (+ Elasticsearch
-#   profile "search").
+# - Ha tang: PostgreSQL, MongoDB, Redis, RabbitMQ, Elasticsearch.
+# - AI Search (8100) va text encoder noi bo chay trong cung Compose.
 # - 2 lop "mat" de FE ket noi duoc BE ngay khi `docker compose up -d`:
 #     + api-gateway (localhost:8080): browser goi vao day. Gateway trong
 #       container tro cac URL service den host.docker.internal (cac
@@ -29,8 +29,8 @@
 #
 # TỐI ƯU TÀI NGUYÊN:
 # - Ha tang nhe mac dinh ~1.75GB RAM (da gom MinIO cho anh dai dien / gian hang).
-#   Elasticsearch nang (~1GB) dat profile "search" - chi bat khi lam AI Search:
-#     docker compose --profile search up -d
+#   Chi bat cac service can dung, vi du Search va cac phu thuoc:
+#     docker compose up -d ai-search-service api-gateway
 # - Logging tap trung + monitoring (Loki, Promtail, Prometheus, Grafana ~0.9GB)
 #   dat profile "monitoring" (PBL6-40) - bat khi can xem log/dashboard:
 #     docker compose --profile monitoring up -d
@@ -98,9 +98,21 @@ x-service-urls: &service-urls
   DELIVERY_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8088
   REVIEW_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8089
   NOTIFICATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8090
-  AI_SEARCH_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8100
   RECOMMENDATION_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8101
   CHATBOT_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8102
+
+# Mot image cho ca recommendation-service va recommendation-init (build mot lan).
+x-recommendation-image: &recommendation-image
+  image: ${COMPOSE_PROJECT_NAME:-vmarket}-recommendation-service
+  build:
+    context: .
+    dockerfile: services/recommendation-service/Dockerfile
+
+x-search-image: &search-image
+  image: ${COMPOSE_PROJECT_NAME:-vmarket}-ai-search-service
+  build:
+    context: .
+    dockerfile: services/ai-search-service/Dockerfile
 
 services:
   # PostgreSQL - CSDL quan he cho: auth, user, shop, order, payment, delivery, review
@@ -204,16 +216,21 @@ services:
       timeout: 10s
       retries: 10
 
-  # Elasticsearch - CHI cho AI Search (nang ~1GB). Bat khi can:
-  #   docker compose --profile search up -d
+  # AI Search stack (Elasticsearch + ai-search-*, ~1.5GB; +1GB khi bat text) chi chay voi profile "search":
+  #   docker compose --profile search up -d ai-search-service api-gateway
+  # Tim kiem tu khoa khong can model. Image search can `manage.py weights` + reindex co
+  # calibration; text (ai-search-text, +1GB) la opt-in, xem README cua service.
   elasticsearch:
+    profiles: ["search"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
     container_name: VMarket-elasticsearch
-    profiles: ["search"]
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      node.processors: "1"
+      xpack.ml.enabled: "false"
+      ingest.geoip.downloader.enabled: "false"
+      ES_JAVA_OPTS: "-Xms384m -Xmx384m"
     ports:
       - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
     volumes:
@@ -221,15 +238,132 @@ services:
     networks:
       - vmarket-network
     mem_limit: 1g
+    memswap_limit: 1g
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS --max-time 5 http://localhost:9200/_cluster/health >/dev/null || exit 1"]
       interval: 20s
       timeout: 10s
       retries: 12
 
+  ai-search-service:
+    <<: *search-image
+    profiles: ["search"]
+    container_name: VMarket-ai-search-service
+    networks: [vmarket-network]
+    mem_limit: 512m
+    memswap_limit: 512m
+    read_only: true
+    tmpfs:
+      - /app/tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./services/ai-search-service/models:/app/models:ro
+    env_file:
+      - path: ./services/ai-search-service/.env
+        required: false
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      EMBEDDING_WEIGHTS_PATH: /app/models/mobilenet_v3_small.pth
+      TEXT_EMBEDDING_URL: ${TEXT_EMBEDDING_URL:-http://ai-search-text:8103/v1}
+      TEXT_EMBEDDING_PROVIDER: ${TEXT_EMBEDDING_PROVIDER:-native}
+    ports: ['127.0.0.1:${AI_SEARCH_SERVICE_PORT:-8100}:8100']
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      ai-search-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8100/api/ai/search/health', timeout=4)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # One-shot safe catch-up from Product's authenticated snapshots; never invents calibration.
+  ai-search-init:
+    <<: *search-image
+    profiles: ["search"]
+    container_name: VMarket-ai-search-init
+    networks: [vmarket-network]
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /app/tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./services/ai-search-service/models:/app/models:ro
+    env_file:
+      - path: ./services/ai-search-service/.env
+        required: false
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      EMBEDDING_WEIGHTS_PATH: /app/models/mobilenet_v3_small.pth
+      TEXT_EMBEDDING_PROVIDER: ${TEXT_EMBEDDING_PROVIDER:-native}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    command: ['python', 'manage.py', 'sync-catalog']
+
+  # Private FR-SRCH-06 component of AI Search; same image, no published port.
+  # Opt-in with TEXT_EMBEDDING_ENABLED=true: start it explicitly (`up -d ai-search-text`).
+  ai-search-text:
+    <<: *search-image
+    profiles: ["search"]
+    container_name: VMarket-ai-search-text
+    networks: [vmarket-network]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    read_only: true
+    tmpfs:
+      - /app/tmp:rw,noexec,nosuid,size=16m,uid=10001,gid=10001
+    volumes:
+      - ./services/ai-search-service/models:/app/models:ro
+    env_file:
+      - path: ./services/ai-search-service/.env
+        required: false
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      TEXT_EMBEDDING_PROVIDER: native
+      TEXT_EMBEDDING_PATH: /app/models/multilingual-e5-small
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    command: ['uvicorn', '--factory', 'text_encoder:create_encoder_app', '--host', '0.0.0.0', '--port', '8103', '--workers', '1', '--no-access-log']
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import os, urllib.request; r=urllib.request.Request('http://localhost:8103/internal/health', headers={'X-Internal-Api-Key':os.environ['INTERNAL_API_KEY']}); urllib.request.urlopen(r, timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # MinIO-compatible media storage (avatar, logo, cover, product images).
   # Chay MAC DINH cung ha tang: user-service / shop-service can no de upload anh.
-  # Khong bat buoc voi AI Search (Elasticsearch van nam trong profile "search").
+  # AI Search uses a separate read-only credential from its private service .env.
   minio:
     # Maintained MinIO fork; original 2025 community image failed the security scan.
     image: ${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac}
@@ -426,7 +560,7 @@ services:
       start_period: 40s
 
   # Order Service (PBL6-27) - don hang, van chuyen, thong ke gian hang.
-  # Phat/nghe event qua RabbitMQ; goi cart-service (chua container hoa) qua may host.
+  # Phat/nghe event qua RabbitMQ; doc/xoa gio qua cart-service trong network.
   order-service:
     build:
       context: .
@@ -445,13 +579,26 @@ services:
       # cung dung khoa nay de tin header X-User-Id khi order-service doc/xoa gio.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       USER_SERVICE_URL: http://user-service:8082
-      CART_SERVICE_URL: http://${BACKEND_SERVICES_HOST:-host.docker.internal}:8085
+      CART_SERVICE_URL: http://cart-service:8085
+      # MinIO - anh minh chung tra hang (PBL6-30). Cung bo bien voi user/shop-service.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      # Lay shopId cua seller (GET /api/shops/me) cho API /api/orders/seller/**.
+      SHOP_SERVICE_URL: http://shop-service:8083
+      # Dinh gia lai tung dong hang luc dat (PBL6-48), khong tin gia trong gio.
+      PRODUCT_SERVICE_URL: http://product-service:8084
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${ORDER_SERVICE_PORT:-8086}:8086"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      minio:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       rabbitmq:
@@ -481,10 +628,19 @@ services:
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       # order-service / shop-service goi /internal/** bang cung khoa nay.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # MinIO - upload anh san pham (PBL6-28). Cung bo bien voi user/shop-service.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     ports:
       # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
       - "${PRODUCT_SERVICE_PORT:-8084}:8084"
     depends_on:
+      minio:
+        condition: service_healthy
       mongo:
         condition: service_healthy
       rabbitmq:
@@ -493,6 +649,194 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8084/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Cart Service (PBL6-16) - gio hang Redis, kiem tra gia/ton kho truoc thanh toan.
+  # order-service doc/xoa gio bang INTERNAL_API_KEY + X-User-Id (cung khoa voi order).
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    container_name: VMarket-cart-service
+    networks:
+      - vmarket-network
+    mem_limit: 384m
+    environment:
+      <<: *common-environment
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      # PHAI TRUNG AUTH_JWT_SECRET cua auth-service de verify access token.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # Kiem tra gia/ton kho hien tai khi buyer bam thanh toan (FR-CART-03).
+      PRODUCT_SERVICE_URL: http://product-service:8084
+    ports:
+      # Publish de goi truc tiep tu may host khi debug (khong bat buoc)
+      - "${CART_SERVICE_PORT:-8085}:8085"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8085/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Payment Service (PBL6-19) - COD va VNPay. VNPay TAT mac dinh (VNPAY_ENABLED=false):
+  # COD van chay day du; muon thu thanh toan online thi dien VNPAY_* trong .env.
+  payment-service:
+    build:
+      context: .
+      dockerfile: services/payment-service/Dockerfile
+    container_name: VMarket-payment-service
+    networks:
+      - vmarket-network
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_payment
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      ORDER_SERVICE_URL: http://order-service:8086
+      VNPAY_ENABLED: ${VNPAY_ENABLED:-false}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:-}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:-}
+      VNPAY_PAY_URL: ${VNPAY_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-http://localhost:5173/payment/vnpay-return}
+    ports:
+      - "${PAYMENT_SERVICE_PORT:-8087}:8087"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8087/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Delivery Service (PBL6-20) - seller ban giao, admin phan cong shipper, cap nhat
+  # trang thai giao -> order-service nghe DeliveryStatusChanged qua RabbitMQ.
+  delivery-service:
+    build:
+      context: .
+      dockerfile: services/delivery-service/Dockerfile
+    container_name: VMarket-delivery-service
+    networks:
+      - vmarket-network
+    mem_limit: 512m
+    # Redis listener (tracking realtime) lam app dung han neu luc khoi dong chua
+    # resolve duoc host redis (gap khi ca stack len cung luc) -> tu khoi dong lai.
+    restart: on-failure:5
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_delivery
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      ORDER_SERVICE_URL: http://order-service:8086
+      SHOP_SERVICE_URL: http://shop-service:8083
+      # Browser mo WebSocket qua gateway (cung origin voi API).
+      DELIVERY_WS_URL: ${DELIVERY_WS_URL:-ws://localhost:8080/api/delivery/ws}
+    ports:
+      - "${DELIVERY_SERVICE_PORT:-8088}:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8088/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Notification Service (PBL6-23) - thong bao in-app (chuong o header), email giao dich
+  # (provider=log mac dinh), push FCM (log mac dinh). Nghe su kien don / thanh toan / giao hang.
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    container_name: VMarket-notification-service
+    networks:
+      - vmarket-network
+    mem_limit: 384m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_notification
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      ORDER_SERVICE_URL: http://order-service:8086
+      AUTH_SERVICE_URL: http://auth-service:8081
+      SHOP_SERVICE_URL: http://shop-service:8083
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-8090}:8090"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8090/actuator/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # Review Service (PBL6-22/PBL6-35) - danh gia san pham, diem tong hop, phan hoi
+  # seller, kiem duyet. Postgres vmarket_review (Flyway) + RabbitMQ (ReviewCreated).
+  review-service:
+    build:
+      context: .
+      dockerfile: services/review-service/Dockerfile
+    container_name: VMarket-review-service
+    networks:
+      - vmarket-network
+    # Cung muc voi order/shop/user (Spring Boot + JPA + MinIO): 384m chi con ~70MB ngoai heap 75%.
+    mem_limit: 512m
+    environment:
+      <<: *common-environment
+      DB_NAME: vmarket_review
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # Kiem tra don (GET /api/orders/{id}) va gian hang cua seller bang token nguoi goi.
+      ORDER_SERVICE_URL: http://order-service:8086
+      SHOP_SERVICE_URL: http://shop-service:8083
+      # Khoa /internal/** cua order-service: doi chieu don da tra hang ghi theo kieu cu.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # MinIO - anh danh gia (reviews/{ngau nhien}/...). URL anh chi duoc tro toi
+      # REVIEW_IMAGE_ORIGINS; khong khai thi lay dung MINIO_PUBLIC_ORIGIN de anh vua tai luon hop le.
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ORIGIN: ${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vmarket-media}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      REVIEW_IMAGE_ORIGINS: ${REVIEW_IMAGE_ORIGINS:-${MINIO_PUBLIC_ORIGIN:-http://localhost:9000}}
+    ports:
+      - "${REVIEW_SERVICE_PORT:-8089}:8089"
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- -T 3 http://localhost:8089/actuator/health >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -540,6 +884,84 @@ services:
       retries: 10
       start_period: 10s
 
+  # Recommendation Service (PBL6-24/PBL6-37) - FastAPI + PostgreSQL + Redis, nghe
+  # su kien san pham / hanh vi tren RabbitMQ. Khoi dong 3 buoc:
+  #   recommendation-migrate (Flyway, mot lan) -> recommendation-service
+  #   recommendation-init (nap catalog tu Product, mot lan; chay lai an toan)
+  # Service khong doi init: consumer van nhan su kien, init chi bu catalog co san.
+  recommendation-migrate:
+    # Trung flyway.version cua Spring Boot (services/recommendation-service/pom.xml)
+    # de lich su migration giong het khi chay `python manage.py migrate`.
+    image: flyway/flyway:12.4.0
+    container_name: VMarket-recommendation-migrate
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    restart: 'no'
+    volumes:
+      - ./services/recommendation-service/src/main/resources/db/migration:/flyway/sql:ro
+    environment:
+      FLYWAY_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/vmarket_recommendation
+      FLYWAY_USER: ${POSTGRES_USER:-vmarket}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-vmarket}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CLEAN_DISABLED: "true"
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  recommendation-service:
+    <<: *recommendation-image
+    container_name: VMarket-recommendation-service
+    networks:
+      - vmarket-network
+    # Benchmark (VERIFICATION.md) chay voi 512 MiB, do duoc ~81 MiB working set.
+    mem_limit: 512m
+    environment: &recommendation-environment
+      <<: *common-environment
+      DB_NAME: vmarket_recommendation
+      # Service tu verify Bearer token (for-you, events) - PHAI trung auth-service.
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      # Doc snapshot san pham noi bo cua Product Service.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      PRODUCT_SERVICE_URL: http://product-service:8084
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://localhost:3000}
+    ports:
+      - "${RECOMMENDATION_SERVICE_PORT:-8101}:8101"
+    depends_on:
+      recommendation-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/api/ai/recommendations/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Nap catalog hien co tu Product (`manage.py seed`). Moi lan `up` chay lai: an toan
+  # vi seed chi upsert theo productVersion, khong xoa dong nao (README recommendation).
+  recommendation-init:
+    <<: *recommendation-image
+    container_name: VMarket-recommendation-init
+    networks:
+      - vmarket-network
+    mem_limit: 256m
+    restart: 'no'
+    environment: *recommendation-environment
+    command: ["python", "manage.py", "seed", "--writers-paused"]
+    depends_on:
+      recommendation-migrate:
+        condition: service_completed_successfully
+      product-service:
+        condition: service_healthy
+
   # API Gateway - diem vao duy nhat cua he thong (browser goi vao localhost:8080).
   # Gateway goi cac business service chay tren may host qua host.docker.internal;
   # auth/user/shop/order/chatbot da container hoa nen goi truc tiep qua ten service.
@@ -560,8 +982,15 @@ services:
       USER_SERVICE_URL: http://user-service:8082
       SHOP_SERVICE_URL: http://shop-service:8083
       PRODUCT_SERVICE_URL: http://product-service:8084
+      CART_SERVICE_URL: http://cart-service:8085
       ORDER_SERVICE_URL: http://order-service:8086
+      PAYMENT_SERVICE_URL: http://payment-service:8087
+      DELIVERY_SERVICE_URL: http://delivery-service:8088
+      REVIEW_SERVICE_URL: http://review-service:8089
+      NOTIFICATION_SERVICE_URL: http://notification-service:8090
       CHATBOT_SERVICE_URL: http://chatbot-service:8102
+      AI_SEARCH_SERVICE_URL: http://ai-search-service:8100
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8101
       # JWT (PBL6-38) - secret chia se voi auth-service de gateway tu verify token.
       # PHAI TRUNG voi gia tri AUTH_JWT_SECRET cua block auth-service ben tren.
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
@@ -573,6 +1002,14 @@ services:
       APP_RATE_LIMIT_ENABLED: ${APP_RATE_LIMIT_ENABLED:-true}
       APP_RATE_LIMIT_CAPACITY: ${APP_RATE_LIMIT_CAPACITY:-200}
       APP_RATE_LIMIT_WINDOW_SECONDS: ${APP_RATE_LIMIT_WINDOW_SECONDS:-60}
+      # Bo dem dung chung qua Redis (Redis loi -> tam dem trong RAM cua gateway).
+      APP_RATE_LIMIT_STORE: ${APP_RATE_LIMIT_STORE:-redis}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # Chi tin X-Forwarded-For tu nginx cua container frontend (tra DNS theo ten
+      # service vi IP container doi moi lan khoi dong lai). Request goi thang cong
+      # gateway thi dem theo IP ket noi, XFF tu gui bi bo qua.
+      APP_RATE_LIMIT_TRUSTED_PROXIES: ${APP_RATE_LIMIT_TRUSTED_PROXIES:-frontend}
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     # host-gateway: giu host.docker.internal hoat dong ca tren Linux

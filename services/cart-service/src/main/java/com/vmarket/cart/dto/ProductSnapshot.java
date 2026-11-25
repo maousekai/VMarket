@@ -3,16 +3,13 @@ package com.vmarket.cart.dto;
 import java.math.BigDecimal;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 /**
- * Snapshot chuẩn hóa mới nhất của sản phẩm dùng bởi cart-service (FR-CART-03).
- * {@code RestClientProductCatalogClient} unwraps the product-service detail envelope
- * and maps its {@code id} fields into this DTO's {@code productId}/{@code variantId}.
- *
- * <p>{@code @JsonIgnoreProperties(ignoreUnknown = true)} để product-service bổ sung
- * trường mới không làm cart-service đọc lỗi.
+ * Snapshot mới nhất của một sản phẩm lấy từ product-service qua API đồng bộ
+ * (FR-CART-03). Đây là mô hình NỘI BỘ mà {@code CheckoutService} kiểm tra; JSON
+ * thật của {@code GET /api/products/{productId}} (PBL6-15) được đọc bằng
+ * {@link ProductDetailPayload} rồi chuyển sang đây.
  *
  * @param productId sản phẩm
  * @param shopId    gian hàng bán
@@ -22,20 +19,33 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record ProductSnapshot(
-		@JsonAlias("id")
 		String productId,
 		String shopId,
 		BigDecimal price,
-		@JsonAlias("availableStock")
 		Integer stock,
 		List<VariantSnapshot> variants) {
 
+	/**
+	 * Giá hiện tại của dòng hàng: theo biến thể nếu có {@code variantId}, ngược lại là
+	 * giá của sản phẩm (chỉ có khi sản phẩm có đúng một biến thể).
+	 *
+	 * @return {@code null} khi biến thể không tồn tại hoặc không xác định được giá
+	 */
+	public BigDecimal priceFor(String variantId) {
+		if (variantId == null) {
+			return price;
+		}
+		return variants == null ? null : variants.stream()
+				.filter(v -> variantId.equals(v.variantId()))
+				.map(VariantSnapshot::price)
+				.findFirst()
+				.orElse(null);
+	}
+
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record VariantSnapshot(
-			@JsonAlias("id")
 			String variantId,
 			BigDecimal price,
-			@JsonAlias("availableStock")
 			Integer stock) {
 	}
 }

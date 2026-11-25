@@ -105,6 +105,15 @@ public class NotificationTemplates {
 				sellerOrderLink(order.id()), Map.of("orderId", order.id(), "shopId", shopId), true, null);
 	}
 
+	public NotificationMessage returnRequested(String orderId, String returnId, String shopId) {
+		return new NotificationMessage(NotificationType.RETURN_REQUESTED, "Có yêu cầu trả hàng mới",
+				"Người mua vừa gửi yêu cầu trả hàng cho đơn " + orderId
+						+ ". Vui lòng chấp nhận hoặc từ chối trong 48 giờ.",
+				sellerReturnsLink(orderId), Map.of("orderId", orderId, "returnId", returnId == null ? "" : returnId,
+						"shopId", shopId),
+				true, null);
+	}
+
 	public NotificationMessage sellerOrderCancelled(String orderId, String shopId) {
 		return new NotificationMessage(NotificationType.ORDER_CANCELLED, "Đơn hàng đã bị huỷ",
 				"Đơn hàng " + orderId + " của gian hàng đã bị huỷ.", sellerOrderLink(orderId),
@@ -215,6 +224,10 @@ public class NotificationTemplates {
 
 	private String sellerOrderLink(String orderId) {
 		return "/seller/orders/" + orderId;
+	}
+
+	private String sellerReturnsLink(String orderId) {
+		return "/seller/returns/" + orderId;
 	}
 
 	private NotificationMessage.Email email(String subject, String heading, String body, String link,

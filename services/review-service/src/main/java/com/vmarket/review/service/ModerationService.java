@@ -39,6 +39,7 @@ public class ModerationService {
 	@Transactional
 	public ReviewResponse hide(String adminId, String reviewId, String reason) {
 		Review review = find(reviewId);
+		rejectReturned(review);
 		if (review.getStatus() == ReviewStatus.HIDDEN) {
 			throw ApiException.conflict("REVIEW_ALREADY_HIDDEN", "Đánh giá đã bị ẩn");
 		}
@@ -48,10 +49,18 @@ public class ModerationService {
 	@Transactional
 	public ReviewResponse restore(String adminId, String reviewId) {
 		Review review = find(reviewId);
+		rejectReturned(review);
 		if (review.getStatus() == ReviewStatus.VISIBLE) {
 			throw ApiException.conflict("REVIEW_NOT_HIDDEN", "Đánh giá đang hiển thị");
 		}
 		return changeStatus(review, ReviewStatus.VISIBLE, adminId, null);
+	}
+
+	/** Đánh giá của đơn đã trả hàng / hoàn tiền không được hiển thị lại (PBL6-35). */
+	private static void rejectReturned(Review review) {
+		if (review.getStatus() == ReviewStatus.RETURNED) {
+			throw ApiException.conflict("REVIEW_RETURNED", "Đơn hàng của đánh giá đã được trả hàng / hoàn tiền");
+		}
 	}
 
 	private ReviewResponse changeStatus(Review review, ReviewStatus status, String adminId, String reason) {

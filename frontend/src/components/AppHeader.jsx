@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
+import { useCart } from '../cart/useCart'
+import NotificationBell from './NotificationBell'
 import { getApiError } from '../services/api/apiClient'
 import { ACTIVE_CITY } from '../data/city'
 import brandBasket from '../assets/account/brand-basket.svg'
@@ -8,6 +10,7 @@ import chevronDown from '../assets/account/chevron-down.svg'
 import CategoryNav from './CategoryNav'
 import HeaderSearch from './HeaderSearch'
 import './account.css'
+import './cart.css'
 
 function initials(name) {
   const words = name.trim().split(/\s+/).filter(Boolean)
@@ -36,8 +39,32 @@ export function AccountAvatar({ name, avatarUrl, large = false }) {
   )
 }
 
+function CartLink({ count }) {
+  return (
+    <Link
+      className="app-header__cart"
+      to="/cart"
+      aria-label={count ? `Giỏ hàng, ${count} sản phẩm` : 'Giỏ hàng'}
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M3 4h2l2.4 10.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 1.9-1.4L21 8H6.2"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="10" cy="19.5" r="1.5" fill="currentColor" />
+        <circle cx="17" cy="19.5" r="1.5" fill="currentColor" />
+      </svg>
+      {count > 0 && <span className="app-header__cart-badge">{count > 99 ? '99+' : count}</span>}
+    </Link>
+  )
+}
+
 export default function AppHeader() {
   const { session, bootstrapState, userProfile, logout } = useAuth()
+  const { totalQuantity } = useCart()
   const navigate = useNavigate()
   const menuRef = useRef(null)
   const buttonRef = useRef(null)
@@ -122,83 +149,93 @@ export default function AppHeader() {
             Đang khôi phục phiên…
           </span>
         ) : session ? (
-          <div className="account-menu" ref={menuRef}>
-            <button
-              ref={buttonRef}
-              type="button"
-              className="account-menu__trigger"
-              aria-label={`Tài khoản của ${name}`}
-              aria-haspopup="menu"
-              aria-expanded={open}
-              aria-controls="account-dropdown"
-              onClick={() => {
-                setOpen(!open)
-                setLogoutError('')
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                  event.preventDefault()
-                  openMenu(event.key === 'ArrowUp')
-                }
-              }}
-            >
-              <AccountAvatar name={name} avatarUrl={userProfile?.avatarUrl} />
-              <span className="account-menu__name">{name}</span>
-              <img className="account-menu__chevron" src={chevronDown} alt="" />
-            </button>
-            {open && (
-              <div
-                className="account-menu__panel"
-                id="account-dropdown"
-                role="menu"
-                aria-label="Tài khoản"
-                onKeyDown={onMenuKeyDown}
+          <>
+            {active && <NotificationBell />}
+            {active && <CartLink count={totalQuantity} />}
+            <div className="account-menu" ref={menuRef}>
+              <button
+                ref={buttonRef}
+                type="button"
+                className="account-menu__trigger"
+                aria-label={`Tài khoản của ${name}`}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                aria-controls="account-dropdown"
+                onClick={() => {
+                  setOpen(!open)
+                  setLogoutError('')
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    openMenu(event.key === 'ArrowUp')
+                  }
+                }}
               >
-                <div className="account-menu__identity" role="presentation">
-                  <strong>{name}</strong>
-                  <span>{session.email}</span>
-                </div>
-                {active ? (
-                  <>
-                    <Link role="menuitem" to="/profile" onClick={() => setOpen(false)}>
-                      Hồ sơ cá nhân
-                    </Link>
-                    <Link role="menuitem" to="/seller" onClick={() => setOpen(false)}>
-                      Kênh người bán
-                    </Link>
-                    {session.roles.includes('ADMIN') && (
-                      <Link role="menuitem" to="/admin" onClick={() => setOpen(false)}>
-                        Khu vực quản trị
-                      </Link>
-                    )}
-                    {session.roles.includes('SHIPPER') && (
-                      <Link role="menuitem" to="/shipper" onClick={() => setOpen(false)}>
-                        Khu vực giao hàng
-                      </Link>
-                    )}
-                  </>
-                ) : (
-                  <Link role="menuitem" to="/verify-email" onClick={() => setOpen(false)}>
-                    Xác thực email
-                  </Link>
-                )}
-                <button
-                  className="account-menu__logout"
-                  role="menuitem"
-                  type="button"
-                  aria-disabled={loggingOut}
-                  onClick={onLogout}
+                <AccountAvatar name={name} avatarUrl={userProfile?.avatarUrl} />
+                <span className="account-menu__name">{name}</span>
+                <img className="account-menu__chevron" src={chevronDown} alt="" />
+              </button>
+              {open && (
+                <div
+                  className="account-menu__panel"
+                  id="account-dropdown"
+                  role="menu"
+                  aria-label="Tài khoản"
+                  onKeyDown={onMenuKeyDown}
                 >
-                  {loggingOut ? 'Đang đăng xuất…' : 'Đăng xuất'}
-                </button>
-                {logoutError && (
-                  <p className="account-menu__error" role="alert">
-                    {logoutError} Chọn Đăng xuất để thử lại.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
+                  <div className="account-menu__identity" role="presentation">
+                    <strong>{name}</strong>
+                    <span>{session.email}</span>
+                  </div>
+                  {active ? (
+                    <>
+                      <Link role="menuitem" to="/profile" onClick={() => setOpen(false)}>
+                        Hồ sơ cá nhân
+                      </Link>
+                      <Link role="menuitem" to="/profile/orders" onClick={() => setOpen(false)}>
+                        Đơn mua
+                      </Link>
+                      <Link role="menuitem" to="/profile/payments" onClick={() => setOpen(false)}>
+                        Lịch sử giao dịch
+                      </Link>
+                      <Link role="menuitem" to="/seller" onClick={() => setOpen(false)}>
+                        Kênh người bán
+                      </Link>
+                      {session.roles.includes('ADMIN') && (
+                        <Link role="menuitem" to="/admin" onClick={() => setOpen(false)}>
+                          Khu vực quản trị
+                        </Link>
+                      )}
+                      {session.roles.includes('SHIPPER') && (
+                        <Link role="menuitem" to="/shipper" onClick={() => setOpen(false)}>
+                          Khu vực giao hàng
+                        </Link>
+                      )}
+                    </>
+                  ) : (
+                    <Link role="menuitem" to="/verify-email" onClick={() => setOpen(false)}>
+                      Xác thực email
+                    </Link>
+                  )}
+                  <button
+                    className="account-menu__logout"
+                    role="menuitem"
+                    type="button"
+                    aria-disabled={loggingOut}
+                    onClick={onLogout}
+                  >
+                    {loggingOut ? 'Đang đăng xuất…' : 'Đăng xuất'}
+                  </button>
+                  {logoutError && (
+                    <p className="account-menu__error" role="alert">
+                      {logoutError} Chọn Đăng xuất để thử lại.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
         ) : (
           <div className="app-header__auth-links">
             <Link to="/login">Đăng nhập</Link>

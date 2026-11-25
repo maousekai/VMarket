@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import apiClient, { bindSessionManager } from './apiClient'
-import { browseProducts, listCategories, PRODUCT_SORT } from './productApi'
-import { getForYou } from './recommendationApi'
+import {
+  browseProducts,
+  createProduct,
+  listCategories,
+  moderateProduct,
+  PRODUCT_SORT,
+  setCategoryVisibility,
+} from './productApi'
+import { getForYou, getSimilar, trackView } from './recommendationApi'
 import { getPublicShop } from './shopApi'
 
 const originalAdapter = apiClient.defaults.adapter
@@ -45,6 +52,41 @@ describe('product catalog API', () => {
   })
 })
 
+describe('product management API', () => {
+  it('passes price and rating filters and skips a zero rating', async () => {
+    await browseProducts({ minPrice: 0, maxPrice: 500000, minRating: 0 })
+    expect(sent().params).toEqual({
+      sort: 'NEWEST',
+      page: 0,
+      size: 20,
+      minPrice: 0,
+      maxPrice: 500000,
+    })
+  })
+
+  it('creates a product with the seller token and an Idempotency-Key', async () => {
+    await createProduct({ name: 'Áo' }, 'key-1')
+    expect(sent().method).toBe('post')
+    expect(sent().url).toBe('/api/products')
+    expect(sent().headers.get('Idempotency-Key')).toBe('key-1')
+    expect(sent().headers.get('Authorization')).toBe('Bearer token-123')
+  })
+
+  it('moderates a product with a trimmed reason and a fresh Idempotency-Key', async () => {
+    await moderateProduct('p 1', { removed: true, reason: '  Hàng giả ' })
+    expect(sent().method).toBe('patch')
+    expect(sent().url).toBe('/api/products/p%201/moderation')
+    expect(JSON.parse(sent().data)).toEqual({ removed: true, reason: 'Hàng giả' })
+    expect(sent().headers.get('Idempotency-Key')).toBeTruthy()
+  })
+
+  it('toggles category visibility', async () => {
+    await setCategoryVisibility('c1', false)
+    expect(sent().url).toBe('/api/products/categories/c1/visibility')
+    expect(JSON.parse(sent().data)).toEqual({ active: false })
+  })
+})
+
 describe('recommendation API', () => {
   it('requests personal picks with the bearer token and returns the items', async () => {
     response = { user_id: 'buyer-1', items: [{ id: 'p1' }] }
@@ -57,6 +99,42 @@ describe('recommendation API', () => {
   it('returns an empty list when the payload has no items', async () => {
     response = {}
     await expect(getForYou()).resolves.toEqual([])
+  })
+
+  it('narrows picks to a category with the service parameter name', async () => {
+    response = { items: [] }
+    await getForYou({ limit: 8, categoryId: 'c9' })
+    expect(sent().params).toEqual({ limit: 8, category_id: 'c9' })
+  })
+
+  it('reads the guest picks when the token is rejected', async () => {
+    adapter
+      .mockRejectedValueOnce(Object.assign(new Error('401'), { response: { status: 401 } }))
+      .mockImplementationOnce(async (config) => ({
+        data: { user_id: '', items: [{ id: 'popular' }] },
+        status: 200,
+        config,
+        headers: {},
+      }))
+    bindSessionManager({ getSnapshot: () => ({ session: null }), getGeneration: () => 1 })
+    await expect(getForYou()).resolves.toEqual([{ id: 'popular' }])
+    expect(adapter.mock.calls[1][0].skipAuth).toBe(true)
+  })
+
+  it('reads similar products publicly with an encoded id', async () => {
+    response = { product_id: 'p/1', items: [{ id: 'p2' }] }
+    await expect(getSimilar('p/1', { limit: 20 })).resolves.toEqual([{ id: 'p2' }])
+    expect(sent().url).toBe('/api/ai/recommendations/similar/p%2F1')
+    expect(sent().params).toEqual({ limit: 20 })
+    expect(sent().headers.get('Authorization')).toBeFalsy()
+  })
+
+  it('records a view with the signed-in token and only the product id', async () => {
+    await trackView('p1')
+    expect(sent().method).toBe('post')
+    expect(sent().url).toBe('/api/ai/recommendations/events')
+    expect(JSON.parse(sent().data)).toEqual({ productId: 'p1', action: 'view' })
+    expect(sent().headers.get('Authorization')).toBe('Bearer token-123')
   })
 })
 

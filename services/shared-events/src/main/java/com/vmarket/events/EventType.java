@@ -36,7 +36,7 @@ public final class EventType {
 	/** Product Catalog phát khi Seller đã sửa và gửi lại sản phẩm bị gỡ. */
 	public static final String PRODUCT_MODERATION_REQUESTED = "ProductModerationRequested";
 
-	/** Payment Service phát theo kết quả giao dịch (PayOS webhook). */
+	/** Payment Service phát theo kết quả giao dịch (IPN/return của VNPay). */
 	public static final String PAYMENT_SUCCEEDED = "PaymentSucceeded";
 	public static final String PAYMENT_FAILED = "PaymentFailed";
 
@@ -52,7 +52,7 @@ public final class EventType {
 	public static final String RETURN_REQUESTED = "ReturnRequested";
 	public static final String RETURN_RESOLVED = "ReturnResolved";
 
-	/** Gateway / Clients phát khi ghi nhận hành vi xem, thêm giỏ, mua của người dùng → Recommendation huấn luyện gợi ý. */
+	/** Hành vi xem (Recommendation), thêm giỏ (Cart), mua (Order) → Recommendation huấn luyện gợi ý. Xem {@link UserBehaviorTracked}. */
 	public static final String USER_BEHAVIOR_TRACKED = "UserBehaviorTracked";
 
 	private EventType() {

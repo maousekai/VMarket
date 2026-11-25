@@ -77,7 +77,18 @@ public record ShopRequest(
 		@Schema(example = "12 Phạm Phán")
 		@NotBlank(message = "Địa chỉ chi tiết không được để trống")
 		@Size(max = 255, message = "Địa chỉ chi tiết tối đa 255 ký tự")
-		String streetAddress) {
+		String streetAddress,
+
+		@Schema(example = "VCB", description = "Mã ngân hàng nhận tiền (VietQR). Bắt buộc khi đăng ký; "
+				+ "PUT /api/shops/me bỏ qua trường này, đổi qua PUT /api/shops/me/bank-account")
+		@Pattern(regexp = BankAccountRequest.BANK_CODE_OR_BLANK, message = "Mã ngân hàng không hợp lệ")
+		String bankCode,
+
+		@Schema(example = "0123456789", description = "Số tài khoản nhận tiền. Bắt buộc khi đăng ký; "
+				+ "PUT /api/shops/me bỏ qua trường này")
+		@Pattern(regexp = BankAccountRequest.ACCOUNT_NUMBER_OR_BLANK,
+				message = "Số tài khoản gồm 6 đến 19 chữ số")
+		String bankAccountNumber) {
 
 	/**
 	 * Bỏ trống ô nhập hoặc URL http(s) không chứa khoảng trắng.

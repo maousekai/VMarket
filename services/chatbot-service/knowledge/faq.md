@@ -17,23 +17,23 @@ Người bán chấp nhận hoặc từ chối (kèm lý do) yêu cầu trả h�
 
 ## Hoàn tiền khi trả hàng hoặc hủy đơn đã thanh toán, bao giờ được hoàn tiền
 
-Khi yêu cầu trả hàng được chấp nhận, hàng được thu hồi về gian hàng và người bán xác nhận đã nhận lại hàng, sau đó hệ thống ghi nhận hoàn tiền. Đơn đã thanh toán qua PayOS mà bị hủy cũng được ghi nhận hoàn tiền. Quản trị viên xác nhận hoàn tiền bằng chuyển khoản thủ công; trạng thái hoàn tiền đi từ "Chờ hoàn" sang "Đã hoàn". Với đơn COD, tiền mặt được hoàn theo xác nhận của hai bên hoặc quản trị viên.
+Khi yêu cầu trả hàng được chấp nhận, hàng được thu hồi về gian hàng và người bán xác nhận đã nhận lại hàng, sau đó hệ thống ghi nhận hoàn tiền. Đơn đã thanh toán qua VNPay mà bị hủy cũng được ghi nhận hoàn tiền. Quản trị viên xác nhận hoàn tiền bằng chuyển khoản thủ công; trạng thái hoàn tiền đi từ "Chờ hoàn" sang "Đã hoàn". Với đơn COD, tiền mặt được hoàn theo xác nhận của hai bên hoặc quản trị viên.
 
-## Phương thức thanh toán PayOS và COD
+## Phương thức thanh toán VNPay và COD
 
-VMarket hỗ trợ hai phương thức thanh toán: thanh toán trực tuyến qua PayOS (quét mã QR VietQR hoặc mở liên kết thanh toán) và COD – thanh toán bằng tiền mặt khi nhận hàng. Đơn COD chuyển thẳng sang trạng thái "Chờ xác nhận".
+VMarket hỗ trợ hai phương thức thanh toán: thanh toán trực tuyến qua VNPay (được chuyển sang trang VNPay để thanh toán bằng thẻ hoặc mã QR) và COD – thanh toán bằng tiền mặt khi nhận hàng. Đơn COD chuyển thẳng sang trạng thái "Chờ xác nhận".
 
 ## COD là gì, thanh toán khi nhận hàng
 
 COD (Cash On Delivery) là thanh toán bằng tiền mặt khi nhận hàng. Bạn chọn COD ở bước đặt hàng; đơn chuyển thẳng sang trạng thái "Chờ xác nhận" và shipper thu tiền khi giao hàng thành công.
 
-## Thời hạn thanh toán PayOS, hết hạn thanh toán thì sao
+## Thời hạn thanh toán VNPay, hết hạn thanh toán thì sao
 
-Với đơn chọn PayOS, bạn có 15 phút để thanh toán bằng mã QR hoặc liên kết thanh toán. Trong thời hạn này bạn có thể thanh toán lại nếu chưa thành công. Hết hạn mà chưa thanh toán, hệ thống tự động hủy đơn, hoàn lại tồn kho và thông báo cho bạn; bạn có thể đặt lại đơn mới.
+Với đơn chọn VNPay, bạn có 15 phút để thanh toán trên trang VNPay. Trong thời hạn này bạn có thể thanh toán lại nếu chưa thành công. Hết hạn mà chưa thanh toán, hệ thống tự động hủy đơn, hoàn lại tồn kho và thông báo cho bạn; bạn có thể đặt lại đơn mới.
 
 ## Cách đặt hàng
 
-Thêm sản phẩm (theo biến thể như màu sắc, kích cỡ) vào giỏ hàng, vào trang thanh toán, chọn địa chỉ giao hàng và phương thức thanh toán (PayOS hoặc COD) rồi xác nhận đặt hàng. Khi vào trang thanh toán hệ thống kiểm tra lại giá và tồn kho mới nhất, cảnh báo nếu sản phẩm hết hàng hoặc đổi giá. Giỏ có sản phẩm của nhiều gian hàng sẽ được tách thành các đơn riêng theo từng gian hàng.
+Thêm sản phẩm (theo biến thể như màu sắc, kích cỡ) vào giỏ hàng, vào trang thanh toán, chọn địa chỉ giao hàng và phương thức thanh toán (VNPay hoặc COD) rồi xác nhận đặt hàng. Khi vào trang thanh toán hệ thống kiểm tra lại giá và tồn kho mới nhất, cảnh báo nếu sản phẩm hết hàng hoặc đổi giá. Giỏ có sản phẩm của nhiều gian hàng sẽ được tách thành các đơn riêng theo từng gian hàng.
 
 ## Hủy đơn hàng
 

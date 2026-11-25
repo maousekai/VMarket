@@ -16,6 +16,8 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/cart-service/**"
+      # PBL6-37: UserBehaviorTracked nam o shared-events
+      - "services/shared-events/**"
       # Parent POM doi (nang version Spring Boot...) anh huong moi service
       - "services/pom.xml"
       - "services/mvnw"
@@ -26,6 +28,8 @@ on:
     branches: [dev, release, product]
     paths:
       - "services/cart-service/**"
+      # PBL6-37: UserBehaviorTracked nam o shared-events
+      - "services/shared-events/**"
       - "services/pom.xml"
       - "services/mvnw"
       - ".github/workflows/cart-service.yml"

@@ -4,13 +4,15 @@ from contextlib import asynccontextmanager
 
 import jwt
 from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
 from event_consumer import Consumer
-from schemas import RecommendationError, error_response, valid_id
+from event_publisher import Publisher, behavior_event
+from schemas import RecommendationError, ViewEvent, error_response, valid_id
 from settings import Settings
 from store import Store
 
@@ -50,9 +52,10 @@ def parameters(request, category=False):
     return int(limit), values.get("category_id")
 
 
-def create_app(settings=None, store=None, run_consumer=True):
+def create_app(settings=None, store=None, run_consumer=True, publisher=None):
     settings = settings or Settings.load()
     store = store or Store(settings)
+    publisher = publisher or Publisher(settings)
     consumer = Consumer(store) if run_consumer else None
 
     @asynccontextmanager
@@ -66,13 +69,14 @@ def create_app(settings=None, store=None, run_consumer=True):
         finally:
             if consumer:
                 consumer.close()
+            publisher.close()
             store.close()
 
     app = FastAPI(title="VMarket Recommendation Service", version="1.0.0", lifespan=lifespan)
-    app.state.store, app.state.consumer = store, consumer
+    app.state.store, app.state.consumer, app.state.publisher = store, consumer, publisher
     app.add_middleware(CORSMiddleware,
         allow_origins=[origin.strip() for origin in settings.cors.split(",") if origin.strip()],
-        allow_credentials=True, allow_methods=["GET"], allow_headers=["Content-Type", "Authorization"])
+        allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
 
     @app.exception_handler(RecommendationError)
     async def recommendation_error(request, error):
@@ -113,6 +117,20 @@ def create_app(settings=None, store=None, run_consumer=True):
         if not valid_id(product_id):
             raise RecommendationError(400, "INVALID_QUERY", "Invalid product ID")
         return {"product_id": product_id, "items": recommend(seed_id=product_id, limit=limit)}
+
+    @app.post(BASE + "/events", status_code=202)
+    def track_view(event: ViewEvent, request: Request):
+        # Only views come from clients; add_to_cart and purchase are published by Cart and Order,
+        # which own those facts. The user always comes from the verified token, never the body.
+        user_id = authenticated_user(request, settings.jwt_secret)
+        if not user_id:
+            raise RecommendationError(401, "UNAUTHORIZED", "Sign in to record product views")
+        try:
+            publisher.publish(behavior_event(user_id, event.productId, event.action))
+        except Exception as error:
+            logging.warning("behavior_publish_unavailable type=%s", type(error).__name__)
+            raise RecommendationError(503, "EVENT_UNAVAILABLE", "Behaviour tracking unavailable") from None
+        return Response(status_code=202)
 
     @app.get(BASE + "/health")
     async def health():

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.vmarket.media.MediaUploadResponse;
+import com.vmarket.shop.dto.BankAccountRequest;
 import com.vmarket.shop.dto.ErrorResponse;
 import com.vmarket.shop.dto.ShopRecentOrderResponse;
 import com.vmarket.shop.dto.ShopRequest;
@@ -113,6 +114,23 @@ public class MyShopController {
 	public ShopResponse updateMine(@AuthenticationPrincipal String userId,
 			@Valid @RequestBody ShopRequest request) {
 		return shopService.updateMine(userId, request);
+	}
+
+	@Operation(summary = "Đổi tài khoản ngân hàng nhận tiền",
+			description = "Mục Thông tin thanh toán của kênh người bán. Đổi được ở mọi trạng thái gian hàng; "
+					+ "mỗi lần đổi được ghi vào nhật ký hồ sơ cho Admin đối chiếu.")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Đã cập nhật",
+					content = @Content(schema = @Schema(implementation = ShopResponse.class))),
+			@ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ (VALIDATION_ERROR)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+			@ApiResponse(responseCode = "404", description = "Chưa đăng ký gian hàng (SHOP_NOT_FOUND)",
+					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+	})
+	@PutMapping("/me/bank-account")
+	public ShopResponse updateBankAccount(@AuthenticationPrincipal String userId,
+			@Valid @RequestBody BankAccountRequest request) {
+		return shopService.updateBankAccount(userId, request);
 	}
 
 	@Operation(summary = "Tải logo gian hàng lên kho ảnh",

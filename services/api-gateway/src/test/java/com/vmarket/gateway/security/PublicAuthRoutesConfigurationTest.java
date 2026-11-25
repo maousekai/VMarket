@@ -42,6 +42,24 @@ class PublicAuthRoutesConfigurationTest {
 		filter = new JwtAuthenticationFilter(new JwtService(jwt), security);
 	}
 
+	/** PBL6-50: route nội bộ service-to-service không đi qua được cửa công khai. */
+	@ParameterizedTest
+	@ValueSource(strings = { "/internal/cart", "/internal/cart/items/p1", "/internal/users/1",
+			"/api/cart/internal/x", "/api/auth/internal/users", "/api/products/internal/shop-access",
+			"/api/products;x=1/internal/shop-access", "/api/products/internal;y=2/shop-access",
+			// %xx: service đích giải mã path nên "%69nternal" chính là "internal"
+			"/api/products/%69nternal/shop-access", "/api/products/%69%6E%74%65%72%6E%61%6C/shop-access",
+			"/%69nternal/cart", "/api/products%2Finternal/shop-access",
+			// segment "internal" ở sâu hơn một cấp dưới /api
+			"/api/ai/search/internal/x" })
+	void internalRoutesAreDeniedByDeployedConfiguration(String path) throws Exception {
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		AtomicBoolean reached = new AtomicBoolean();
+		filter.doFilter(new MockHttpServletRequest("GET", path), response, (in, out) -> reached.set(true));
+		assertThat(reached).as(path).isFalse();
+		assertThat(response.getStatus()).as(path).isEqualTo(404);
+	}
+
 	@ParameterizedTest
 	@ValueSource(strings = {
 			"/api/auth/otp/request", "/api/auth/otp/verify",
@@ -67,7 +85,7 @@ class PublicAuthRoutesConfigurationTest {
 	@ValueSource(strings = {
 			"/api/auth/otp/request/extra", "/api/auth/otp/verify/extra",
 			"/api/auth/password/forgot/extra", "/api/auth/password/reset/extra",
-			"/api/auth/me", "/api/auth/password/change", "/api/auth/internal/users"
+			"/api/auth/me", "/api/auth/password/change"
 	})
 	void otherAuthEndpointsStillRequireBearerToken(String path) throws Exception {
 		MockHttpServletResponse response = new MockHttpServletResponse();

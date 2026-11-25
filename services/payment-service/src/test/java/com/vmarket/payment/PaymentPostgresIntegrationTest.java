@@ -105,28 +105,20 @@ class PaymentPostgresIntegrationTest {
                 store.reserve(
                         "buyer",
                         new OrderClient.OrderView(
-                                "payos-order",
+                                "vnpay-order",
                                 "WAITING_PAYMENT",
                                 new BigDecimal("3000"),
-                                "PAYOS",
+                                "VNPAY",
                                 now.plusSeconds(900),
                                 true));
-        store.webhook(
-                Map.of(
-                        "orderCode",
-                        id,
-                        "amount",
-                        3000,
-                        "currency",
-                        "VND",
-                        "paymentLinkId",
-                        "pg-link",
-                        "reference",
-                        "same-bank-reference",
-                        "code",
-                        "00",
-                        "transactionDateTime",
-                        now.toString()));
+        String txnRef = id + "T" + payments.findById(id).orElseThrow().getCreatedAt().getEpochSecond();
+        String payDate =
+                java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+                        .withZone(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))
+                        .format(now);
+        store.process(
+                new PaymentStore.VnpayResult(
+                        txnRef, "300000", "00", "00", "same-bank-reference", payDate));
         assertThat(payments.count()).isEqualTo(2);
         assertThat(payments.findAll()).allSatisfy(p -> assertThat(p.getPaidAt()).isNotNull());
     }

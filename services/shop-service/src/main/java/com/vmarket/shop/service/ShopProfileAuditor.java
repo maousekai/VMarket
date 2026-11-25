@@ -56,6 +56,8 @@ public class ShopProfileAuditor {
 		fields.put("district", shop.getDistrict());
 		fields.put("ward", shop.getWard());
 		fields.put("streetAddress", shop.getStreetAddress());
+		fields.put("bankCode", shop.getBankCode());
+		fields.put("bankAccountNumber", shop.getBankAccountNumber());
 		return fields;
 	}
 

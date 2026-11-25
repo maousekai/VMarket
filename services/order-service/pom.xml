@@ -139,6 +139,8 @@
 		</dependency>
 
         <dependency><groupId>com.vmarket</groupId><artifactId>shared-events</artifactId><version>0.0.1-SNAPSHOT</version></dependency>
+        <!-- PBL6-30: anh minh chung tra hang len MinIO (thu vien dung chung) -->
+        <dependency><groupId>com.vmarket</groupId><artifactId>shared-media</artifactId><version>0.0.1-SNAPSHOT</version></dependency>
 	</dependencies>
 
 	<build>

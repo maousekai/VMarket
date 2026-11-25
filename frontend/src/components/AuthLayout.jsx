@@ -30,7 +30,7 @@ export default function AuthLayout({ title, description, tabs = false, children 
         <ul className="auth-features">
           <li>
             <img src={payment} width="16" height="16" alt="" />
-            Thanh toán PayOS / COD
+            Thanh toán VNPay / COD
           </li>
           <li>
             <img src={delivery} width="16" height="16" alt="" />

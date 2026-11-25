@@ -9,6 +9,7 @@ import {
   reinstateShop,
   suspendShop,
 } from '../services/api/shopApi'
+import { findBank } from '../data/vietnamBanks'
 import { formatDate, formatDateTime } from '../utils/formatDate'
 import { imageUrlOrEmpty, shopAddress, shopStatusLabels } from '../utils/shop'
 import { AccountAvatar } from './AppHeader'
@@ -182,6 +183,14 @@ export function AdminShopDrawer({ shop, onClose, onDecision, onChanged }) {
           <div>
             <dt>Điện thoại</dt>
             <dd>{detail.contactPhone}</dd>
+          </div>
+          <div>
+            <dt>Tài khoản nhận tiền</dt>
+            <dd>
+              {detail.bankAccountNumber
+                ? `${findBank(detail.bankCode)?.shortName || detail.bankCode} · ${detail.bankAccountNumber}`
+                : 'Chưa cung cấp'}
+            </dd>
           </div>
           <div>
             <dt>Địa chỉ lấy hàng</dt>

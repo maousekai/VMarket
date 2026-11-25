@@ -3,7 +3,7 @@ package com.vmarket.payment;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.vmarket.payment.client.PayosClient;
+import com.vmarket.payment.client.PaymentGatewayClient;
 import com.vmarket.payment.entity.PaymentTransaction;
 import com.vmarket.payment.repository.PaymentRepository;
 import com.vmarket.payment.service.PaymentExpiryJob;
@@ -28,7 +28,7 @@ class PaymentExpiryJobTest {
                                 any(), any(), any()))
                 .thenReturn(List.of(first, second));
         doThrow(new IllegalStateException("bad row")).when(store).expire(1L);
-        new PaymentExpiryJob(repository, store, mock(PayosClient.class), Clock.systemUTC()).run();
+        new PaymentExpiryJob(repository, store, mock(PaymentGatewayClient.class), Clock.systemUTC()).run();
         verify(store).expire(1L);
         verify(store).expire(2L);
     }

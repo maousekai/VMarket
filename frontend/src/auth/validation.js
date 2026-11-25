@@ -167,6 +167,19 @@ export function validateShop(values) {
   })
 }
 
+const accountNumberPattern = /^\d{6,19}$/
+
+/** Ngan hang + so tai khoan nhan tien cua gian hang. */
+export const validateBankAccount = ({ bankCode, bankAccountNumber }) =>
+  compact({
+    bankCode: bankCode?.trim() ? undefined : 'Vui lòng chọn ngân hàng.',
+    bankAccountNumber: !bankAccountNumber?.trim()
+      ? 'Vui lòng nhập số tài khoản.'
+      : accountNumberPattern.test(bankAccountNumber.trim())
+        ? undefined
+        : 'Số tài khoản gồm 6 đến 19 chữ số.',
+  })
+
 export const validateUserSearch = ({ q }) =>
   compact({ q: q?.trim().length > 100 ? 'Từ khoá tối đa 100 ký tự.' : undefined })
 

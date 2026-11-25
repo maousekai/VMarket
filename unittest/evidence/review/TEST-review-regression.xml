@@ -1,0 +1,139 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" tests="86" failures="0" errors="0" skipped="0">
+  <testsuite xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.vmarket.cart.service.CartServiceTest" time="2.214" tests="18" errors="0" skipped="0" failures="0" flakes="0">
+    <testcase name="addItemMergesSameProductAndVariant" classname="com.vmarket.cart.service.CartServiceTest" time="1.759" />
+    <testcase name="removeItemDeletesOnlyThatItem" classname="com.vmarket.cart.service.CartServiceTest" time="0.02" />
+    <testcase name="addItem_congDonDungBangTran_thiVanChoPhep" classname="com.vmarket.cart.service.CartServiceTest" time="0.01" />
+    <testcase name="cartIsGroupedByShopWithSubtotals" classname="com.vmarket.cart.service.CartServiceTest" time="0.011" />
+    <testcase name="updateQuantityChangesLineTotal" classname="com.vmarket.cart.service.CartServiceTest" time="0.009" />
+    <testcase name="addItem_congDonVuotTranInt_tra400_vaKhongTaoSoLuongAm" classname="com.vmarket.cart.service.CartServiceTest" time="0.023" />
+    <testcase name="redisFailurePreservesStoredCartAndRetainsCause(String)[1]" classname="com.vmarket.cart.service.CartServiceTest" time="0.051">
+    </testcase>
+    <testcase name="redisFailurePreservesStoredCartAndRetainsCause(String)[2]" classname="com.vmarket.cart.service.CartServiceTest" time="0.015">
+    </testcase>
+    <testcase name="redisFailurePreservesStoredCartAndRetainsCause(String)[3]" classname="com.vmarket.cart.service.CartServiceTest" time="0.015">
+    </testcase>
+    <testcase name="emptyCartReturnsEmptyGroupsAndZeroTotal" classname="com.vmarket.cart.service.CartServiceTest" time="0.002" />
+    <testcase name="concurrentAddsInOneServiceInstanceDoNotLoseQuantities" classname="com.vmarket.cart.service.CartServiceTest" time="0.057" />
+    <testcase name="addItemStoresDocumentWithTtlInOneCommand" classname="com.vmarket.cart.service.CartServiceTest" time="0.006" />
+    <testcase name="corruptJsonIsReadAsEmptyWithoutWritingAndNextAddRecovers" classname="com.vmarket.cart.service.CartServiceTest" time="0.018">
+    </testcase>
+    <testcase name="updateQuantity_ngoaiBien_tra400" classname="com.vmarket.cart.service.CartServiceTest" time="0.01" />
+    <testcase name="addItem_duTranSoDongHang_tra400" classname="com.vmarket.cart.service.CartServiceTest" time="0.064" />
+    <testcase name="storedJsonRoundTripsThroughObjectMapper" classname="com.vmarket.cart.service.CartServiceTest" time="0.016" />
+    <testcase name="clearCartRemovesRedisKey" classname="com.vmarket.cart.service.CartServiceTest" time="0.004" />
+    <testcase name="addDifferentVariantsKeepsSeparateItems" classname="com.vmarket.cart.service.CartServiceTest" time="0.006" />
+  </testsuite>
+  <testsuite xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.vmarket.cart.service.TV01CartSheetTest" time="0.09" tests="9" errors="0" skipped="0" failures="0" flakes="0">
+    <testcase name="ut_CART_01" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.006">
+    </testcase>
+    <testcase name="ut_CART_02" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.008">
+    </testcase>
+    <testcase name="ut_CART_03" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.008">
+    </testcase>
+    <testcase name="ut_CART_04" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.009">
+    </testcase>
+    <testcase name="ut_CART_05" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.007">
+    </testcase>
+    <testcase name="ut_CART_06(int)[1]" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.007">
+    </testcase>
+    <testcase name="ut_CART_06(int)[2]" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.01">
+    </testcase>
+    <testcase name="ut_CART_07" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.016">
+    </testcase>
+    <testcase name="ut_CART_08" classname="com.vmarket.cart.service.TV01CartSheetTest" time="0.006">
+    </testcase>
+  </testsuite>
+  <testsuite xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.153" tests="11" errors="0" skipped="0" failures="0" flakes="0">
+    <testcase name="ut_CHK_01" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.099">
+    </testcase>
+    <testcase name="ut_CHK_02" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.011">
+    </testcase>
+    <testcase name="ut_CHK_03" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.004">
+    </testcase>
+    <testcase name="ut_CHK_04" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.002">
+    </testcase>
+    <testcase name="ut_CHK_05" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.006">
+    </testcase>
+    <testcase name="ut_CHK_06(boolean)[1]" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.004">
+    </testcase>
+    <testcase name="ut_CHK_06(boolean)[2]" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.003">
+    </testcase>
+    <testcase name="ut_CHK_07" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.003">
+    </testcase>
+    <testcase name="ut_CHK_08(boolean)[1]" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.002">
+    </testcase>
+    <testcase name="ut_CHK_08(boolean)[2]" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.002">
+    </testcase>
+    <testcase name="ut_CHK_09" classname="com.vmarket.cart.service.TV01CheckoutSheetTest" time="0.004">
+    </testcase>
+  </testsuite>
+  <testsuite xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.vmarket.product.InventoryInputValidatorTest" time="0.585" tests="17" errors="0" skipped="0" failures="0" flakes="0">
+    <testcase name="acceptsPositiveQuantityBoundaries(int)[1]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.116">
+    </testcase>
+    <testcase name="acceptsPositiveQuantityBoundaries(int)[2]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.002" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[1]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.01" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[2]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.016" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[3]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[4]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.003" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[5]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[6]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[7]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[8]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[9]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[10]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.002" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[11]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[12]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[13]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.004" />
+    <testcase name="rejectsInvalidRequests(String, InventoryRequest)[14]" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.001" />
+    <testcase name="duplicateItemsAreValidInputsForServiceNormalization" classname="com.vmarket.product.InventoryInputValidatorTest" time="0.002" />
+  </testsuite>
+  <testsuite xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.vmarket.product.InventoryServiceTest" time="2.163" tests="21" errors="0" skipped="0" failures="0" flakes="0">
+    <testcase name="oneInsufficientProductRejectsTheWholeReservationWithoutWriting" classname="com.vmarket.product.InventoryServiceTest" time="1.742" />
+    <testcase name="resolvedReturnCannotRestockMoreThanWasPurchased" classname="com.vmarket.product.InventoryServiceTest" time="0.023" />
+    <testcase name="resolvedReturnRestocksOnlyPurchasedQuantityAndIsIdempotent" classname="com.vmarket.product.InventoryServiceTest" time="0.057" />
+    <testcase name="releaseReturnsReservedStockAndPublishesEvent" classname="com.vmarket.product.InventoryServiceTest" time="0.026" />
+    <testcase name="earlyPaymentIsStoredUntilOrderReservationArrives" classname="com.vmarket.product.InventoryServiceTest" time="0.067">
+    </testcase>
+    <testcase name="reserveIsIdempotentForSameOrderAndItems" classname="com.vmarket.product.InventoryServiceTest" time="0.006" />
+    <testcase name="sameOrderWithDifferentItemsConflictsWithoutWriting" classname="com.vmarket.product.InventoryServiceTest" time="0.063" />
+    <testcase name="reserveRejectsProductInHiddenCategory" classname="com.vmarket.product.InventoryServiceTest" time="0.007" />
+    <testcase name="latePaymentEventAfterCancellationLeavesInventoryReleased(ReservationStatus)[1]" classname="com.vmarket.product.InventoryServiceTest" time="0.009" />
+    <testcase name="latePaymentEventAfterCancellationLeavesInventoryReleased(ReservationStatus)[2]" classname="com.vmarket.product.InventoryServiceTest" time="0.003" />
+    <testcase name="cancellingConfirmedOrderRestoresPhysicalStockAndSoldCount" classname="com.vmarket.product.InventoryServiceTest" time="0.012" />
+    <testcase name="duplicateQuantityOverflowIsRejectedBeforeRepositoryAccess" classname="com.vmarket.product.InventoryServiceTest" time="0.006" />
+    <testcase name="earlyCancellationPreventsLaterReservation" classname="com.vmarket.product.InventoryServiceTest" time="0.006">
+    </testcase>
+    <testcase name="reserveHoldsStockAndPublishesEvent" classname="com.vmarket.product.InventoryServiceTest" time="0.008" />
+    <testcase name="confirmAfterReservationWasReleasedConflicts" classname="com.vmarket.product.InventoryServiceTest" time="0.006" />
+    <testcase name="directReleaseOfUnknownReservationReturnsNotFound" classname="com.vmarket.product.InventoryServiceTest" time="0.007" />
+    <testcase name="duplicateItemsAreMergedBeforeSavingAndPublishing" classname="com.vmarket.product.InventoryServiceTest" time="0.023" />
+    <testcase name="reserveRejectsSoftDeletedVariant" classname="com.vmarket.product.InventoryServiceTest" time="0.007" />
+    <testcase name="confirmDeductsPhysicalAndReservedStockOnce" classname="com.vmarket.product.InventoryServiceTest" time="0.007" />
+    <testcase name="restockReturnBeforeReservationIsAppliedAfterConfirmation" classname="com.vmarket.product.InventoryServiceTest" time="0.028">
+    </testcase>
+    <testcase name="reserveRejectsInsufficientAvailableStockWithoutWriting" classname="com.vmarket.product.InventoryServiceTest" time="0.006" />
+  </testsuite>
+  <testsuite xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="com.vmarket.product.TV01InventorySheetTest" time="0.224" tests="10" errors="0" skipped="0" failures="0" flakes="0">
+    <testcase name="ut_STK_01" classname="com.vmarket.product.TV01InventorySheetTest" time="0.109">
+    </testcase>
+    <testcase name="ut_STK_02(int)[1]" classname="com.vmarket.product.TV01InventorySheetTest" time="0.006">
+    </testcase>
+    <testcase name="ut_STK_02(int)[2]" classname="com.vmarket.product.TV01InventorySheetTest" time="0.042">
+    </testcase>
+    <testcase name="ut_STK_03" classname="com.vmarket.product.TV01InventorySheetTest" time="0.004">
+    </testcase>
+    <testcase name="ut_STK_04(boolean)[1]" classname="com.vmarket.product.TV01InventorySheetTest" time="0.006">
+    </testcase>
+    <testcase name="ut_STK_04(boolean)[2]" classname="com.vmarket.product.TV01InventorySheetTest" time="0.006">
+    </testcase>
+    <testcase name="ut_STK_05" classname="com.vmarket.product.TV01InventorySheetTest" time="0.009">
+    </testcase>
+    <testcase name="ut_STK_06" classname="com.vmarket.product.TV01InventorySheetTest" time="0.005">
+    </testcase>
+    <testcase name="ut_STK_07" classname="com.vmarket.product.TV01InventorySheetTest" time="0.009">
+    </testcase>
+    <testcase name="ut_STK_08" classname="com.vmarket.product.TV01InventorySheetTest" time="0.005">
+    </testcase>
+  </testsuite>
+</testsuites>

@@ -38,7 +38,7 @@ class OrderPaymentLifecycleTest {
         var order = new Order();
         order.setUserId("alice");
         order.setStatus(OrderStatus.WAITING_PAYMENT);
-        order.setPaymentMethod("PAYOS");
+        order.setPaymentMethod("VNPAY");
         order.setPaymentExpiresAt(Instant.now().plusSeconds(900));
         order.setRecipientName("Alice");
         order.setPhone("0901234567");

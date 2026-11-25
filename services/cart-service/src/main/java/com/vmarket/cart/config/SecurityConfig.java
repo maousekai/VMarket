@@ -3,7 +3,10 @@ package com.vmarket.cart.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
@@ -63,7 +66,20 @@ public class SecurityConfig {
 				.formLogin(form -> form.disable())
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(PUBLIC_PATHS).permitAll()
-						.anyRequest().authenticated())
+						// Route nội bộ: chỉ cuộc gọi service-to-service (khoá nội bộ), access
+						// token của người dùng bị 403 (PBL6-50).
+						.requestMatchers(CartAuthenticationFilter.INTERNAL_PREFIX + "/**")
+						.hasAuthority(CartAuthenticationFilter.INTERNAL_AUTHORITY)
+						// CHUYỂN TIẾP (PBL6-50): ba route order-service bản cũ gọi nhận cả
+						// người dùng lẫn cuộc gọi nội bộ, cho tới khi tắt cờ.
+						.requestMatchers(cartAuthenticationFilter::acceptsLegacyInternalCall)
+						.access((authentication, context) -> new AuthorizationDecision(
+								isUserAuthentication(authentication.get())
+										|| isInternalAuthentication(authentication.get())))
+						// Ngược lại: danh tính tạo từ khoá nội bộ không bao giờ dùng được
+						// route công khai, kể cả khi hai nơi kiểm path lệch nhau sau này.
+						.anyRequest().access((authentication, context) ->
+								new AuthorizationDecision(isUserAuthentication(authentication.get()))))
 				// Đặt trước filter đăng nhập bằng form/username-password để danh tính
 				// có mặt trong SecurityContext khi tầng phân quyền chạy.
 				.addFilterBefore(cartAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
@@ -71,6 +87,24 @@ public class SecurityConfig {
 						.authenticationEntryPoint(unauthorizedEntryPoint(objectMapper))
 						.accessDeniedHandler(accessDeniedHandler(objectMapper)));
 		return http.build();
+	}
+
+	/** Danh tính tạo từ khoá nội bộ đúng. */
+	static boolean isInternalAuthentication(Authentication authentication) {
+		return authentication != null && authentication.isAuthenticated()
+				&& !(authentication instanceof AnonymousAuthenticationToken)
+				&& authentication.getAuthorities().stream()
+						.anyMatch(a -> CartAuthenticationFilter.INTERNAL_AUTHORITY.equals(a.getAuthority()));
+	}
+
+	/** Đã đăng nhập bằng access token (không ẩn danh, không phải danh tính nội bộ). */
+	static boolean isUserAuthentication(Authentication authentication) {
+		if (authentication == null || !authentication.isAuthenticated()
+				|| authentication instanceof AnonymousAuthenticationToken) {
+			return false;
+		}
+		return authentication.getAuthorities().stream()
+				.noneMatch(a -> CartAuthenticationFilter.INTERNAL_AUTHORITY.equals(a.getAuthority()));
 	}
 
 	/**

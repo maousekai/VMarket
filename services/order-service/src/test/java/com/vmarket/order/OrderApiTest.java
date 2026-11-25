@@ -16,7 +16,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vmarket.order.exception.ApiException;
 import com.vmarket.order.client.CartServiceClient;
+import com.vmarket.order.client.ProductServiceClient;
+import com.vmarket.order.service.OrderService;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.config.OrderJwtProperties;
 import com.vmarket.order.entity.Order;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -62,11 +66,51 @@ class OrderApiTest {
     @MockitoBean private UserServiceClient userServiceClient;
 
     @MockitoBean private CartServiceClient cartServiceClient;
+
     @MockitoBean private java.time.Clock paymentClock;
+
+    /** product-service giả: giá hiện tại của các dòng hàng test đã "niêm yết" (PBL6-48). */
+    @MockitoBean private ProductServiceClient productServiceClient;
+
+    /** productId → (variantId hoặc "" → giá). */
+    private final java.util.Map<String, java.util.Map<String, BigDecimal>> catalog =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** productId → gian hàng bán (theo product-service giả). */
+    private final java.util.Map<String, String> catalogShops = new java.util.concurrent.ConcurrentHashMap<>();
 
     @org.junit.jupiter.api.BeforeEach
     void paymentClock() {
         when(paymentClock.instant()).thenReturn(java.time.Instant.parse("2026-10-19T12:00:00Z"));
+    }
+
+    @org.junit.jupiter.api.BeforeEach
+    void productCatalog() {
+        catalog.clear();
+        catalogShops.clear();
+        when(productServiceClient.findProduct(anyString()))
+                .thenAnswer(
+                        inv -> {
+                            String productId = inv.getArgument(0);
+                            var prices = catalog.get(productId);
+                            if (prices == null) return java.util.Optional.empty();
+                            List<ProductServiceClient.Variant> variants =
+                                    prices.entrySet().stream()
+                                            .map(e -> new ProductServiceClient.Variant(
+                                                    e.getKey().isEmpty() ? "default" : e.getKey(), e.getValue()))
+                                            .toList();
+                            return java.util.Optional.of(
+                                    new ProductServiceClient.ProductPrices(
+                                            productId, catalogShops.get(productId), variants));
+                        });
+    }
+
+    /** Niêm yết giá của dòng hàng ở product-service giả, rồi trả lại chính dòng đó. */
+    private CartServiceClient.CartItemView listed(CartServiceClient.CartItemView item) {
+        catalog.computeIfAbsent(item.productId(), id -> new java.util.concurrent.ConcurrentHashMap<>())
+                .put(item.variantId() == null ? "" : item.variantId(), item.unitPrice());
+        catalogShops.put(item.productId(), item.shopId());
+        return item;
     }
 
     /**
@@ -101,21 +145,21 @@ class OrderApiTest {
 
     private CartServiceClient.CartView cartWithItems() {
         CartServiceClient.CartItemView item1 =
-                new CartServiceClient.CartItemView(
+                listed(new CartServiceClient.CartItemView(
                         "01JBQ9PROD000000000ITEM001",
                         null,
                         "01JBQ9SHOP0000000000TEST01",
                         2,
                         new BigDecimal("250000.00"),
-                        new BigDecimal("500000.00"));
+                        new BigDecimal("500000.00")));
         CartServiceClient.CartItemView item2 =
-                new CartServiceClient.CartItemView(
+                listed(new CartServiceClient.CartItemView(
                         "01JBQ9PROD000000000ITEM002",
                         "01JBQ9VARI0000000000TEST01",
                         "01JBQ9SHOP0000000000TEST01",
                         1,
                         new BigDecimal("250000.00"),
-                        new BigDecimal("250000.00"));
+                        new BigDecimal("250000.00")));
         return new CartServiceClient.CartView(
                 ALICE,
                 List.of(
@@ -165,6 +209,151 @@ class OrderApiTest {
         // rời order-service.
         verifyNoInteractions(userServiceClient);
         verifyNoInteractions(cartServiceClient);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions placeOrderAsAlice() throws Exception {
+        return mockMvc.perform(
+                post("/api/orders")
+                        .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"));
+    }
+
+    /** PBL6-48: giá trong giỏ bị sửa (vd 0đ) → 409 PRICE_CHANGED, không tạo đơn, không xoá giỏ. */
+    @Test
+    void placeOrderWithTamperedCartPriceReturns409AndCreatesNoOrder() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        CartServiceClient.CartView cart = cartWithItems();
+        // Giá thật ở product-service vẫn 250000; giỏ bị sửa về 0 cho dòng đầu.
+        CartServiceClient.CartItemView real = cart.groups().get(0).items().get(0);
+        CartServiceClient.CartItemView tampered =
+                new CartServiceClient.CartItemView(
+                        real.productId(), real.variantId(), real.shopId(), real.quantity(),
+                        BigDecimal.ZERO, BigDecimal.ZERO);
+        CartServiceClient.CartView tamperedCart =
+                new CartServiceClient.CartView(
+                        ALICE,
+                        List.of(new CartServiceClient.CartGroupView(
+                                real.shopId(),
+                                List.of(tampered, cart.groups().get(0).items().get(1)),
+                                new BigDecimal("250000.00"))),
+                        3,
+                        new BigDecimal("250000.00"));
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(tamperedCart);
+
+        placeOrderAsAlice()
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PRICE_CHANGED"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+        verify(cartServiceClient, never()).removeCartItem(anyString(), anyString(), any());
+    }
+
+    /** PBL6-48: giá ở product-service đã đổi sau khi thêm vào giỏ → 409, không tạo đơn. */
+    @Test
+    void placeOrderWhenCatalogPriceChangedReturns409() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        catalog.get("01JBQ9PROD000000000ITEM002").put("01JBQ9VARI0000000000TEST01", new BigDecimal("260000"));
+
+        placeOrderAsAlice()
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PRICE_CHANGED"));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+    }
+
+    @Test
+    void placeOrderWhenProductRemovedReturns409ProductUnavailable() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        catalog.remove("01JBQ9PROD000000000ITEM001");
+
+        placeOrderAsAlice()
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PRODUCT_UNAVAILABLE"));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+    }
+
+    /** Dòng giỏ cũ mang shopId do client gửi, khác gian hàng thật → 409, không tạo đơn. */
+    @Test
+    void placeOrderWithCartShopDifferentFromCatalogReturns409() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        catalogShops.put("01JBQ9PROD000000000ITEM001", "01JBQ9SHOP0000000000OTHER1");
+
+        placeOrderAsAlice()
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PRODUCT_UNAVAILABLE"));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+    }
+
+    /** Giá đổi → 409; giỏ cập nhật giá mới rồi đặt lại cùng Idempotency-Key → đúng một đơn. */
+    @Test
+    void placeOrderRetryAfterPriceChangeWithSameKeyCreatesOneOrder() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        CartServiceClient.CartView cart = cartWithItems();
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cart);
+        catalog.get("01JBQ9PROD000000000ITEM001").put("", new BigDecimal("260000"));
+        String body = "{\"addressId\":\"" + ADDRESS_ID + "\"}";
+
+        mockMvc.perform(post("/api/orders").header(HttpHeaders.AUTHORIZATION, aliceToken())
+                        .header("Idempotency-Key", "retry-after-price-change")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+
+        // Giỏ sau validate: dòng đầu mang giá mới
+        CartServiceClient.CartItemView old = cart.groups().get(0).items().get(0);
+        CartServiceClient.CartItemView refreshed = new CartServiceClient.CartItemView(old.productId(),
+                old.variantId(), old.shopId(), old.quantity(), new BigDecimal("260000"),
+                new BigDecimal("520000"));
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(new CartServiceClient.CartView(ALICE,
+                List.of(new CartServiceClient.CartGroupView(old.shopId(),
+                        List.of(refreshed, cart.groups().get(0).items().get(1)), new BigDecimal("770000"))),
+                3, new BigDecimal("770000")));
+
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(post("/api/orders").header(HttpHeaders.AUTHORIZATION, aliceToken())
+                            .header("Idempotency-Key", "retry-after-price-change")
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().is2xxSuccessful())
+                    .andExpect(jsonPath("$.totalAmount").value(770000));
+        }
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
+
+    @Test
+    void placeOrderWhenProductServiceDownReturns503AndCreatesNoOrder() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(productServiceClient.findProduct(anyString()))
+                .thenThrow(com.vmarket.order.exception.ApiException.unavailable(
+                        "PRODUCT_SERVICE_UNAVAILABLE", "down"));
+
+        placeOrderAsAlice()
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("PRODUCT_SERVICE_UNAVAILABLE"));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+    }
+
+    /** PBL6-48: checkout nhiều gian hàng, lệch giá ở một gian → không gian hàng nào được tạo đơn. */
+    @Test
+    void checkoutWithPriceChangeInOneShopCreatesNoOrders() throws Exception {
+        var a1 = line("01JBQ9PROD0000000000PRODA1", "01JBQ9SHOP0000000000SHOPAA", 1, "100000.00");
+        var b1 = line("01JBQ9PROD0000000000PRODB1", "01JBQ9SHOP0000000000SHOPBB", 1, "70000.00");
+        catalog.get("01JBQ9PROD0000000000PRODB1").put("", new BigDecimal("75000"));
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(a1, b1));
+
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-price-changed")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PRICE_CHANGED"));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
     }
 
     @Test
@@ -236,7 +425,45 @@ class OrderApiTest {
     }
 
     @Test
-    void payosDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
+    void placeOrderKeepsCatalogIdsLongerThanUlids() throws Exception {
+        // Product Catalog cấp ObjectId (24 ký tự) cho sản phẩm và UUID (36 ký tự) cho biến
+        // thể; cột VARCHAR(26) cũ làm mọi đơn có biến thể thật lỗi 500 (PBL6-30).
+        String productId = "6aeda9255cb56e8b256e2463";
+        String variantId = "136dd277-76d9-4038-91b5-ab8c18f894a4";
+        CartServiceClient.CartItemView item =
+                listed(new CartServiceClient.CartItemView(
+                        productId,
+                        variantId,
+                        "01JBQ9SHOP0000000000TEST01",
+                        1,
+                        new BigDecimal("150000.00"),
+                        new BigDecimal("150000.00")));
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartView(
+                                ALICE,
+                                List.of(
+                                        new CartServiceClient.CartGroupView(
+                                                "01JBQ9SHOP0000000000TEST01",
+                                                List.of(item),
+                                                new BigDecimal("150000.00"))),
+                                1,
+                                new BigDecimal("150000.00")));
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.items[0].productId").value(productId))
+                .andExpect(jsonPath("$.items[0].variantId").value(variantId));
+    }
+
+    @Test
+    void vnpayDeadlineUsesConfiguredDurationAndInjectedClock() throws Exception {
         when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
         when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
         when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
@@ -247,7 +474,7 @@ class OrderApiTest {
                                 .content(
                                         "{\"addressId\":\""
                                                 + ADDRESS_ID
-                                                + "\",\"paymentMethod\":\"PAYOS\"}"))
+                                                + "\",\"paymentMethod\":\"VNPAY\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("WAITING_PAYMENT"))
                 .andExpect(jsonPath("$.paymentExpiresAt").value("2026-10-19T12:10:00Z"));
@@ -287,8 +514,18 @@ class OrderApiTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].status").value("PENDING"));
 
+        // Chi tiết trả kèm id từng dòng hàng: buyer cần nó làm orderItemId khi trả hàng.
+        Order own = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0);
+        String orderId = own.getId();
+        mockMvc.perform(get("/api/orders/" + orderId).header(HttpHeaders.AUTHORIZATION, aliceToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder(own.getItems().stream()
+                                .map(i -> i.getId()).toArray())))
+                .andExpect(jsonPath("$.updatedAt").exists())
+                .andExpect(jsonPath("$.deliveredAt").value(org.hamcrest.Matchers.nullValue()));
+
         // Bob đoán đúng id cũng không đọc được (IDOR).
-        String orderId = orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE).get(0).getId();
         mockMvc.perform(get("/api/orders/" + orderId).header(HttpHeaders.AUTHORIZATION, bobToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("ORDER_NOT_FOUND"));
@@ -563,5 +800,209 @@ class OrderApiTest {
                 .andExpect(jsonPath("$.status").value("PENDING"));
 
         assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
+
+    /**
+     * PBL6-50: cart-service bản cũ chưa có /internal/cart (404) hoặc từ chối khoá (401) thì
+     * đọc giỏ thất bại TRƯỚC khi tạo đơn: không có đơn nào, không xoá giỏ.
+     */
+    @Test
+    void placeOrderWhenCartReadFails_createsNoOrderAndTouchesNoCart() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenThrow(new ApiException("CART_SERVICE_ERROR", HttpStatus.BAD_GATEWAY, "cart lỗi"));
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error.code").value("CART_SERVICE_ERROR"));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).isEmpty();
+        verify(cartServiceClient, never()).removeCartItem(anyString(), anyString(), any());
+        verify(cartServiceClient, never()).clearCart(anyString());
+    }
+
+    /** Xoá giỏ sau khi tạo đơn thất bại toàn bộ (vd cart 401/404): đơn vẫn được tạo. */
+    @Test
+    void placeOrderWhenEveryCartItemRemovalFails_orderStillCreated() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(false);
+
+        mockMvc.perform(
+                        post("/api/orders")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"addressId\":\"" + ADDRESS_ID + "\"}"))
+                .andExpect(status().isCreated());
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(1);
+    }
+
+    private CartServiceClient.CartItemView line(String product, String shop, int qty, String price) {
+        BigDecimal unit = new BigDecimal(price);
+        return listed(new CartServiceClient.CartItemView(
+                product, null, shop, qty, unit, unit.multiply(BigDecimal.valueOf(qty))));
+    }
+
+    @Test
+    void checkoutSplitsSelectedItemsIntoOneOrderPerShop() throws Exception {
+        String shopA = "01JBQ9SHOP0000000000SHOPAA";
+        String shopB = "01JBQ9SHOP0000000000SHOPBB";
+        var a1 = line("01JBQ9PROD0000000000PRODA1", shopA, 1, "100000.00");
+        var a2 = line("01JBQ9PROD0000000000PRODA2", shopA, 2, "50000.00");
+        var b1 = line("01JBQ9PROD0000000000PRODB1", shopB, 1, "70000.00");
+        var notChosen = line("01JBQ9PROD0000000000PRODB2", shopB, 1, "10000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE)))
+                .thenReturn(
+                        new CartServiceClient.CartView(
+                                ALICE,
+                                List.of(
+                                        new CartServiceClient.CartGroupView(
+                                                shopA, List.of(a1, a2), new BigDecimal("200000.00")),
+                                        new CartServiceClient.CartGroupView(
+                                                shopB, List.of(b1, notChosen), new BigDecimal("80000.00"))),
+                                5,
+                                new BigDecimal("280000.00")));
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        String body =
+                "{\"addressId\":\""
+                        + ADDRESS_ID
+                        + "\",\"items\":["
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA1\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA2\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODB1\"}]}";
+
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].items.length()").value(2))
+                .andExpect(jsonPath("$[0].totalAmount").value(200000.00))
+                .andExpect(jsonPath("$[1].items.length()").value(1))
+                .andExpect(jsonPath("$[1].totalAmount").value(70000.00));
+
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+        verify(cartServiceClient, never()).removeCartItem(ALICE, "01JBQ9PROD0000000000PRODB2", null);
+        verify(cartServiceClient).removeCartItem(ALICE, "01JBQ9PROD0000000000PRODB1", null);
+
+        // Gửi lại cùng khoá: không tạo thêm đơn.
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .header("Idempotency-Key", "checkout-key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    private CartServiceClient.CartView cartOf(CartServiceClient.CartItemView... items) {
+        BigDecimal total =
+                java.util.Arrays.stream(items)
+                        .map(CartServiceClient.CartItemView::lineTotal)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new CartServiceClient.CartView(
+                ALICE,
+                java.util.Arrays.stream(items)
+                        .map(item -> new CartServiceClient.CartGroupView(item.shopId(), List.of(item), item.lineTotal()))
+                        .toList(),
+                items.length,
+                total);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions checkout(String key, String body)
+            throws Exception {
+        return mockMvc.perform(
+                post("/api/orders/checkout")
+                        .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body));
+    }
+
+    @Test
+    void checkoutRetryReturnsOrdersCreatedByThePartialFirstAttempt() throws Exception {
+        // Lần đầu: đơn shop A tạo xong và dòng giỏ của A đã xoá, shop B lỗi -> giỏ chỉ còn B.
+        var a1 = line("01JBQ9PROD0000000000PRODA1", "01JBQ9SHOP0000000000SHOPAA", 1, "100000.00");
+        var b1 = line("01JBQ9PROD0000000000PRODB1", "01JBQ9SHOP0000000000SHOPBB", 1, "70000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        String body =
+                "{\"addressId\":\"" + ADDRESS_ID + "\",\"items\":["
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODA1\"},"
+                        + "{\"productId\":\"01JBQ9PROD0000000000PRODB1\"}]}";
+
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(a1));
+        String first =
+                checkout("retry-key-1", body)
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.length()").value(1))
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString();
+        String orderA = com.jayway.jsonpath.JsonPath.read(first, "$[0].id");
+
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(b1));
+        checkout("retry-key-1", body)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value(orderA))
+                .andExpect(jsonPath("$[1].totalAmount").value(70000.00));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    @Test
+    void longCheckoutKeysAreHashedSoSharedPrefixesDoNotCollideAndReplayStillWorks() throws Exception {
+        String prefix = "x".repeat(OrderService.MAX_RAW_CHECKOUT_KEY);
+        String keyOne = prefix + "-attempt-1";
+        String keyTwo = prefix + "-attempt-2";
+        assertThat(OrderService.checkoutKey(keyOne))
+                .isNotEqualTo(OrderService.checkoutKey(keyTwo))
+                .hasSizeLessThanOrEqualTo(OrderService.MAX_RAW_CHECKOUT_KEY);
+        assertThat(OrderService.checkoutKey("short-key")).isEqualTo("short-key");
+
+        var a1 = line("01JBQ9PROD0000000000PRODA1", "01JBQ9SHOP0000000000SHOPAA", 1, "100000.00");
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.removeCartItem(eq(ALICE), anyString(), any())).thenReturn(true);
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf(a1));
+        String body =
+                "{\"addressId\":\"" + ADDRESS_ID
+                        + "\",\"items\":[{\"productId\":\"01JBQ9PROD0000000000PRODA1\"}]}";
+        checkout(keyOne, body).andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1));
+
+        // Khoá khác có cùng tiền tố là một lần checkout khác: tạo đơn mới, không trả đơn cũ.
+        checkout(keyTwo, body).andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+
+        // Giỏ đã trống: gửi lại khoá dài vẫn trả đúng đơn của khoá đó thay vì CART_EMPTY.
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartOf());
+        checkout(keyOne, body).andExpect(status().isCreated()).andExpect(jsonPath("$.length()").value(1));
+        assertThat(orderRepository.findByUserIdOrderByCreatedAtDesc(ALICE)).hasSize(2);
+    }
+
+    @Test
+    void checkoutWithNothingSelectedInCartIsRejected() throws Exception {
+        when(userServiceClient.getAddress(anyString(), eq(ADDRESS_ID))).thenReturn(aliceAddress());
+        when(cartServiceClient.getCart(eq(ALICE))).thenReturn(cartWithItems());
+        mockMvc.perform(
+                        post("/api/orders/checkout")
+                                .header(HttpHeaders.AUTHORIZATION, aliceToken())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"addressId\":\""
+                                                + ADDRESS_ID
+                                                + "\",\"items\":[{\"productId\":\"not-in-cart\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("CART_EMPTY"));
     }
 }

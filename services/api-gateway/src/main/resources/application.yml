@@ -110,8 +110,8 @@ app:
       - /api/auth/sessions
       - /api/auth/sessions/**
       - /api/auth/health
-      # PayOS authenticates this exact endpoint with its signed webhook body.
-      - /api/payments/webhooks/payos
+      # VNPay goi IPN (GET) vao endpoint nay, xac thuc bang chu ky vnp_SecureHash trong query.
+      - /api/payments/webhooks/vnpay
       # Chatbot (PBL6-18): khach chua dang nhap duoc hoi dap chung (FR-BOT-01) nen
       # gui tin nhan la public. Gateway KHONG verify token o route nay -> chatbot-service
       # tu verify Authorization Bearer (cung AUTH_JWT_SECRET) truoc khi tra cuu don
@@ -142,10 +142,12 @@ app:
       - /api/ai/recommendations/health
     # Path nội bộ service-to-service: gateway LUÔN chặn (404). Các service gọi
     # nhau trực tiếp qua URL nội bộ (BACKEND_SERVICES_HOST), kèm X-Internal-Api-Key.
+    # "/api/**/internal/**" khớp segment "internal" ở mọi độ sâu (vd
+    # /api/products/internal/..., /api/ai/search/internal/...), nên không cần liệt kê
+    # từng service. Không route công khai nào được có segment tên "internal".
     internal-deny-paths:
-      - /api/products/internal/**
-      - /api/shops/internal/**
-      - /api/users/internal/**
+      - /internal/**
+      - /api/**/internal/**
     # RBAC theo vai trò (PBL6-46) - route protected (da qua buoc xac thuc JWT o
     # tren) con doi hoi it nhat MOT vai trò trong danh sach. Chua co route
     # admin-only thuc te nao trong he thong tinh den luc nay -> de trong, cac
@@ -156,11 +158,28 @@ app:
     #       methods: [POST]
     #       roles: [ADMIN]
     role-required-paths: []
-  # Rate limit co ban (fixed-window theo IP). Xem RateLimitProperties.
+  # Rate limit (fixed-window theo client IP). Xem RateLimitProperties.
   rate-limit:
     enabled: ${APP_RATE_LIMIT_ENABLED:true}
     capacity: ${APP_RATE_LIMIT_CAPACITY:200}
     window-seconds: ${APP_RATE_LIMIT_WINDOW_SECONDS:60}
+    # memory = dem trong RAM tung instance; redis = dem chung giua cac instance
+    # (Redis loi thi tam dem trong RAM).
+    store: ${APP_RATE_LIMIT_STORE:memory}
+    # Proxy duoc tin de doc X-Forwarded-For: IP, CIDR hoac ten host, cach nhau
+    # dau phay. De trong = khong tin XFF tu dau ca (dung getRemoteAddr()).
+    trusted-proxies: ${APP_RATE_LIMIT_TRUSTED_PROXIES:}
+
+# Redis cho rate limit (chi dung khi app.rate-limit.store=redis). Timeout ngan de
+# Redis cham/sap khong keo request; khi loi gateway tu chuyen sang dem trong RAM.
+spring.data.redis:
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  timeout: 200ms
+  connect-timeout: 500ms
+
+# Redis chi la bo dem rate limit co phuong an du phong -> khong de no lam health DOWN.
+management.health.redis.enabled: false
 
 info:
   app:

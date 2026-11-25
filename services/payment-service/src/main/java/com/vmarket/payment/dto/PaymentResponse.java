@@ -17,7 +17,8 @@ public record PaymentResponse(
         Instant expiresAt,
         Instant linkExpiresAt,
         Instant settlementExpiresAt,
-        Instant paidAt) {
+        Instant paidAt,
+        Instant createdAt) {
     public static PaymentResponse from(PaymentTransaction p) {
         return new PaymentResponse(
                 p.getId(),
@@ -32,6 +33,7 @@ public record PaymentResponse(
                 p.getExpiresAt(),
                 p.getLinkExpiresAt(),
                 p.getSettlementExpiresAt(),
-                p.getPaidAt());
+                p.getPaidAt(),
+                p.getCreatedAt());
     }
 }

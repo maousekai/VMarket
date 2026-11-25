@@ -7,6 +7,7 @@ import com.vmarket.order.client.CartServiceClient.CartItemView;
 import com.vmarket.order.client.CartServiceClient.CartView;
 import com.vmarket.order.client.UserServiceClient;
 import com.vmarket.order.client.UserServiceClient.AddressView;
+import com.vmarket.order.dto.CheckoutRequest;
 import com.vmarket.order.dto.OrderResponse;
 import com.vmarket.order.dto.PlaceOrderRequest;
 import com.vmarket.order.entity.Order;
@@ -23,7 +24,18 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.Optional;
 
 /**
@@ -39,8 +51,10 @@ import java.util.Optional;
  *       thuộc người đang gọi.
  *   <li>Đọc giỏ từ cart-service bằng {@code X-User-Id} đã xác thực.
  *   <li>Kiểm tra giỏ không rỗng.
- *   <li>Chụp từng item thành {@link OrderItem} với giá đã có trong giỏ (snapshot của cart-service,
- *       không hỏi lại product-service — giá chốt là giá đã hiện cho người dùng khi thêm vào giỏ).
+ *   <li>Định giá lại từng dòng bằng giá hiện tại của product-service ({@link OrderPricing},
+ *       PBL6-48). Giá trong giỏ khác giá hiện tại → 409 {@code PRICE_CHANGED}, không tạo đơn;
+ *       người mua xem giá mới (cart cập nhật khi validate) rồi đặt lại.
+ *   <li>Chụp từng item thành {@link OrderItem} với giá vừa định lại.
  *   <li>Lưu đơn + item trong MỘT transaction. <b>Sau khi commit</b>, xoá từng item đã checkout khỏi
  *       giỏ (không xoá toàn bộ, tránh mất item thêm trong lúc checkout). Xoá hỏng chỉ log cảnh báo,
  *       không làm hỏng đơn đã tạo.
@@ -60,6 +74,7 @@ public class OrderService {
     private final CartServiceClient cartServiceClient;
     private final com.vmarket.order.event.Outbox outbox;
     private final OrderCreator orderCreator;
+    private final OrderPricing orderPricing;
 
     /**
      * Đặt hàng từ giỏ hiện có (FR-ORDER-01, PBL6-52).
@@ -121,19 +136,147 @@ public class OrderService {
             throw ApiException.badRequest("CART_EMPTY", "Giỏ hàng đang trống, không thể đặt hàng");
         }
 
-        // 3. Thực hiện tạo đơn trong transaction độc lập (REQUIRES_NEW)
+        // 3. Định giá lại từng dòng từ product-service (PBL6-48): giá trong giỏ chỉ là snapshot.
+        // Lệch giá → 409 PRICE_CHANGED, không tạo đơn.
+        List<CartItemView> pricedItems = OrderPricing.apply(cartItems, orderPricing.reprice(cartItems));
+
+        // 4. Thực hiện tạo đơn trong transaction độc lập (REQUIRES_NEW)
         OrderResponse response;
         try {
             response = orderCreator.createOrderInTransaction(
-                    userId, address, cartItems, trimmedKey, request);
+                    userId, address, pricedItems, trimmedKey, request);
         } catch (DataIntegrityViolationException ex) {
             return recoverIdempotentOrderOrThrow(userId, trimmedKey, ex);
         }
 
-        // 4. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
+        // 5. Xoá giỏ SAU KHI transaction đã hoàn tất và kết nối DB đã được giải phóng (PBL6-52 review)
         removeCheckoutItemsFromCart(userId, response.id(), cartItems);
 
         return response;
+    }
+
+    /**
+     * Đặt hàng các dòng đã chọn trong giỏ, mỗi gian hàng một đơn (PBL6-29/30).
+     *
+     * <p>Mỗi đơn tạo trong transaction riêng ({@link OrderCreator}) với khoá chống trùng suy ra
+     * từ {@code Idempotency-Key} + {@code shopId}: gửi lại cùng khoá thì đơn đã tạo được trả lại,
+     * đơn còn thiếu (vd lần trước hỏng giữa chừng) mới được tạo. Dòng của đơn nào tạo xong thì
+     * xoá khỏi giỏ ngay sau đó.
+     */
+    public List<OrderResponse> checkout(
+            String userId, String bearerToken, String idempotencyKey, CheckoutRequest request) {
+        String checkoutKey =
+                checkoutKey(
+                        (idempotencyKey != null && !idempotencyKey.isBlank())
+                                ? idempotencyKey.trim()
+                                : null);
+        AddressView address = userServiceClient.getAddress(bearerToken, request.addressId());
+        CartView cart = cartServiceClient.getCart(userId);
+        List<CartItemView> cartItems =
+                cart.groups().stream().flatMap(group -> group.items().stream()).toList();
+
+        List<CartItemView> chosen = cartItems;
+        if (request.items() != null && !request.items().isEmpty()) {
+            Set<String> wanted =
+                    request.items().stream()
+                            .map(item -> lineKey(item.productId(), item.variantId()))
+                            .collect(Collectors.toSet());
+            chosen =
+                    cartItems.stream()
+                            .filter(item -> wanted.contains(lineKey(item.productId(), item.variantId())))
+                            .toList();
+        }
+
+        Map<String, List<CartItemView>> byShop = new LinkedHashMap<>();
+        for (CartItemView item : chosen) {
+            byShop.computeIfAbsent(item.shopId(), ignored -> new ArrayList<>()).add(item);
+        }
+        // Đơn đã tạo bằng khoá này ở lần gửi trước (dòng giỏ của chúng đã bị xoá nên không còn
+        // trong byShop). Luôn trả lại cùng đơn mới để trang kết quả / hàng đợi thanh toán đủ đơn.
+        List<OrderResponse> previous =
+                checkoutKey == null
+                        ? List.of()
+                        : orderRepository
+                                .findByUserIdAndIdempotencyKeyStartingWith(userId, checkoutKey + ":")
+                                .stream()
+                                .sorted(Comparator.comparing(Order::getCreatedAt,
+                                        Comparator.nullsLast(Comparator.naturalOrder())))
+                                .map(OrderResponse::from)
+                                .toList();
+        if (byShop.isEmpty() && previous.isEmpty()) {
+            throw ApiException.badRequest(
+                    "CART_EMPTY", "Không có sản phẩm nào được chọn trong giỏ để đặt hàng");
+        }
+
+        // Định giá lại MỌI dòng của các đơn sắp tạo trước khi tạo đơn nào (PBL6-48): lệch giá ở
+        // một gian hàng thì không gian hàng nào được tạo đơn.
+        Map<String, Optional<Order>> existingByShop = new LinkedHashMap<>();
+        List<CartItemView> toCreate = new ArrayList<>();
+        for (Map.Entry<String, List<CartItemView>> group : byShop.entrySet()) {
+            String key = shopKey(checkoutKey, group.getKey());
+            Optional<Order> existing =
+                    key == null ? Optional.empty() : orderRepository.findByUserIdAndIdempotencyKey(userId, key);
+            existingByShop.put(group.getKey(), existing);
+            if (existing.isEmpty()) {
+                toCreate.addAll(group.getValue());
+            }
+        }
+        Map<String, CartItemView> priced = orderPricing.reprice(toCreate);
+
+        Map<String, OrderResponse> orders = new LinkedHashMap<>();
+        previous.forEach(order -> orders.put(order.id(), order));
+        for (Map.Entry<String, List<CartItemView>> group : byShop.entrySet()) {
+            String key = shopKey(checkoutKey, group.getKey());
+            Optional<Order> existing = existingByShop.get(group.getKey());
+            OrderResponse response;
+            if (existing.isPresent()) {
+                response = OrderResponse.from(existing.get());
+            } else {
+                try {
+                    response =
+                            orderCreator.createOrderInTransaction(
+                                    userId, address, OrderPricing.apply(group.getValue(), priced), key,
+                                    request.toPlaceOrder());
+                } catch (DataIntegrityViolationException ex) {
+                    response = recoverIdempotentOrderOrThrow(userId, key, ex);
+                }
+            }
+            removeCheckoutItemsFromCart(userId, response.id(), group.getValue());
+            orders.put(response.id(), response);
+        }
+        return List.copyOf(orders.values());
+    }
+
+    private static String lineKey(String productId, String variantId) {
+        return productId + "::" + Objects.toString(variantId, "");
+    }
+
+    /** Cột {@code idempotency_key} là VARCHAR(64); shopId là ULID 26 ký tự. */
+    private static final int KEY_COLUMN_LENGTH = 64;
+    private static final int SHOP_ID_LENGTH = 26;
+    public static final int MAX_RAW_CHECKOUT_KEY = KEY_COLUMN_LENGTH - 1 - SHOP_ID_LENGTH;
+
+    /**
+     * Định danh của một lần checkout, dùng chung cho tạo đơn và tra cứu khi gửi lại. Khoá đủ ngắn
+     * (UUID của web) giữ nguyên; khoá dài hơn được băm SHA-256 thay vì cắt bớt, để hai khoá khác
+     * nhau không bao giờ trùng tiền tố.
+     */
+    public static String checkoutKey(String idempotencyKey) {
+        if (idempotencyKey == null) return null;
+        if (idempotencyKey.length() <= MAX_RAW_CHECKOUT_KEY) return idempotencyKey;
+        try {
+            byte[] digest =
+                    MessageDigest.getInstance("SHA-256")
+                            .digest(idempotencyKey.getBytes(StandardCharsets.UTF_8));
+            return "#" + HexFormat.of().formatHex(digest).substring(0, MAX_RAW_CHECKOUT_KEY - 1);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 không khả dụng", ex);
+        }
+    }
+
+    /** Khoá chống trùng của đơn thuộc {@code shopId} trong lần checkout {@code checkoutKey}. */
+    static String shopKey(String checkoutKey, String shopId) {
+        return checkoutKey == null ? null : checkoutKey + ":" + shopId;
     }
 
     private OrderResponse recoverIdempotentOrderOrThrow(
