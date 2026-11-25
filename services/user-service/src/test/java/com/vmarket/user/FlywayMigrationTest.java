@@ -19,10 +19,8 @@ import org.springframework.test.context.TestPropertySource;
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra.
  *
  * <p>Nếu context khởi động được nghĩa là: (1) script migration chạy không lỗi,
- * (2) mapping entity khớp với cột/kiểu trong migration. Đây là điểm mà bộ test còn
- * lại (Flyway tắt + {@code create-drop}) không kiểm được — chúng chạy trên schema
- * do Hibernate tự sinh, nên một lỗi trong {@code V1__init_user_schema.sql} vẫn để
- * CI xanh cho tới khi deploy thật lên PostgreSQL.
+ * (2) mapping entity khớp với cột/kiểu trong migration. Từ PBL6-59 toàn bộ test
+ * cũng chạy trên schema do Flyway sinh ({@code ddl-auto: validate}).
  *
  * <p>DB riêng ({@code jdbc:h2:mem:user_flyway_it}) để không đụng schema của các test
  * khác. Test end-to-end trên PostgreSQL thật (Testcontainers) để dành PBL6-47.
@@ -35,6 +33,7 @@ import org.springframework.test.context.TestPropertySource;
  * nên {@code db/vendor/postgresql/V3__addresses_one_default_per_user.sql} (partial
  * index, cú pháp riêng của Postgres) không được nạp. Trên PostgreSQL thật sẽ có đủ
  * năm — con số 4 dưới đây là <b>đúng cho H2</b>, không phải số migration của prod.
+ * {@link PostgresMigrationTest} chạy đủ năm migration trên PostgreSQL thật.
  */
 @SpringBootTest
 @TestPropertySource(properties = {

@@ -11,10 +11,13 @@ spring:
     password: ""
   jpa:
     hibernate:
-      # Test dung schema do Hibernate sinh tu entity (khong chay migration Postgres).
-      ddl-auto: create-drop
+      # PBL6-59: test cung dung schema do Flyway sinh (giong moi profile khac), Hibernate
+      # chi doi chieu. Tren H2, V3 (partial index, db/vendor/postgresql) bi bo qua -
+      # PostgresMigrationTest chay du V1..V5 tren PostgreSQL that.
+      ddl-auto: validate
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration,classpath:db/vendor/{vendor}
 
 app:
   internal:
