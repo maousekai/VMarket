@@ -4,6 +4,7 @@ import com.vmarket.events.*;
 import com.vmarket.order.config.OrderPaymentProperties;
 import com.vmarket.order.entity.Order;
 import com.vmarket.order.entity.OrderStatus;
+import com.vmarket.order.entity.PaymentStatus;
 import com.vmarket.order.event.Outbox;
 import com.vmarket.order.repository.OrderRepository;
 
@@ -24,12 +25,18 @@ public class OrderPaymentLifecycle {
         var optional = repository.lock(id);
         if (optional.isEmpty()) return;
         var order = optional.get();
+        // PaymentSucceeded giao lại (at-least-once) khi đơn đã PAID/REFUNDED: không thu lần hai,
+        // không phát thêm yêu cầu hoàn tiền (PBL6-63).
+        if (order.getPaymentStatus() != PaymentStatus.UNPAID) return;
         if (order.getStatus() == OrderStatus.WAITING_PAYMENT
                 && "VNPAY".equals(order.getPaymentMethod())) {
+            order.markPaid();
             change(order, OrderStatus.PENDING);
         } else if (order.getStatus() == OrderStatus.CANCELLED) {
             // Reconcile success racing cancellation, including cancellation consumed before the
-            // webhook.
+            // webhook: tiền đã vào sau khi huỷ nên phải hoàn đúng một lần.
+            order.markPaid();
+            order.markRefunded();
             outbox.add(
                     EventType.ORDER_STATUS_CHANGED,
                     new OrderStatusChanged(id, "CANCELLED", "CANCELLED", order.getPaymentMethod()));
@@ -72,8 +79,7 @@ public class OrderPaymentLifecycle {
     }
 
     private void change(Order order, OrderStatus status) {
-        var previous = order.getStatus();
-        order.setStatus(status);
+        var previous = order.transitionTo(status);
         outbox.add(
                 EventType.ORDER_STATUS_CHANGED,
                 new OrderStatusChanged(

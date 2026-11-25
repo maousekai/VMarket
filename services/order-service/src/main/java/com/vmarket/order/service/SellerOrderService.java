@@ -119,7 +119,7 @@ public class SellerOrderService {
 		// Nếu TẤT CẢ sản phẩm trong toàn bộ đơn hàng (của mọi shop) đều đã được xác nhận:
 		boolean allConfirmed = order.getItems().stream().allMatch(OrderItem::isConfirmed);
 		if (allConfirmed && order.getStatus() == OrderStatus.PENDING) {
-			order.setStatus(OrderStatus.PROCESSING);
+			order.transitionTo(OrderStatus.PROCESSING);
 			outbox.add(
 					EventType.ORDER_STATUS_CHANGED,
 					new OrderStatusChanged(

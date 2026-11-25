@@ -14,6 +14,7 @@ import com.vmarket.order.exception.ApiException;
 import com.vmarket.order.repository.OrderRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderDeliveryBridge {
@@ -70,7 +72,7 @@ public class OrderDeliveryBridge {
                 if (!allConfirmed) {
                     throw ApiException.conflict("ORDER_NOT_CONFIRMED", "Đơn hàng chưa được tất cả gian hàng xác nhận");
                 }
-                order.setStatus(OrderStatus.PROCESSING);
+                order.transitionTo(OrderStatus.PROCESSING);
                 enqueue(
                         new OrderStatusChanged(
                                 id,
@@ -118,7 +120,16 @@ public class OrderDeliveryBridge {
         if (order.getStatus() == OrderStatus.CANCELLED
                 || order.getStatus() == OrderStatus.DELIVERED) return;
         var before = order.getStatus();
-        order.setStatus(next);
+        if (before != next) {
+            if (!before.canTransitionTo(next)) {
+                // Event giao hàng không khớp vòng đời đơn (vd đơn đã COMPLETED): bỏ qua thay vì
+                // làm consumer lỗi rồi rơi vào DLQ.
+                log.warn("Bỏ qua DeliveryStatusChanged {} cho đơn {} ở trạng thái {}",
+                        event.status(), order.getId(), before);
+                return;
+            }
+            order.transitionTo(next);
+        }
         if (next == OrderStatus.DELIVERED && order.getDeliveredAt() == null) {
             order.setDeliveredAt(clock.instant());
         }

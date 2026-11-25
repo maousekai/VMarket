@@ -64,6 +64,7 @@ class OrderConcurrentFlowTest {
 		Order order = new Order();
 		order.setUserId(BUYER);
 		order.setStatus(OrderStatus.PENDING);
+		order.setStockReserved(true);
 		order.setTotalAmount(new BigDecimal("100000"));
 		order.setRecipientName("Buyer");
 		order.setPhone("0901234567");
@@ -82,7 +83,8 @@ class OrderConcurrentFlowTest {
 	@Test
 	void deliveryCommitsFirst_buyerCancelWaitsThenIsRejected() throws Exception {
 		Future<?> cancel = runWhileHoldingRowLock(
-				() -> bridge.apply(new DeliveryStatusChanged(orderId, "PICKED_UP", 1)),
+				// Đơn PENDING chỉ vào luồng giao hàng qua claim (PENDING -> PROCESSING).
+				() -> bridge.snapshot(orderId, true),
 				() -> orderService.cancelMyOrder(BUYER, orderId));
 
 		Throwable failure = catchThrowable(() -> cancel.get(TIMEOUT_SECONDS, TimeUnit.SECONDS));
@@ -90,8 +92,8 @@ class OrderConcurrentFlowTest {
 				.hasCauseInstanceOf(ApiException.class);
 		assertThat(((ApiException) failure.getCause()).getCode()).isEqualTo("ORDER_NOT_CANCELLABLE");
 
-		assertFinalState(OrderStatus.SHIPPED);
-		assertThat(outboxPayloads()).allSatisfy(p -> assertThat(p).contains("SHIPPED").doesNotContain("CANCELLED"));
+		assertFinalState(OrderStatus.PROCESSING);
+		assertThat(outboxPayloads()).allSatisfy(p -> assertThat(p).contains("PROCESSING").doesNotContain("CANCELLED"));
 	}
 
 	@Test

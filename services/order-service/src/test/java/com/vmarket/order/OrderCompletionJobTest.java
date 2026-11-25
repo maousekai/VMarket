@@ -115,7 +115,7 @@ class OrderCompletionJobTest {
 	@Test
 	void buyerCompletesProcessingOrder_returnsConflict() throws Exception {
 		Order order = createDeliveredOrder();
-		order.setStatus(OrderStatus.PROCESSING);
+		TestOrders.forceStatus(order, OrderStatus.PROCESSING);
 		orderRepository.save(order);
 
 		mockMvc.perform(post("/api/orders/" + order.getId() + "/complete")

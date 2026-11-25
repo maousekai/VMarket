@@ -65,12 +65,8 @@ public class AdminOrderService {
 		if (order.getStatus() == OrderStatus.CANCELLED) {
 			throw ApiException.conflict("ORDER_ALREADY_CANCELLED", "Đơn hàng đã bị huỷ trước đó");
 		}
-		if (order.getStatus() == OrderStatus.COMPLETED) {
-			throw ApiException.conflict("ORDER_ALREADY_COMPLETED", "Đơn hàng đã hoàn tất, không thể huỷ");
-		}
-
-		OrderStatus previous = order.getStatus();
-		order.setStatus(OrderStatus.CANCELLED);
+		// Các trạng thái còn lại do bảng chuyển trạng thái quyết định (COMPLETED → 409).
+		OrderStatus previous = order.transitionTo(OrderStatus.CANCELLED);
 		Order saved = orderRepository.save(order);
 
 		outbox.add(

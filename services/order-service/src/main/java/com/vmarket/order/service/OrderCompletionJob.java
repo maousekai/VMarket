@@ -106,7 +106,7 @@ public class OrderCompletionJob {
 				return false;
 			}
 
-			order.setStatus(OrderStatus.COMPLETED);
+			order.transitionTo(OrderStatus.COMPLETED);
 			orderRepository.save(order);
 
 			outbox.add(
