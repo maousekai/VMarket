@@ -41,7 +41,10 @@ vi.mock('../services/api/orderApi', async (importOriginal) => ({
 vi.mock('../services/api/deliveryApi', async (importOriginal) => ({
   ...(await importOriginal()),
   getDelivery: vi.fn(),
+  getRoute: vi.fn().mockResolvedValue([]),
+  issueTrackingTicket: vi.fn().mockRejectedValue({ response: { status: 404, data: {} } }),
 }))
+vi.mock('../components/DeliveryMap', () => ({ default: () => <div data-testid="delivery-map" /> }))
 vi.mock('../services/api/productApi', () => ({ getProduct: vi.fn() }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
 vi.mock('../services/api/reviewApi', async (importOriginal) => ({

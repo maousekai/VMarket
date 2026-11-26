@@ -14,7 +14,7 @@ import { StarRow } from '../components/ReviewParts'
 import { useProductLookup, useShopLookup } from '../hooks/useCatalogLookup'
 import { listMyReviews, REVIEW_STATUS } from '../services/api/reviewApi'
 import { getApiError } from '../services/api/apiClient'
-import { DELIVERY_STATUS_LABELS, getDelivery } from '../services/api/deliveryApi'
+import DeliveryTrackingPanel from '../components/DeliveryTrackingPanel'
 import {
   cancelOrder,
   completeOrder,
@@ -45,25 +45,10 @@ import EvidenceGallery from '../components/EvidenceGallery'
 
 const DISPUTE_MAX = 500
 
+// PBL6-33: trang thai van chuyen + ban do vi tri shipper theo thoi gian thuc.
 function DeliveryStatus({ orderId, status }) {
-  const [delivery, setDelivery] = useState(null)
-  useEffect(() => {
-    if (!['PROCESSING', 'SHIPPED', 'DELIVERED'].includes(status)) return undefined
-    let current = true
-    getDelivery(orderId)
-      .then((data) => current && setDelivery(data))
-      .catch(() => current && setDelivery(null))
-    return () => {
-      current = false
-    }
-  }, [orderId, status])
-  const deliveryStatus = delivery?.assignment?.status
-  if (!deliveryStatus) return null
-  return (
-    <p className="order-delivery" role="status">
-      <strong>Vận chuyển:</strong> {DELIVERY_STATUS_LABELS[deliveryStatus] || deliveryStatus}
-    </p>
-  )
+  if (!['PROCESSING', 'SHIPPED', 'DELIVERED'].includes(status)) return null
+  return <DeliveryTrackingPanel orderId={orderId} />
 }
 
 function ReturnCard({ item, onDispute }) {

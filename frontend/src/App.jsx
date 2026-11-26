@@ -45,7 +45,7 @@ import SellerOrdersPage from './pages/SellerOrdersPage'
 import SellerReviewsPage from './pages/SellerReviewsPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
-import RoleAreaPage from './pages/RoleAreaPage'
+import ShipperPage from './pages/ShipperPage'
 
 /** Link trong email thong bao (/orders/:id) -> trang chi tiet don cua nguoi mua. */
 function LegacyOrderRedirect() {
@@ -138,7 +138,7 @@ export default function App() {
             </Route>
             <Route path="/shops/:shopId" element={<ShopPublicPage />} />
             <Route element={<RouteGuard roles={['SHIPPER']} />}>
-              <Route path="/shipper" element={<RoleAreaPage role="SHIPPER" />} />
+              <Route path="/shipper" element={<ShipperPage />} />
             </Route>
             <Route path="*" element={<NotFoundPage />} />
           </Route>
