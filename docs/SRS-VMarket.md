@@ -565,7 +565,7 @@ Dưới đây đặc tả chi tiết các use case tiêu biểu, đại diện c
 
 - **Web Admin (React):** đăng nhập; phân hệ Seller (bảng điều khiển, quản lý sản phẩm, đơn hàng, xử lý yêu cầu trả hàng, đánh giá, thống kê gian hàng); phân hệ Admin (duyệt gian hàng, kiểm duyệt sản phẩm/đánh giá, quản lý người dùng, quản lý và phân công shipper, danh mục, phân xử trả hàng – khiếu nại, thống kê toàn sàn). Menu hiển thị theo vai trò.
 
-- **Mobile (React Native/Flutter):** các màn hình tương ứng Web end-user, bổ sung tìm kiếm bằng camera và thông báo đẩy; phân hệ Shipper (danh sách đơn được phân công, cập nhật trạng thái giao, chia sẻ vị trí GPS); điều hướng thanh tab chuẩn di động.
+- **Mobile (React Native + Expo):** các màn hình tương ứng Web end-user, bổ sung tìm kiếm bằng camera và thông báo đẩy; phân hệ Shipper (danh sách đơn được phân công, cập nhật trạng thái giao, chia sẻ vị trí GPS); điều hướng thanh tab chuẩn di động.
 
 - Toàn bộ giao diện bằng tiếng Việt, thiết kế đáp ứng; thông báo lỗi rõ ràng, thân thiện.
 
