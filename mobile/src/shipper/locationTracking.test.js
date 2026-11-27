@@ -1,5 +1,6 @@
 import * as Location from 'expo-location'
 import * as SecureStore from 'expo-secure-store'
+import { signOutLocally } from '../api/client'
 import { sendLocation } from '../api/deliveryApi'
 import {
   pushLocation,
@@ -83,5 +84,55 @@ describe('pushLocation', () => {
     await stopTracking()
     expect((await pushLocation(coords, 400_000)).sent).toBe(false)
     expect(sendLocation).not.toHaveBeenCalled()
+  })
+})
+
+describe('review PR 69: stop collecting location when access is gone', () => {
+  it('drops a trip on 403 and stops the background task once no trip is left', async () => {
+    Location.hasStartedLocationUpdatesAsync.mockResolvedValue(true)
+    await startTracking(['a1', 'a2'])
+    sendLocation.mockImplementation(async (id) => {
+      if (id === 'a1') throw apiError(403, 'SHIPPER_INACTIVE')
+      return {}
+    })
+    const first = await pushLocation(coords, 500_000)
+    expect(first.stopped).toBeUndefined()
+    expect(JSON.parse(SecureStore.__store.get('vmarket.trackingAssignments'))).toEqual(['a2'])
+    expect(Location.stopLocationUpdatesAsync).not.toHaveBeenCalled()
+
+    sendLocation.mockRejectedValue(apiError(403, 'FORBIDDEN'))
+    const second = await pushLocation(coords, 520_000)
+    expect(second).toMatchObject({ stopped: true })
+    expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false)
+    expect(Location.stopLocationUpdatesAsync).toHaveBeenCalledWith('vmarket-shipper-location')
+    Location.hasStartedLocationUpdatesAsync.mockResolvedValue(false)
+  })
+
+  it('stops tracking whenever the session ends, whatever the reason', async () => {
+    Location.hasStartedLocationUpdatesAsync.mockResolvedValue(true)
+    await startTracking(['a1'])
+    await signOutLocally()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false)
+    expect(Location.stopLocationUpdatesAsync).toHaveBeenCalledWith('vmarket-shipper-location')
+    Location.hasStartedLocationUpdatesAsync.mockResolvedValue(false)
+  })
+
+  it('reports device location services that are switched off', async () => {
+    Location.hasServicesEnabledAsync.mockResolvedValueOnce(false)
+    expect(await startTracking(['a1'])).toBe('servicesOff')
+  })
+
+  it('asks for background permission only once', async () => {
+    await startTracking(['a1'])
+    await startTracking(['a1', 'a2'])
+    expect(Location.requestBackgroundPermissionsAsync).toHaveBeenCalledTimes(1)
+    expect(Location.getBackgroundPermissionsAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('records when the server last accepted a point', async () => {
+    await startTracking(['a1'])
+    await pushLocation(coords, 600_000)
+    expect(SecureStore.__store.get('vmarket.lastLocationSentAt')).toBe('600000')
   })
 })

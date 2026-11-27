@@ -213,7 +213,7 @@ Ngoài ra, các hệ thống ngoài (cổng thanh toán VNPay, dịch vụ email
 
 - Trình duyệt hỗ trợ: hai phiên bản mới nhất của Chrome, Edge, Firefox, Safari; giao diện web đáp ứng (responsive).
 
-- Thiết bị di động: Android 8.0 trở lên, iOS 13 trở lên; build/chạy thử Android trực tiếp trên máy Windows qua Android Studio; build iOS cần macOS hoặc dịch vụ build đám mây (ví dụ EAS Build) do hạn chế của môi trường Windows. Thiết bị của Shipper phải bật định vị GPS khi giao hàng.
+- Thiết bị di động: Android 8.0 trở lên, iOS 15.1 trở lên (yêu cầu tối thiểu của Expo SDK 58 / React Native 0.88); build/chạy thử Android trực tiếp trên máy Windows qua Android Studio; build iOS cần macOS hoặc dịch vụ build đám mây (ví dụ EAS Build) do hạn chế của môi trường Windows. Thiết bị của Shipper phải bật định vị GPS khi giao hàng.
 
 - Hạ tầng dữ liệu: PostgreSQL, MongoDB, Redis, Elasticsearch, RabbitMQ chạy dưới dạng container.
 

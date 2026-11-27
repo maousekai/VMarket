@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import { KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, View } from 'react-native'
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { Button, Field, Notice } from '../components/ui'
 import { formatMoney } from '../api/deliveryApi'
 import { colors, radius, spacing } from '../theme'
@@ -12,11 +20,14 @@ function Sheet({ title, description, onClose, children }) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.sheet} accessibilityViewIsModal>
-          <Text style={styles.title} accessibilityRole="header">
-            {title}
-          </Text>
-          {description ? <Text style={styles.description}>{description}</Text> : null}
-          {children}
+          {/* handled: bam nut khi ban phim dang mo thi nut nhan luon, khong chi dong ban phim. */}
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+            <Text style={styles.title} accessibilityRole="header">
+              {title}
+            </Text>
+            {description ? <Text style={styles.description}>{description}</Text> : null}
+            {children}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -102,8 +113,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
     padding: spacing(5),
     paddingBottom: spacing(8),
-    gap: spacing(3),
+    maxHeight: '90%',
   },
+  content: { gap: spacing(3) },
   title: { fontSize: 18, fontWeight: '700', color: colors.text },
   description: { fontSize: 14, color: colors.muted },
 })

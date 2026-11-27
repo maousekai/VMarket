@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import * as Location from 'expo-location'
+import * as SecureStore from 'expo-secure-store'
 import AssignmentsScreen from './AssignmentsScreen'
-import { listMyAssignments, retryAssignment, updateAssignmentStatus } from '../api/deliveryApi'
+import { resetThrottleForTests } from './locationTracking'
+import {
+  listMyAssignments,
+  retryAssignment,
+  sendLocation,
+  updateAssignmentStatus,
+} from '../api/deliveryApi'
 
 jest.mock('../api/deliveryApi', () => ({
   ...jest.requireActual('../api/deliveryApi'),
@@ -28,7 +35,19 @@ const trip = (overrides = {}) => ({
   ...overrides,
 })
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  SecureStore.__store.clear()
+  resetThrottleForTests()
+  sendLocation.mockResolvedValue({})
+})
+
+/** watchPositionAsync gia: phat ngay mot diem GPS. */
+const emitOnePosition = () =>
+  Location.watchPositionAsync.mockImplementationOnce(async (options, callback) => {
+    callback({ coords: { latitude: 16.05, longitude: 108.2 } })
+    return { remove: jest.fn() }
+  })
 
 it('lists the trip with recipient, address and COD', async () => {
   listMyAssignments.mockResolvedValue([trip()])
@@ -93,11 +112,69 @@ it('retries a failed trip', async () => {
   await waitFor(() => expect(retryAssignment).toHaveBeenCalledWith('a1', 3))
 })
 
-it('starts GPS only for moving trips', async () => {
+it('starts GPS only for moving trips and says "sharing" only after a point was accepted', async () => {
+  emitOnePosition()
   listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
   await render(<AssignmentsScreen />)
   expect(await screen.findByText(/Đang chia sẻ vị trí cho 1 chuyến/)).toBeTruthy()
-  expect(Location.watchPositionAsync).toHaveBeenCalled()
+  expect(sendLocation).toHaveBeenCalledWith('a1', { latitude: 16.05, longitude: 108.2 })
+})
+
+it('waits for a GPS fix instead of claiming to share', async () => {
+  listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+  await render(<AssignmentsScreen />)
+  expect(await screen.findByText(/Đang chờ tín hiệu GPS/)).toBeTruthy()
+})
+
+it('warns when device location services are off', async () => {
+  Location.hasServicesEnabledAsync.mockResolvedValueOnce(false)
+  listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+  await render(<AssignmentsScreen />)
+  expect(await screen.findByText(/Định vị của máy đang tắt/)).toBeTruthy()
+  expect(screen.getByText('Bật định vị')).toBeTruthy()
+})
+
+it('stops watching and says so when the server revokes access (403)', async () => {
+  const remove = jest.fn()
+  Location.watchPositionAsync.mockImplementationOnce(async (options, callback) => {
+    setTimeout(() => callback({ coords: { latitude: 16.05, longitude: 108.2 } }), 0)
+    return { remove }
+  })
+  sendLocation.mockRejectedValue(
+    Object.assign(new Error('403'), {
+      response: {
+        status: 403,
+        data: { error: { code: 'SHIPPER_INACTIVE', message: 'Shipper đã bị khoá' } },
+      },
+    }),
+  )
+  listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+  await render(<AssignmentsScreen />)
+  expect(await screen.findByText(/Đã dừng chia sẻ vị trí: Shipper đã bị khoá/)).toBeTruthy()
+  expect(remove).toHaveBeenCalled()
+})
+
+it('requires location permission before confirming pickup', async () => {
+  Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied' })
+  listMyAssignments.mockResolvedValue([trip({ status: 'ASSIGNED' })])
+  await render(<AssignmentsScreen />)
+  await fireEvent.press(await screen.findByText('Đã lấy hàng'))
+  expect(await screen.findByText(/Cần cấp quyền vị trí trước khi xác nhận lấy hàng/)).toBeTruthy()
+  expect(updateAssignmentStatus).not.toHaveBeenCalled()
+})
+
+it('hides the buyer address and COD while returning the parcel', async () => {
+  listMyAssignments.mockResolvedValue([trip({ status: 'RETURNING' })])
+  await render(<AssignmentsScreen />)
+  expect(await screen.findByText(/Hoàn hàng về shop/)).toBeTruthy()
+  expect(screen.queryByText(/COD/)).toBeNull()
+  expect(screen.queryByText('1 Bạch Đằng, Đà Nẵng')).toBeNull()
+})
+
+it('uses the shared label for an assigned trip', async () => {
+  listMyAssignments.mockResolvedValue([trip({ status: 'ASSIGNED' })])
+  await render(<AssignmentsScreen />)
+  expect(await screen.findByText('Đã phân công shipper')).toBeTruthy()
 })
 
 it('does not ask for location before pickup', async () => {

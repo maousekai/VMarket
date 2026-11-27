@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native'
+import { Linking, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../auth/AuthProvider'
-import { Card } from '../../components/ui'
+import { Button, Card } from '../../components/ui'
+import { WEB_URL } from '../../config'
 import { colors, spacing } from '../../theme'
 
 export default function BuyerHome() {
@@ -18,6 +19,9 @@ export default function BuyerHome() {
             dụng di động. Trong lúc chờ, bạn có thể mua sắm trên web VMarket bằng cùng tài khoản.
           </Text>
         </Card>
+        {WEB_URL ? (
+          <Button title="Mở VMarket trên web" onPress={() => Linking.openURL(WEB_URL)} />
+        ) : null}
       </View>
     </SafeAreaView>
   )

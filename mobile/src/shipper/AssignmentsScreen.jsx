@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FlatList, Linking, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import {
+  Alert,
+  FlatList,
+  Linking,
+  Platform,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
+import * as Location from 'expo-location'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { getApiError } from '../api/client'
 import {
@@ -15,6 +26,7 @@ import {
   updateAssignmentStatus,
 } from '../api/deliveryApi'
 import { Badge, Button, Card, Loading, Notice } from '../components/ui'
+import { isReturnStatus } from '../deliveryStatus'
 import { colors, radius, spacing } from '../theme'
 import { DeliverSheet, FailSheet } from './ActionSheet'
 import useShipperTracking from './useShipperTracking'
@@ -38,8 +50,47 @@ const timeFormat = new Intl.DateTimeFormat('vi-VN', {
   hour12: false,
 })
 
+const openLocationSettings = () =>
+  Platform.OS === 'android'
+    ? Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() =>
+        Linking.openSettings(),
+      )
+    : Linking.openSettings()
+
 function TrackingBanner({ tracking }) {
   if (!tracking.trackingCount) return null
+  if (tracking.mode === 'servicesOff')
+    return (
+      <View style={styles.banner}>
+        <Notice tone="danger">
+          Định vị của máy đang tắt nên không gửi được vị trí. Bật định vị (GPS) rồi quay lại app.
+        </Notice>
+        <View style={styles.row}>
+          <Button title="Bật định vị" onPress={openLocationSettings} style={styles.flex} />
+          <Button
+            title="Thử lại"
+            variant="secondary"
+            onPress={tracking.retry}
+            style={styles.flex}
+          />
+        </View>
+      </View>
+    )
+  if (tracking.mode === 'revoked')
+    return (
+      <View style={styles.banner}>
+        <Notice tone="danger">
+          {`Đã dừng chia sẻ vị trí: ${tracking.error || 'bạn không còn quyền với chuyến này.'}`}
+        </Notice>
+      </View>
+    )
+  if (tracking.mode === 'error')
+    return (
+      <View style={styles.banner}>
+        <Notice tone="danger">{`Không lấy được vị trí: ${tracking.error}`}</Notice>
+        <Button title="Thử lại" onPress={tracking.retry} />
+      </View>
+    )
   if (tracking.mode === 'denied')
     return (
       <View style={styles.banner}>
@@ -59,14 +110,25 @@ function TrackingBanner({ tracking }) {
       </View>
     )
   const sent = tracking.lastSentAt ? ` · gửi lúc ${timeFormat.format(tracking.lastSentAt)}` : ''
+  // Chi bao "dang chia se" sau khi server da nhan diem that (khong chi vi da co quyen).
+  const message = !tracking.sharing
+    ? 'Đang chờ tín hiệu GPS, chưa gửi được vị trí…'
+    : tracking.mode === 'background'
+      ? `Đang chia sẻ vị trí cho ${tracking.trackingCount} chuyến, kể cả khi app chạy nền${sent}.`
+      : `Đang chia sẻ vị trí cho ${tracking.trackingCount} chuyến khi app đang mở${sent}.`
   return (
     <View style={styles.banner}>
-      <Notice tone={tracking.error ? 'warning' : 'success'}>
-        {tracking.mode === 'background'
-          ? `Đang chia sẻ vị trí cho ${tracking.trackingCount} chuyến, kể cả khi app chạy nền.`
-          : `Đang chia sẻ vị trí cho ${tracking.trackingCount} chuyến khi app đang mở${sent}.`}
+      <Notice tone={tracking.error || !tracking.sharing ? 'warning' : 'success'}>
+        {message}
         {tracking.error ? `\n${tracking.error}` : ''}
       </Notice>
+      {tracking.mode === 'foreground' && (
+        <Button
+          title="Bật chia sẻ khi chạy nền"
+          variant="secondary"
+          onPress={tracking.enableBackground}
+        />
+      )}
     </View>
   )
 }
@@ -76,7 +138,9 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
   const [sheet, setSheet] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const cod = assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
+  // Hoan hang: khong giao cho nguoi mua, khong thu COD -> an dia chi va tien thu ho.
+  const returning = isReturnStatus(assignment.status)
+  const cod = !returning && assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
 
   async function run(action) {
     setBusy(true)
@@ -102,9 +166,28 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
       }),
     )
 
+  async function pickUp() {
+    // Xin quyen vi tri TRUOC khi lay hang: tu choi thi khong de chuyen di tiep ma khong co GPS.
+    const permission = await Location.requestForegroundPermissionsAsync().catch(() => null)
+    if (permission?.status !== 'granted') {
+      setError('Cần cấp quyền vị trí trước khi xác nhận lấy hàng để người mua theo dõi được đơn.')
+      return
+    }
+    changeStatus('PICKED_UP')
+  }
+
+  function confirmReturned() {
+    Alert.alert('Xác nhận đã hoàn hàng?', 'Thao tác này không đảo ngược được.', [
+      { text: 'Huỷ', style: 'cancel' },
+      { text: 'Đã hoàn hàng', style: 'destructive', onPress: () => changeStatus('RETURNED') },
+    ])
+  }
+
   function onAction(action) {
     if (action.kind === 'deliver' || action.kind === 'fail') setSheet(action.kind)
     else if (action.kind === 'retry') run(() => retryAssignment(assignment.id, assignment.version))
+    else if (action.status === 'PICKED_UP') pickUp()
+    else if (action.status === 'RETURNED') confirmReturned()
     else changeStatus(action.status)
   }
 
@@ -120,30 +203,40 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
           tone={badgeTone(assignment.status)}
         />
       </View>
-      <View style={styles.info}>
-        <Text style={styles.label}>Người nhận</Text>
-        <Text style={styles.value}>{order.recipientName || '—'}</Text>
-        {order.phone ? (
-          <Pressable accessibilityRole="link" onPress={() => Linking.openURL(`tel:${order.phone}`)}>
-            <Text style={styles.link}>{order.phone}</Text>
-          </Pressable>
-        ) : null}
-        <Text style={styles.label}>Địa chỉ</Text>
-        <Text style={styles.value}>
-          {orderAddress(order) ||
-            [assignment.district, assignment.province].filter(Boolean).join(', ')}
-        </Text>
-        {order.note ? (
-          <>
-            <Text style={styles.label}>Ghi chú</Text>
-            <Text style={styles.value}>{order.note}</Text>
-          </>
-        ) : null}
-        <Text style={styles.label}>Thu hộ</Text>
-        <Text style={[styles.value, cod && styles.cod]}>
-          {cod ? `COD ${formatMoney(assignment.codAmount)}` : 'Đã thanh toán trước'}
-        </Text>
-      </View>
+      {returning ? (
+        <View style={styles.info}>
+          <Text style={styles.label}>Nhiệm vụ</Text>
+          <Text style={styles.value}>Hoàn hàng về shop — không thu tiền người mua.</Text>
+        </View>
+      ) : (
+        <View style={styles.info}>
+          <Text style={styles.label}>Người nhận</Text>
+          <Text style={styles.value}>{order.recipientName || '—'}</Text>
+          {order.phone ? (
+            <Pressable
+              accessibilityRole="link"
+              onPress={() => Linking.openURL(`tel:${order.phone}`)}
+            >
+              <Text style={styles.link}>{order.phone}</Text>
+            </Pressable>
+          ) : null}
+          <Text style={styles.label}>Địa chỉ</Text>
+          <Text style={styles.value}>
+            {orderAddress(order) ||
+              [assignment.district, assignment.province].filter(Boolean).join(', ')}
+          </Text>
+          {order.note ? (
+            <>
+              <Text style={styles.label}>Ghi chú</Text>
+              <Text style={styles.value}>{order.note}</Text>
+            </>
+          ) : null}
+          <Text style={styles.label}>Thu hộ</Text>
+          <Text style={[styles.value, cod && styles.cod]}>
+            {cod ? `COD ${formatMoney(assignment.codAmount)}` : 'Đã thanh toán trước'}
+          </Text>
+        </View>
+      )}
       {error && !sheet ? <Notice tone="danger">{error}</Notice> : null}
       {shipperActions(assignment).map((action) => (
         <Button

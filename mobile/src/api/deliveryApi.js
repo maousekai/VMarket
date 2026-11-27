@@ -1,17 +1,7 @@
 import client from './client'
 
 // Delivery Service (PBL6-20) - phan he shipper. Cung quy tac voi frontend/src/services/api/deliveryApi.js.
-export const DELIVERY_STATUS_LABELS = Object.freeze({
-  WAITING_HANDOFF: 'Chờ gian hàng bàn giao',
-  WAITING_ASSIGNMENT: 'Chờ phân công',
-  ASSIGNED: 'Chờ lấy hàng',
-  PICKED_UP: 'Đã lấy hàng',
-  IN_TRANSIT: 'Đang giao',
-  FAILED: 'Giao thất bại',
-  RETURNING: 'Đang hoàn hàng',
-  RETURNED: 'Đã hoàn hàng',
-  DELIVERED: 'Đã giao',
-})
+export { DELIVERY_STATUS_LABELS } from '../deliveryStatus'
 
 /** Trang thai server nhan GPS (DeliveryStatus.tracking). */
 export const TRACKING_STATUSES = Object.freeze(['PICKED_UP', 'IN_TRANSIT', 'RETURNING'])
