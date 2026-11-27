@@ -2,17 +2,8 @@ import apiClient from './apiClient'
 
 // Delivery Service (PBL6-20). Seller ban giao phan hang cua shop minh; nguoi mua / seller xem
 // trang thai chuyen giao. 404 DELIVERY_NOT_FOUND = don chua co chuyen giao.
-export const DELIVERY_STATUS_LABELS = Object.freeze({
-  WAITING_HANDOFF: 'Chờ các gian hàng bàn giao',
-  WAITING_ASSIGNMENT: 'Chờ phân công shipper',
-  ASSIGNED: 'Đã có shipper nhận đơn',
-  PICKED_UP: 'Shipper đã lấy hàng',
-  IN_TRANSIT: 'Đang giao hàng',
-  FAILED: 'Giao không thành công, sẽ giao lại',
-  RETURNING: 'Đang hoàn hàng về gian hàng',
-  RETURNED: 'Đã hoàn hàng',
-  DELIVERED: 'Đã giao thành công',
-})
+// Nhan trang thai dung chung nam o utils/deliveryStatus.js (review PR 68, muc 1.3).
+export { DELIVERY_STATUS_LABELS } from '../../utils/deliveryStatus'
 
 /** Trang thai ma delivery-service nhan GPS va day vi tri qua WebSocket (DeliveryStatus.tracking). */
 export const TRACKING_STATUSES = Object.freeze(['PICKED_UP', 'IN_TRANSIT', 'RETURNING'])
@@ -21,6 +12,21 @@ export const isTerminalStatus = (status) => status === 'DELIVERED' || status ===
 
 /** Server tu choi GPS gui cach nhau duoi 10 giay (PING_TOO_FREQUENT). */
 export const GPS_MIN_INTERVAL_MS = 10_000
+/**
+ * Web gui moi 12 giay: gui dung 10 giay thi do lech dong ho / mang lam 200 va 429 xen ke, vi tri
+ * thuc te 20 giay moi cap nhat mot lan (review PR 68).
+ */
+export const GPS_SEND_INTERVAL_MS = 12_000
+
+// Do lech dong ho may khach so voi server (header Date), de "x giay truoc" tinh theo gio server.
+let serverOffsetMs = 0
+function recordServerClock(response) {
+  const serverTime = Date.parse(response?.headers?.date || '')
+  if (Number.isFinite(serverTime)) serverOffsetMs = serverTime - Date.now()
+  return response
+}
+/** Gio hien tai uoc theo dong ho server. */
+export const serverNow = () => Date.now() + serverOffsetMs
 
 const enc = encodeURIComponent
 const orderUrl = (orderId) => `/api/delivery/orders/${enc(orderId)}`
@@ -31,19 +37,24 @@ export const handoffOrder = async (orderId) =>
   (await apiClient.post(`/api/delivery/seller/orders/${enc(orderId)}/handoff`)).data
 
 /** {assignment:{status,version,...}, order:{...}, pickups:[...], history:[{status, occurred_at}]} */
-export const getDelivery = async (orderId) => (await apiClient.get(orderUrl(orderId))).data
+export const getDelivery = async (orderId) =>
+  recordServerClock(await apiClient.get(orderUrl(orderId))).data
 
 /** Lich su hanh trinh: [{sequence, latitude, longitude, recorded_at}] theo thu tu ghi. */
 export const getRoute = async (orderId, { page = 0, size = 500 } = {}) =>
-  (await apiClient.get(`${orderUrl(orderId)}/route`, { params: { page, size } })).data
+  recordServerClock(await apiClient.get(`${orderUrl(orderId)}/route`, { params: { page, size } }))
+    .data
 
 /** Ve dung mot lan, song 30 giay: {ticket, webSocketUrl}. */
 export const issueTrackingTicket = async (orderId) =>
-  (await apiClient.post(`${orderUrl(orderId)}/tracking-ticket`)).data
+  recordServerClock(await apiClient.post(`${orderUrl(orderId)}/tracking-ticket`)).data
 
 // ---- Admin ----
 
-/** [{id,name,phone,province,district,active,total_orders,delivered_orders,success_rate_percent}] */
+/**
+ * [{id, name, phone, province, district, active, account_status, total_orders, active_orders,
+ *   delivered_orders, success_rate_percent}] - province/district la khoa da chuan hoa.
+ */
 export const listShippers = async ({ province = '', district = '', page = 0, size = 20 } = {}) =>
   (
     await apiClient.get('/api/delivery/admin/shippers', {
@@ -70,9 +81,13 @@ export const newIdempotencyKey = idempotencyKey
 export const setShipperLocked = async (shipperId, locked) =>
   (await apiClient.put(`/api/delivery/admin/shippers/${enc(shipperId)}/lock`, { locked })).data
 
-/** [{id, order_id, shipper_id, status, attempt, province, district, created_at}] */
-export const listAssignments = async ({ page = 0, size = 20 } = {}) =>
-  (await apiClient.get('/api/delivery/admin/assignments', { params: { page, size } })).data
+/** [{id, order_id, shipper_id, shipper_name, shipper_phone, status, attempt, version, ...}] */
+export const listAssignments = async ({ status = '', page = 0, size = 20 } = {}) =>
+  (
+    await apiClient.get('/api/delivery/admin/assignments', {
+      params: { page, size, ...(status ? { status } : {}) },
+    })
+  ).data
 
 export const assignShipper = async (assignmentId, body) =>
   (await apiClient.post(`/api/delivery/admin/assignments/${enc(assignmentId)}/assign`, body)).data

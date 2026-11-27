@@ -14,6 +14,7 @@ import {
   shipperActions,
   updateAssignmentStatus,
 } from '../services/api/deliveryApi'
+import { displayArea } from '../utils/deliveryStatus'
 import { formatDateTime } from '../utils/formatDate'
 import { formatMoney } from '../utils/formatMoney'
 import { orderAddress, shortOrderId } from '../utils/order'
@@ -25,6 +26,11 @@ const TABS = [
   ['active', 'Đang xử lý'],
   ['done', 'Đã kết thúc'],
 ]
+const PAGE_SIZE = 50
+// Tu lam moi de chuyen moi duoc phan cong hien len ma shipper khong phai bam "Lam moi".
+const AUTO_REFRESH_MS = 30_000
+const RETURN_STATUSES = ['RETURNING', 'RETURN_DROPPED_OFF']
+const groupThousands = (digits) => (digits ? Number(digits).toLocaleString('vi-VN') : '')
 
 /** Chia se GPS cho chuyen dang chay; tu dung khi chuyen roi khoi trang thai theo doi. */
 function GpsSharing({ assignment, onStopped }) {
@@ -55,6 +61,11 @@ function GpsSharing({ assignment, onStopped }) {
         {gps.error && (
           <span className="shipper-gps__error" role="alert">
             {gps.error}
+          </span>
+        )}
+        {!gps.error && gps.warning && (
+          <span className="shipper-gps__warning" role="status">
+            {gps.warning}
           </span>
         )}
       </div>
@@ -105,7 +116,7 @@ function DeliverDialog({ assignment, busy, error, onClose, onSubmit }) {
             required
             inputMode="numeric"
             data-autofocus
-            value={amount}
+            value={groupThousands(amount)}
             error={amount && Number(amount) !== cod ? 'Số tiền phải khớp số COD của đơn' : ''}
             onChange={(event) => setAmount(event.target.value.replace(/\D/g, ''))}
           />
@@ -200,6 +211,8 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
   const items = order.items || []
+  // Hoan hang: khong hien dia chi nguoi mua va COD vi khong giao / khong thu tien nua.
+  const returning = RETURN_STATUSES.includes(assignment.status)
 
   async function run(action) {
     setBusy(true)
@@ -246,47 +259,59 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
         </span>
       </div>
 
-      <dl className="shipper-card__info">
-        <div>
-          <dt>Người nhận</dt>
-          <dd>
-            {order.recipientName || '—'}
-            {order.phone && (
-              <>
-                {' · '}
-                <a href={`tel:${order.phone}`}>{order.phone}</a>
-              </>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Địa chỉ</dt>
-          <dd>
-            {orderAddress(order) ||
-              [assignment.district, assignment.province].filter(Boolean).join(', ')}
-          </dd>
-        </div>
-        {order.note && (
+      {returning ? (
+        <dl className="shipper-card__info">
           <div>
-            <dt>Ghi chú</dt>
-            <dd>{order.note}</dd>
+            <dt>Nhiệm vụ</dt>
+            <dd>Hoàn hàng về shop — không thu tiền người mua.</dd>
           </div>
-        )}
-        <div>
-          <dt>Thu hộ</dt>
-          <dd>
-            {assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
-              ? `COD ${formatMoney(Number(assignment.codAmount))}`
-              : 'Đã thanh toán trước'}
-          </dd>
-        </div>
-        {items.length > 0 && (
+          {items.length > 0 && (
+            <div>
+              <dt>Hàng hoá</dt>
+              <dd>{items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)} sản phẩm</dd>
+            </div>
+          )}
+        </dl>
+      ) : (
+        <dl className="shipper-card__info">
           <div>
-            <dt>Hàng hoá</dt>
-            <dd>{items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)} sản phẩm</dd>
+            <dt>Người nhận</dt>
+            <dd>
+              {order.recipientName || '—'}
+              {order.phone && (
+                <>
+                  {' · '}
+                  <a href={`tel:${order.phone}`}>{order.phone}</a>
+                </>
+              )}
+            </dd>
           </div>
-        )}
-      </dl>
+          <div>
+            <dt>Địa chỉ</dt>
+            <dd>{orderAddress(order) || displayArea(assignment)}</dd>
+          </div>
+          {order.note && (
+            <div>
+              <dt>Ghi chú</dt>
+              <dd>{order.note}</dd>
+            </div>
+          )}
+          <div>
+            <dt>Thu hộ</dt>
+            <dd>
+              {assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
+                ? `COD ${formatMoney(Number(assignment.codAmount))}`
+                : 'Đã thanh toán trước'}
+            </dd>
+          </div>
+          {items.length > 0 && (
+            <div>
+              <dt>Hàng hoá</dt>
+              <dd>{items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)} sản phẩm</dd>
+            </div>
+          )}
+        </dl>
+      )}
 
       <GpsSharing assignment={assignment} onStopped={onStale} />
 
@@ -320,7 +345,13 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
         )}
       </div>
 
-      {showMap && <DeliveryTrackingPanel orderId={assignment.orderId} showHistory={false} />}
+      {showMap && (
+        <DeliveryTrackingPanel
+          orderId={assignment.orderId}
+          audience="shipper"
+          showHistory={false}
+        />
+      )}
 
       {dialog === 'deliver' && (
         <DeliverDialog
@@ -347,22 +378,52 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
 /** Phan he shipper (PBL6-33): don duoc phan cong, xu ly giao va chia se GPS. */
 export default function ShipperPage() {
   const [tab, setTab] = useState('active')
-  const [state, setState] = useState({ status: 'loading', items: [], error: '' })
+  const [state, setState] = useState({ status: 'loading', items: [], error: '', hasMore: false })
+  const [pages, setPages] = useState(1)
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey((key) => key + 1), [])
 
   useEffect(() => {
     let current = true
-    listMyAssignments()
-      .then((items) => current && setState({ status: 'ready', items: items || [], error: '' }))
-      .catch(
-        (failure) =>
-          current && setState({ status: 'error', items: [], error: getApiError(failure).message }),
-      )
+    ;(async () => {
+      try {
+        // Tai lai du so trang da xem de "Tai them" va tu lam moi khong lam mat chuyen cu.
+        const items = []
+        let last = []
+        for (let page = 0; page < pages; page += 1) {
+          last = (await listMyAssignments({ page, size: PAGE_SIZE })) || []
+          items.push(...last)
+          if (last.length < PAGE_SIZE) break
+        }
+        if (current)
+          setState({ status: 'ready', items, error: '', hasMore: last.length === PAGE_SIZE })
+      } catch (failure) {
+        if (current)
+          setState((previous) => ({
+            ...previous,
+            status: previous.items.length ? 'ready' : 'error',
+            error: getApiError(failure).message,
+          }))
+      }
+    })()
     return () => {
       current = false
     }
-  }, [reloadKey])
+  }, [reloadKey, pages])
+
+  useEffect(() => {
+    const timer = setInterval(reload, AUTO_REFRESH_MS)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reload()
+    }
+    window.addEventListener('focus', reload)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', reload)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [reload])
 
   function onChanged(updated) {
     setState((previous) => ({
@@ -432,6 +493,15 @@ export default function ShipperPage() {
             />
           ))}
         </ul>
+      )}
+      {state.status === 'ready' && state.hasMore && (
+        <button
+          className="account-button account-button--secondary shipper-page__more"
+          type="button"
+          onClick={() => setPages((value) => value + 1)}
+        >
+          Tải thêm chuyến cũ
+        </button>
       )}
     </main>
   )

@@ -2,6 +2,7 @@ package com.vmarket.delivery.controller;
 
 import com.vmarket.delivery.config.DeliveryProperties;
 import com.vmarket.delivery.domain.Assignment;
+import com.vmarket.delivery.domain.DeliveryStatus;
 import com.vmarket.delivery.dto.DeliveryRequests.*;
 import com.vmarket.delivery.repository.DeliveryRepository;
 import com.vmarket.delivery.service.DeliveryService;
@@ -61,9 +62,11 @@ public class DeliveryController {
     @GetMapping("/admin/assignments")
     public List<Map<String, Object>> assignments(
             Authentication auth,
+            @RequestParam(required = false) DeliveryStatus status,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return service.assignments(auth.getName(), page, size);
+        return service.assignments(
+                auth.getName(), status == null ? "" : status.name(), page, size);
     }
 
     @PostMapping("/admin/assignments/{id}/assign")

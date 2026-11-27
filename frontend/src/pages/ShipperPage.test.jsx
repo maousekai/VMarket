@@ -160,4 +160,44 @@ describe('ShipperPage', () => {
     await card()
     expect(geolocation.watchPosition).not.toHaveBeenCalled()
   })
+
+  it('hides the buyer address and COD while returning the parcel', async () => {
+    listMyAssignments.mockResolvedValue([trip({ status: 'RETURNING' })])
+    render(<ShipperPage />)
+    const item = within(await card())
+    expect(item.getByText(/Hoàn hàng về shop/)).toBeTruthy()
+    expect(item.queryByText(/COD/)).toBeNull()
+    expect(item.queryByText('1 Bạch Đằng, Hải Châu 1, Đà Nẵng')).toBeNull()
+  })
+
+  it('groups thousands in the COD amount field', async () => {
+    listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+    render(<ShipperPage />)
+    fireEvent.click(within(await card()).getByRole('button', { name: 'Giao thành công' }))
+    const input = within(screen.getByRole('dialog')).getByLabelText(/Số tiền đã thu/)
+    fireEvent.change(input, { target: { value: '150000' } })
+    expect(input.value).toBe((150000).toLocaleString('vi-VN'))
+  })
+
+  it('keeps an unsent point after a 429 and warns instead of failing silently', async () => {
+    listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+    sendLocation.mockRejectedValueOnce({
+      response: { status: 429, data: { error: { code: 'PING_TOO_FREQUENT' } } },
+    })
+    render(<ShipperPage />)
+    await card()
+    watchSuccess({ coords: { latitude: 16.05, longitude: 108.2 }, timestamp: 1 })
+    expect(await screen.findByText(/gửi chậm lại/)).toBeTruthy()
+  })
+
+  it('stops watching the position when the server revokes access (403)', async () => {
+    listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+    sendLocation.mockRejectedValueOnce({
+      response: { status: 403, data: { error: { code: 'FORBIDDEN', message: 'Không có quyền' } } },
+    })
+    render(<ShipperPage />)
+    await card()
+    watchSuccess({ coords: { latitude: 16.05, longitude: 108.2 }, timestamp: 1 })
+    await waitFor(() => expect(geolocation.clearWatch).toHaveBeenCalledWith(7))
+  })
 })

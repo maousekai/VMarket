@@ -45,6 +45,7 @@ import SellerOrdersPage from './pages/SellerOrdersPage'
 import SellerReviewsPage from './pages/SellerReviewsPage'
 import ShopPublicPage from './pages/ShopPublicPage'
 import SellerLayout from './components/SellerLayout'
+import ShipperLayout from './components/ShipperLayout'
 import ShipperPage from './pages/ShipperPage'
 
 /** Link trong email thong bao (/orders/:id) -> trang chi tiet don cua nguoi mua. */
@@ -108,6 +109,12 @@ export default function App() {
               <Route path="settings" element={<SellerSettingsPage />} />
             </Route>
           </Route>
+          {/* Khu vuc giao hang co khung rieng: khong header mua sam / chatbot (review PR 68). */}
+          <Route element={<RouteGuard roles={['SHIPPER']} />}>
+            <Route path="/shipper" element={<ShipperLayout />}>
+              <Route index element={<ShipperPage />} />
+            </Route>
+          </Route>
           <Route element={<ApplicationLayout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/search" element={<SearchPage />} />
@@ -137,9 +144,6 @@ export default function App() {
               <Route path="/seller/intro" element={<Navigate to="/seller" replace />} />
             </Route>
             <Route path="/shops/:shopId" element={<ShopPublicPage />} />
-            <Route element={<RouteGuard roles={['SHIPPER']} />}>
-              <Route path="/shipper" element={<ShipperPage />} />
-            </Route>
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

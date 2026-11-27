@@ -7,7 +7,6 @@ import {
   adminRetryAssignment,
   assignShipper,
   createShipper,
-  DELIVERY_STATUS_LABELS,
   getDelivery,
   isTerminalStatus,
   listAssignments,
@@ -16,6 +15,17 @@ import {
   returnAssignment,
   setShipperLocked,
 } from '../services/api/deliveryApi'
+import {
+  DELIVERY_STATUS_LABELS,
+  displayArea,
+  displayAreaName,
+  isAreaMismatch,
+  NEEDS_DISPATCH_STATUS,
+  SHIPPER_ACCOUNT_LABELS,
+  SHIPPER_DISTRICTS,
+  SHIPPER_PROVINCES,
+  shipperAccountStatus,
+} from '../utils/deliveryStatus'
 import { formatDateTime } from '../utils/formatDate'
 import { shortOrderId } from '../utils/order'
 import '../components/account.css'
@@ -24,7 +34,10 @@ import '../components/adminUsers.css'
 import '../components/delivery.css'
 
 const PAGE_SIZE = 20
-const area = (row) => [row.district, row.province].filter(Boolean).join(', ') || '—'
+const STATUS_FILTERS = [
+  ['', 'Tất cả trạng thái'],
+  ...Object.entries(DELIVERY_STATUS_LABELS).filter(([status]) => status !== 'RETURN_DROPPED_OFF'),
+]
 
 function usePaged(loader, deps) {
   const [page, setPage] = useState(0)
@@ -72,13 +85,22 @@ function Pager({ page, count, setPage }) {
   )
 }
 
+function AccountBadge({ shipper }) {
+  const status = shipperAccountStatus(shipper)
+  return (
+    <span className={`delivery-badge delivery-badge--${status.toLowerCase()}`}>
+      {SHIPPER_ACCOUNT_LABELS[status]}
+    </span>
+  )
+}
+
 const emptyShipper = {
   email: '',
   username: '',
   password: '',
   name: '',
   phone: '',
-  province: '',
+  province: SHIPPER_PROVINCES[0],
   district: '',
 }
 
@@ -108,8 +130,8 @@ function CreateShipperDialog({ onClose, onCreated }) {
           },
           name: form.name.trim(),
           phone: form.phone.trim(),
-          province: form.province.trim(),
-          district: form.district.trim() || null,
+          province: form.province,
+          district: form.district || null,
         },
         key,
       )
@@ -127,11 +149,12 @@ function CreateShipperDialog({ onClose, onCreated }) {
     form.password.length >= 8 &&
     form.name &&
     form.phone &&
-    form.province
+    form.province &&
+    form.district
   return (
     <Modal
       title="Thêm shipper"
-      description="Tạo tài khoản đăng nhập vai trò SHIPPER và hồ sơ khu vực giao hàng."
+      description="Tạo tài khoản vai trò SHIPPER. Shipper ở trạng thái “Chờ kích hoạt” cho tới khi xác thực email, và chỉ được phân công khi đã Hoạt động."
       onClose={onClose}
     >
       <form className="profile-form" noValidate onSubmit={submit}>
@@ -160,8 +183,22 @@ function CreateShipperDialog({ onClose, onCreated }) {
           hint="8–32 ký tự. Shipper nên đổi sau lần đăng nhập đầu."
           {...field('password')}
         />
-        <AccountField label="Tỉnh / thành phố" required maxLength={100} {...field('province')} />
-        <AccountField label="Quận / huyện" maxLength={100} {...field('district')} />
+        {/* Chon tu danh sach: go sai chinh ta thi shipper khong bao gio duoc tu dong phan cong. */}
+        <AccountField as="select" label="Tỉnh / thành phố" required {...field('province')}>
+          {SHIPPER_PROVINCES.map((province) => (
+            <option key={province} value={province}>
+              {province}
+            </option>
+          ))}
+        </AccountField>
+        <AccountField as="select" label="Quận / huyện phụ trách" required {...field('district')}>
+          <option value="">Chọn quận / huyện</option>
+          {SHIPPER_DISTRICTS.map((district) => (
+            <option key={district} value={district}>
+              {district}
+            </option>
+          ))}
+        </AccountField>
         {error && !Object.keys(error.fieldErrors || {}).length && (
           <p className="account-notice account-notice--error" role="alert">
             {error.message}
@@ -184,55 +221,90 @@ function CreateShipperDialog({ onClose, onCreated }) {
   )
 }
 
-function ShippersTab() {
-  const [province, setProvince] = useState('')
-  const [filter, setFilter] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [notice, setNotice] = useState('')
-  const [busyId, setBusyId] = useState('')
-  const shippers = usePaged(
-    (page) => listShippers({ province: filter, page, size: PAGE_SIZE }),
-    [filter],
-  )
+function LockDialog({ shipper, onClose, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const locking = shipperAccountStatus(shipper) !== 'LOCKED'
+  const open = Number(shipper.active_orders || 0)
 
-  async function toggleLock(shipper) {
-    setBusyId(shipper.id)
-    setNotice('')
+  async function confirm() {
+    setBusy(true)
+    setError('')
     try {
-      await setShipperLocked(shipper.id, shipper.active)
-      setNotice(`${shipper.active ? 'Đã khoá' : 'Đã mở khoá'} shipper ${shipper.name}.`)
-      shippers.reload()
+      await setShipperLocked(shipper.id, locking)
+      onDone(`${locking ? 'Đã khoá' : 'Đã mở khoá'} shipper ${shipper.name}.`)
     } catch (failure) {
-      setNotice(getApiError(failure).message)
-    } finally {
-      setBusyId('')
+      setError(getApiError(failure).message)
+      setBusy(false)
     }
   }
 
   return (
+    <Modal
+      title={`${locking ? 'Khoá' : 'Mở khoá'} shipper ${shipper.name}?`}
+      description={
+        locking
+          ? open > 0
+            ? `Shipper đang có ${open} chuyến chưa xong. Sau khi khoá, shipper không đăng nhập và không gửi vị trí được nữa; hãy phân công lại các chuyến này.`
+            : 'Shipper không có chuyến nào đang chạy. Sau khi khoá, shipper không đăng nhập được nữa.'
+          : 'Shipper sẽ đăng nhập và nhận chuyến lại được.'
+      }
+      onClose={onClose}
+    >
+      {error && (
+        <p className="account-notice account-notice--error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="account-actions">
+        <button
+          type="button"
+          className={`account-button${locking ? ' account-button--danger' : ''}`}
+          disabled={busy}
+          onClick={confirm}
+        >
+          {busy ? 'Đang xử lý…' : locking ? 'Khoá shipper' : 'Mở khoá'}
+        </button>
+        <button
+          type="button"
+          className="account-button account-button--secondary"
+          data-autofocus
+          onClick={onClose}
+        >
+          Huỷ
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function ShippersTab() {
+  const [district, setDistrict] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [locking, setLocking] = useState(null)
+  const [notice, setNotice] = useState('')
+  const shippers = usePaged((page) => listShippers({ district, page, size: PAGE_SIZE }), [district])
+
+  return (
     <>
       <div className="admin-users__toolbar">
-        <form
-          className="admin-users__search"
-          role="search"
-          onSubmit={(event) => {
-            event.preventDefault()
-            shippers.setPage(0)
-            setFilter(province.trim())
-          }}
-        >
-          <input
-            type="search"
-            aria-label="Lọc theo tỉnh / thành phố"
-            placeholder="Lọc theo tỉnh / thành phố…"
-            maxLength={100}
-            value={province}
-            onChange={(event) => setProvince(event.target.value)}
-          />
-          <button className="account-button" type="submit">
-            Lọc
-          </button>
-        </form>
+        <label className="delivery-filter">
+          <span>Quận / huyện</span>
+          <select
+            value={district}
+            onChange={(event) => {
+              shippers.setPage(0)
+              setDistrict(event.target.value)
+            }}
+          >
+            <option value="">Tất cả</option>
+            {SHIPPER_DISTRICTS.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
         <button className="account-button" type="button" onClick={() => setCreating(true)}>
           Thêm shipper
         </button>
@@ -264,6 +336,7 @@ function ShippersTab() {
                 <tr>
                   <th scope="col">Shipper</th>
                   <th scope="col">Khu vực</th>
+                  <th scope="col">Đang chạy</th>
                   <th scope="col">Đã giao / tổng</th>
                   <th scope="col">Tỉ lệ thành công</th>
                   <th scope="col">Trạng thái</th>
@@ -273,36 +346,35 @@ function ShippersTab() {
                 </tr>
               </thead>
               <tbody>
-                {shippers.items.map((shipper) => (
-                  <tr key={shipper.id}>
-                    <td>
-                      <strong>{shipper.name}</strong>
-                      <span className="admin-cell__sub">{shipper.phone}</span>
-                    </td>
-                    <td>{area(shipper)}</td>
-                    <td>
-                      {shipper.delivered_orders} / {shipper.total_orders}
-                    </td>
-                    <td>{Number(shipper.success_rate_percent || 0).toFixed(1)}%</td>
-                    <td>
-                      <span
-                        className={`delivery-badge delivery-badge--${shipper.active ? 'delivered' : 'failed'}`}
-                      >
-                        {shipper.active ? 'Hoạt động' : 'Đã khoá'}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className={`account-button${shipper.active ? ' account-button--danger' : ' account-button--secondary'}`}
-                        disabled={busyId === shipper.id}
-                        onClick={() => toggleLock(shipper)}
-                      >
-                        {shipper.active ? 'Khoá' : 'Mở khoá'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {shippers.items.map((shipper) => {
+                  const locked = shipperAccountStatus(shipper) === 'LOCKED'
+                  return (
+                    <tr key={shipper.id}>
+                      <td>
+                        <strong>{shipper.name}</strong>
+                        <span className="admin-cell__sub">{shipper.phone}</span>
+                      </td>
+                      <td>{displayArea(shipper)}</td>
+                      <td>{Number(shipper.active_orders || 0)}</td>
+                      <td>
+                        {shipper.delivered_orders} / {shipper.total_orders}
+                      </td>
+                      <td>{Number(shipper.success_rate_percent || 0).toFixed(1)}%</td>
+                      <td>
+                        <AccountBadge shipper={shipper} />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className={`account-button${locked ? ' account-button--secondary' : ' account-button--danger'}`}
+                          onClick={() => setLocking(shipper)}
+                        >
+                          {locked ? 'Mở khoá' : 'Khoá'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -314,7 +386,20 @@ function ShippersTab() {
           onClose={() => setCreating(false)}
           onCreated={(shipper) => {
             setCreating(false)
-            setNotice(`Đã tạo shipper ${shipper.name}.`)
+            setNotice(
+              `Đã tạo shipper ${shipper.name}. Tài khoản ở trạng thái “Chờ kích hoạt” cho tới khi shipper xác thực email.`,
+            )
+            shippers.reload()
+          }}
+        />
+      )}
+      {locking && (
+        <LockDialog
+          shipper={locking}
+          onClose={() => setLocking(null)}
+          onDone={(message) => {
+            setLocking(null)
+            setNotice(message)
             shippers.reload()
           }}
         />
@@ -325,33 +410,41 @@ function ShippersTab() {
 
 function AssignDialog({ assignment, onClose, onDone }) {
   const [shippers, setShippers] = useState(null)
-  const [version, setVersion] = useState(null)
-  const [form, setForm] = useState({
-    shipperId: assignment.shipper_id || '',
-    overrideArea: false,
-    reason: '',
-  })
+  const [version, setVersion] = useState(
+    typeof assignment.version === 'number' ? assignment.version : null,
+  )
+  const [form, setForm] = useState({ shipperId: '', reason: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const midTrip = !['WAITING_ASSIGNMENT', 'ASSIGNED'].includes(assignment.status)
+  const inProgress = !['WAITING_ASSIGNMENT', 'ASSIGNED'].includes(assignment.status)
 
   useEffect(() => {
     let current = true
-    // Danh sach chuyen khong tra version; lay tu chi tiet de chan ghi de (STALE_DELIVERY).
-    Promise.all([
-      listShippers({ province: form.overrideArea ? '' : assignment.province, size: 100 }),
-      getDelivery(assignment.order_id),
-    ])
+    // Ca tinh, de admin thay ca shipper khac quan (gan nhan "Khac quan") khi khu vuc het nguoi.
+    const loads = [listShippers({ province: assignment.province, size: 100 })]
+    if (version === null) loads.push(getDelivery(assignment.order_id))
+    Promise.all(loads)
       .then(([items, detail]) => {
         if (!current) return
-        setShippers((items || []).filter((shipper) => shipper.active))
-        setVersion(detail?.assignment?.version ?? null)
+        const active = (items || [])
+          .filter((shipper) => shipperAccountStatus(shipper) === 'ACTIVE')
+          .filter((shipper) => shipper.id !== assignment.shipper_id)
+          .map((shipper) => ({ ...shipper, mismatch: isAreaMismatch(shipper, assignment) }))
+          .sort((a, b) => Number(a.mismatch) - Number(b.mismatch))
+        setShippers(active)
+        if (detail) setVersion(detail.assignment?.version ?? null)
       })
       .catch((failure) => current && setError(getApiError(failure).message))
     return () => {
       current = false
     }
-  }, [assignment, form.overrideArea])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignment])
+
+  const selected = shippers?.find((shipper) => shipper.id === form.shipperId)
+  // Ly do (noi bo) bat buoc dung theo backend: gan khac khu vuc hoac doi shipper giua chuyen.
+  const mismatch = Boolean(selected?.mismatch)
+  const needsReason = mismatch || inProgress
 
   async function submit(event) {
     event.preventDefault()
@@ -361,10 +454,10 @@ function AssignDialog({ assignment, onClose, onDone }) {
       await assignShipper(assignment.id, {
         shipperId: form.shipperId,
         expectedVersion: version,
-        overrideArea: form.overrideArea || undefined,
+        overrideArea: mismatch || undefined,
         reason: form.reason.trim() || undefined,
       })
-      onDone('Đã phân công shipper.')
+      onDone(`Đã phân công ${selected?.name || 'shipper'}.`)
     } catch (failure) {
       setError(getApiError(failure).message)
     } finally {
@@ -372,17 +465,16 @@ function AssignDialog({ assignment, onClose, onDone }) {
     }
   }
 
-  const needsReason = midTrip || form.overrideArea
   return (
     <Modal
       title={`Phân công đơn ${shortOrderId(assignment.order_id)}`}
-      description={`Khu vực giao: ${area(assignment)}`}
+      description={`Khu vực giao: ${displayArea(assignment)}${assignment.shipper_name ? ` · Đang giao cho ${assignment.shipper_name}` : ''}`}
       onClose={onClose}
     >
       <form className="profile-form" noValidate onSubmit={submit}>
         <AccountField
           as="select"
-          label="Shipper"
+          label="Shipper (chỉ tài khoản đang hoạt động)"
           required
           data-autofocus
           value={form.shipperId}
@@ -390,36 +482,36 @@ function AssignDialog({ assignment, onClose, onDone }) {
             setForm((previous) => ({ ...previous, shipperId: event.target.value }))
           }
         >
-          <option value="">{shippers ? 'Chọn shipper' : 'Đang tải…'}</option>
+          <option value="">
+            {shippers
+              ? shippers.length
+                ? 'Chọn shipper'
+                : 'Không có shipper đang hoạt động'
+              : 'Đang tải…'}
+          </option>
           {(shippers || []).map((shipper) => (
             <option key={shipper.id} value={shipper.id}>
-              {shipper.name} · {area(shipper)} ·{' '}
-              {Number(shipper.success_rate_percent || 0).toFixed(0)}%
+              {shipper.name} · {displayAreaName(shipper.district) || 'Cả tỉnh'} ·{' '}
+              {Number(shipper.active_orders || 0)} chuyến đang chạy
+              {shipper.mismatch ? ' · Khác quận' : ''}
             </option>
           ))}
         </AccountField>
-        <label className="delivery-check">
-          <input
-            type="checkbox"
-            checked={form.overrideArea}
-            onChange={(event) =>
-              setForm((previous) => ({
-                ...previous,
-                overrideArea: event.target.checked,
-                shipperId: '',
-              }))
-            }
-          />
-          Cho phép shipper ngoài khu vực
-        </label>
+        {mismatch && (
+          <p className="account-notice account-notice--warning" role="status">
+            Shipper này không phụ trách quận của đơn. Cần ghi lý do để gán vượt khu vực.
+          </p>
+        )}
         {needsReason && (
           <AccountField
             as="textarea"
-            label="Lý do"
+            label="Lý do (nội bộ, người mua không thấy)"
             required
             maxLength={255}
             hint={
-              midTrip ? 'Bắt buộc khi đổi shipper giữa chuyến.' : 'Bắt buộc khi giao ngoài khu vực.'
+              inProgress
+                ? 'Bắt buộc khi đổi shipper giữa chuyến.'
+                : 'Bắt buộc khi gán shipper khác quận.'
             }
             value={form.reason}
             onChange={(event) =>
@@ -464,11 +556,9 @@ function ReturnDialog({ assignment, onClose, onDone }) {
     setBusy(true)
     setError('')
     try {
-      const detail = await getDelivery(assignment.order_id)
-      await returnAssignment(assignment.id, {
-        expectedVersion: detail.assignment.version,
-        reason: reason.trim(),
-      })
+      const version =
+        assignment.version ?? (await getDelivery(assignment.order_id)).assignment.version
+      await returnAssignment(assignment.id, { expectedVersion: version, reason: reason.trim() })
       onDone('Đã chuyển đơn sang hoàn hàng.')
     } catch (failure) {
       setError(getApiError(failure).message)
@@ -485,7 +575,7 @@ function ReturnDialog({ assignment, onClose, onDone }) {
       <form className="profile-form" noValidate onSubmit={submit}>
         <AccountField
           as="textarea"
-          label="Lý do"
+          label="Lý do (nội bộ)"
           required
           maxLength={255}
           data-autofocus
@@ -519,15 +609,22 @@ function ReturnDialog({ assignment, onClose, onDone }) {
 }
 
 function AssignmentsTab() {
-  const assignments = usePaged((page) => listAssignments({ page, size: PAGE_SIZE }), [])
+  const [status, setStatus] = useState('')
+  const assignments = usePaged(
+    (page) => listAssignments({ status, page, size: PAGE_SIZE }),
+    [status],
+  )
+  const waiting = usePaged(
+    () => listAssignments({ status: NEEDS_DISPATCH_STATUS, page: 0, size: 100 }),
+    [],
+  )
   const [dialog, setDialog] = useState(null)
   const [notice, setNotice] = useState('')
 
   async function retry(assignment) {
     setNotice('')
     try {
-      const detail = await getDelivery(assignment.order_id)
-      await adminRetryAssignment(assignment.id, detail.assignment.version)
+      await adminRetryAssignment(assignment.id, assignment.version)
       setNotice('Đã chuyển đơn sang giao lại.')
       assignments.reload()
     } catch (failure) {
@@ -539,10 +636,47 @@ function AssignmentsTab() {
     setDialog(null)
     setNotice(message)
     assignments.reload()
+    waiting.reload()
   }
+
+  const waitingCount = waiting.items.length
 
   return (
     <>
+      {waitingCount > 0 && status !== NEEDS_DISPATCH_STATUS && (
+        <div className="account-notice account-notice--warning" role="status">
+          {waitingCount >= 100 ? '100+' : waitingCount} chuyến chưa có shipper (tự động phân công
+          thất bại).{' '}
+          <button
+            type="button"
+            className="shipper-topbar__link"
+            onClick={() => {
+              assignments.setPage(0)
+              setStatus(NEEDS_DISPATCH_STATUS)
+            }}
+          >
+            Xem và phân công
+          </button>
+        </div>
+      )}
+      <div className="admin-users__toolbar">
+        <label className="delivery-filter">
+          <span>Trạng thái</span>
+          <select
+            value={status}
+            onChange={(event) => {
+              assignments.setPage(0)
+              setStatus(event.target.value)
+            }}
+          >
+            {STATUS_FILTERS.map(([value, label]) => (
+              <option key={value || 'all'} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {notice && (
         <p className="account-notice" role="status">
           {notice}
@@ -562,13 +696,14 @@ function AssignmentsTab() {
           aria-busy={assignments.status === 'loading' ? 'true' : undefined}
         >
           {assignments.status === 'ready' && assignments.items.length === 0 ? (
-            <p className="admin-users__empty">Chưa có chuyến giao nào.</p>
+            <p className="admin-users__empty">Không có chuyến giao nào.</p>
           ) : (
             <table className="admin-table">
               <caption className="visually-hidden">Danh sách chuyến giao</caption>
               <thead>
                 <tr>
                   <th scope="col">Đơn</th>
+                  <th scope="col">Shipper</th>
                   <th scope="col">Khu vực</th>
                   <th scope="col">Trạng thái</th>
                   <th scope="col">Lần giao</th>
@@ -579,67 +714,79 @@ function AssignmentsTab() {
                 </tr>
               </thead>
               <tbody>
-                {assignments.items.map((assignment) => (
-                  <tr key={assignment.id}>
-                    <td>
-                      <strong>{shortOrderId(assignment.order_id)}</strong>
-                      <span className="admin-cell__sub">
-                        {assignment.shipper_id
-                          ? `Shipper ${assignment.shipper_id.slice(-6)}`
-                          : 'Chưa có shipper'}
-                      </span>
-                    </td>
-                    <td>{area(assignment)}</td>
-                    <td>
-                      <span
-                        className={`delivery-badge delivery-badge--${assignment.status.toLowerCase()}`}
-                      >
-                        {DELIVERY_STATUS_LABELS[assignment.status] || assignment.status}
-                      </span>
-                    </td>
-                    <td>{assignment.attempt || 1}/3</td>
-                    <td>{formatDateTime(assignment.created_at)}</td>
-                    <td>
-                      <div className="delivery-row-actions">
-                        {assignment.status !== 'WAITING_HANDOFF' &&
-                          !isTerminalStatus(assignment.status) && (
+                {assignments.items.map((assignment) => {
+                  const attention = assignment.status === NEEDS_DISPATCH_STATUS
+                  return (
+                    <tr
+                      key={assignment.id}
+                      className={attention ? 'delivery-row--attention' : undefined}
+                    >
+                      <td>
+                        <strong>{shortOrderId(assignment.order_id)}</strong>
+                        {attention && <span className="delivery-attention">Cần phân công</span>}
+                      </td>
+                      <td>
+                        {assignment.shipper_name ? (
+                          <>
+                            {assignment.shipper_name}
+                            <span className="admin-cell__sub">{assignment.shipper_phone}</span>
+                          </>
+                        ) : (
+                          <span className="admin-cell__sub">Chưa có shipper</span>
+                        )}
+                      </td>
+                      <td>{displayArea(assignment)}</td>
+                      <td>
+                        <span
+                          className={`delivery-badge delivery-badge--${assignment.status.toLowerCase()}`}
+                        >
+                          {DELIVERY_STATUS_LABELS[assignment.status] || assignment.status}
+                        </span>
+                      </td>
+                      <td>{assignment.attempt || 1}/3</td>
+                      <td>{formatDateTime(assignment.created_at)}</td>
+                      <td>
+                        <div className="delivery-row-actions">
+                          {assignment.status !== 'WAITING_HANDOFF' &&
+                            !isTerminalStatus(assignment.status) && (
+                              <button
+                                type="button"
+                                className="account-button"
+                                onClick={() => setDialog({ kind: 'assign', assignment })}
+                              >
+                                {assignment.shipper_id ? 'Đổi shipper' : 'Phân công'}
+                              </button>
+                            )}
+                          {assignment.status === 'FAILED' && assignment.attempt < 3 && (
                             <button
                               type="button"
-                              className="account-button"
-                              onClick={() => setDialog({ kind: 'assign', assignment })}
+                              className="account-button account-button--secondary"
+                              onClick={() => retry(assignment)}
                             >
-                              {assignment.shipper_id ? 'Đổi shipper' : 'Phân công'}
+                              Giao lại
                             </button>
                           )}
-                        {assignment.status === 'FAILED' && assignment.attempt < 3 && (
+                          {assignment.status === 'FAILED' && (
+                            <button
+                              type="button"
+                              className="account-button account-button--danger"
+                              onClick={() => setDialog({ kind: 'return', assignment })}
+                            >
+                              Hoàn hàng
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="account-button account-button--secondary"
-                            onClick={() => retry(assignment)}
+                            onClick={() => setDialog({ kind: 'track', assignment })}
                           >
-                            Giao lại
+                            Theo dõi
                           </button>
-                        )}
-                        {assignment.status === 'FAILED' && (
-                          <button
-                            type="button"
-                            className="account-button account-button--danger"
-                            onClick={() => setDialog({ kind: 'return', assignment })}
-                          >
-                            Hoàn hàng
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="account-button account-button--secondary"
-                          onClick={() => setDialog({ kind: 'track', assignment })}
-                        >
-                          Theo dõi
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -670,7 +817,7 @@ function AssignmentsTab() {
           title={`Theo dõi đơn ${shortOrderId(dialog.assignment.order_id)}`}
           onClose={() => setDialog(null)}
         >
-          <DeliveryTrackingPanel orderId={dialog.assignment.order_id} />
+          <DeliveryTrackingPanel orderId={dialog.assignment.order_id} audience="admin" />
         </Modal>
       )}
     </>

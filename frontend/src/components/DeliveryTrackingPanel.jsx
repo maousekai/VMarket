@@ -2,12 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import useDeliveryTracking from '../hooks/useDeliveryTracking'
 import { getApiError } from '../services/api/apiClient'
 import {
-  DELIVERY_STATUS_LABELS,
   getDelivery,
   getRoute,
   isTerminalStatus,
   isTrackingStatus,
+  serverNow,
 } from '../services/api/deliveryApi'
+import { BUYER_MAP_STATUSES, deliveryStatusLabel, publicHistory } from '../utils/deliveryStatus'
 import { formatDateTime } from '../utils/formatDate'
 import './delivery.css'
 
@@ -29,60 +30,64 @@ const toPoint = (row) => ({
   recordedAt: row.recorded_at ?? row.recordedAt,
 })
 
-function secondsAgo(timestamp, now) {
-  if (!timestamp) return null
-  return Math.max(0, Math.round((now - new Date(timestamp).getTime()) / 1000))
-}
-
-function useNow(active) {
-  const [now, setNow] = useState(() => Date.now())
+function useServerNow(active) {
+  const [now, setNow] = useState(serverNow)
   useEffect(() => {
     if (!active) return undefined
-    const timer = setInterval(() => setNow(Date.now()), 1000)
+    const timer = setInterval(() => setNow(serverNow()), 1000)
     return () => clearInterval(timer)
   }, [active])
   return now
 }
 
 /**
- * Theo doi chuyen giao cua mot don (PBL6-33): trang thai, ban do vi tri shipper cap nhat qua
- * WebSocket, lich su hanh trinh (route_logs) va lich su trang thai. Dung cho nguoi mua (trang
- * chi tiet don) va admin (dieu phoi shipper).
+ * Theo doi chuyen giao cua mot don (PBL6-33): trang thai, ban do vi tri shipper qua WebSocket,
+ * lich su trang thai. Quyen xem theo NFR-SEC-07 (review PR 68, muc 1.6):
+ *  - buyer: chi thay ban do khi chuyen o PICKED_UP / IN_TRANSIT; khong thay ly do noi bo.
+ *  - admin / shipper: thay vi tri bat cu khi nao chuyen co GPS.
  */
-export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
+export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', showHistory = true }) {
   const [detail, setDetail] = useState({ status: 'loading', data: null, error: '' })
   const [route, setRoute] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
+  const buyer = audience === 'buyer'
+
+  const assignment = detail.data?.assignment
+  const loadedStatus = assignment?.status
 
   useEffect(() => {
     let current = true
     setDetail((previous) => ({ ...previous, status: 'loading' }))
-    Promise.all([getDelivery(orderId), getRoute(orderId).catch(() => [])])
-      .then(([data, points]) => {
+    getDelivery(orderId)
+      .then(async (data) => {
+        const status = data?.assignment?.status
+        const allowed = buyer ? BUYER_MAP_STATUSES.includes(status) : Boolean(status)
+        const points = allowed ? await getRoute(orderId).catch(() => []) : []
         if (!current) return
         setDetail({ status: 'ready', data, error: '' })
         setRoute((points || []).map(toPoint))
       })
       .catch((failure) => {
         if (!current) return
-        const error = getApiError(failure)
         setDetail({
           status: failure?.response?.status === 404 ? 'missing' : 'error',
           data: null,
-          error: error.message,
+          error: getApiError(failure).message,
         })
       })
     return () => {
       current = false
     }
-  }, [orderId, reloadKey])
+  }, [orderId, reloadKey, buyer])
 
-  const assignment = detail.data?.assignment
-  const trackable = Boolean(assignment) && !isTerminalStatus(assignment.status)
+  const trackable =
+    Boolean(assignment) &&
+    !isTerminalStatus(loadedStatus) &&
+    (buyer ? BUYER_MAP_STATUSES.includes(loadedStatus) : true)
   const live = useDeliveryTracking(orderId, { enabled: trackable })
   const update = live.update
 
-  // Moi diem GPS moi tu WebSocket noi vao duong di da tai.
+  // Diem GPS moi tu WebSocket noi vao duong di da tai.
   useEffect(() => {
     const location = update?.location
     if (!location || !Number.isFinite(location.latitude)) return
@@ -93,14 +98,17 @@ export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
     })
   }, [update])
 
-  // Trang thai doi qua socket thi tai lai lich su trang thai.
+  // Trang thai doi qua socket thi tai lai chi tiet (lich su, quyen xem ban do).
   const liveStatus = update?.status
   useEffect(() => {
-    if (liveStatus && assignment && liveStatus !== assignment.status) setReloadKey((k) => k + 1)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveStatus])
+    if (liveStatus && loadedStatus && liveStatus !== loadedStatus) setReloadKey((k) => k + 1)
+  }, [liveStatus, loadedStatus])
 
-  const status = liveStatus || assignment?.status
+  const status = liveStatus || loadedStatus
+  // Admin / shipper: ban do khi chuyen dang co GPS hoac da co hanh trinh.
+  const showMap = buyer
+    ? BUYER_MAP_STATUSES.includes(status)
+    : isTrackingStatus(status) || route.length > 0
   const position = useMemo(() => {
     if (update?.location?.latitude != null) return toPoint(update.location)
     if (assignment?.latitude != null)
@@ -112,8 +120,10 @@ export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
     return route[route.length - 1] || null
   }, [update, assignment, route])
 
-  const now = useNow(live.connection === 'live')
-  const age = secondsAgo(position?.recordedAt, now)
+  const now = useServerNow(showMap && live.connection === 'live')
+  const age = position?.recordedAt
+    ? Math.max(0, Math.round((now - new Date(position.recordedAt).getTime()) / 1000))
+    : null
 
   if (detail.status === 'loading' && !detail.data)
     return (
@@ -132,8 +142,7 @@ export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
       </section>
     )
 
-  const history = detail.data?.history || []
-  const showMap = isTrackingStatus(status) || route.length > 0
+  const history = buyer ? publicHistory(detail.data?.history) : detail.data?.history || []
 
   return (
     <section className="delivery-track" aria-label="Theo dõi giao hàng">
@@ -141,10 +150,10 @@ export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
         <div>
           <span className="delivery-track__eyebrow">Vận chuyển</span>
           <strong className="delivery-track__status">
-            {DELIVERY_STATUS_LABELS[status] || status}
+            {deliveryStatusLabel(status, buyer ? 'buyer' : 'staff')}
           </strong>
         </div>
-        {trackable && (
+        {trackable && showMap && (
           <span
             className={`delivery-live delivery-live--${live.connection}`}
             role="status"
@@ -155,7 +164,7 @@ export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
         )}
       </div>
 
-      {showMap ? (
+      {showMap && (
         <>
           <Suspense fallback={<div className="delivery-map delivery-map--placeholder" />}>
             <DeliveryMap position={position} route={route} />
@@ -166,46 +175,27 @@ export default function DeliveryTrackingPanel({ orderId, showHistory = true }) {
               : 'Shipper chưa chia sẻ vị trí.'}
           </p>
         </>
-      ) : (
+      )}
+      {!showMap && buyer && !isTerminalStatus(status) && (
         <p className="delivery-track__muted">
-          Bản đồ hiển thị khi shipper đã lấy hàng và bắt đầu giao.
+          Bản đồ hiển thị khi shipper đã lấy hàng và đang giao tới bạn.
         </p>
       )}
 
-      {showHistory && (
-        <div className="delivery-track__columns">
-          {history.length > 0 && (
-            <div>
-              <h3 className="delivery-track__title">Lịch sử trạng thái</h3>
-              <ol className="delivery-timeline">
-                {history.map((entry, index) => (
-                  <li key={`${entry.status}-${entry.occurred_at}-${index}`}>
-                    <strong>{DELIVERY_STATUS_LABELS[entry.status] || entry.status}</strong>
-                    <span>{formatDateTime(entry.occurred_at)}</span>
-                    {entry.reason && <span className="delivery-track__muted">{entry.reason}</span>}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-          {route.length > 0 && (
-            <div>
-              <h3 className="delivery-track__title">Lịch sử hành trình ({route.length} điểm)</h3>
-              <ol className="delivery-route" reversed>
-                {[...route]
-                  .reverse()
-                  .slice(0, 20)
-                  .map((point, index) => (
-                    <li key={`${point.recordedAt}-${index}`}>
-                      <span>{formatDateTime(point.recordedAt)}</span>
-                      <span className="delivery-track__coords">
-                        {point.latitude.toFixed(5)}, {point.longitude.toFixed(5)}
-                      </span>
-                    </li>
-                  ))}
-              </ol>
-            </div>
-          )}
+      {showHistory && history.length > 0 && (
+        <div>
+          <h3 className="delivery-track__title">Lịch sử trạng thái</h3>
+          <ol className="delivery-timeline">
+            {history.map((entry, index) => (
+              <li key={`${entry.status}-${entry.occurred_at}-${index}`}>
+                <strong>{deliveryStatusLabel(entry.status, buyer ? 'buyer' : 'staff')}</strong>
+                <span>{formatDateTime(entry.occurred_at)}</span>
+                {!buyer && entry.reason && (
+                  <span className="delivery-track__muted">Ghi chú nội bộ: {entry.reason}</span>
+                )}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
     </section>

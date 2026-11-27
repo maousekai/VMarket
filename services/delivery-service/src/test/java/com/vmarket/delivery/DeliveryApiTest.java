@@ -611,6 +611,47 @@ class DeliveryApiTest {
     }
 
     @Test
+    void adminAssignmentListShowsShipperNameVersionAndFiltersByStatus() throws Exception {
+        String id = handoff();
+        call(get("/api/delivery/admin/assignments"), "admin", "ADMIN", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id))
+                .andExpect(jsonPath("$[0].shipper_name").value("Shipper"))
+                .andExpect(jsonPath("$[0].shipper_phone").value("0901234567"))
+                .andExpect(jsonPath("$[0].version").isNumber());
+        call(get("/api/delivery/admin/assignments?status=ASSIGNED"), "admin", "ADMIN", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+        call(
+                        get("/api/delivery/admin/assignments?status=WAITING_ASSIGNMENT"),
+                        "admin",
+                        "ADMIN",
+                        null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        call(get("/api/delivery/admin/assignments?status=NOPE"), "admin", "ADMIN", null)
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void adminShipperListSeparatesPendingActivationActiveAndLocked() throws Exception {
+        handoff();
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].account_status").value("ACTIVE"))
+                .andExpect(jsonPath("$[0].active_orders").value(1));
+        when(clients.activeShipper(SHIPPER)).thenReturn(false);
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].account_status").value("PENDING_ACTIVATION"));
+        when(clients.activeShipper(SHIPPER)).thenThrow(new IllegalStateException("auth down"));
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].account_status").value("UNKNOWN"));
+        jdbc.update("update shippers set active=false where id=?", SHIPPER);
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].account_status").value("LOCKED"));
+    }
+
+    @Test
     void unicodePrefixesAndUnaccentedAreasMatchExistingShippers() throws Exception {
         var snapshot = (tools.jackson.databind.node.ObjectNode) order("COD", false);
         snapshot.put(

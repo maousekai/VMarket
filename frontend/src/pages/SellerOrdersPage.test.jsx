@@ -98,7 +98,10 @@ describe('SellerOrdersPage', () => {
     listSellerOrders.mockResolvedValue(page([order({ status: 'PROCESSING', shopConfirmed: true })]))
     handoffOrder.mockResolvedValue({ status: 'WAITING_ASSIGNMENT' })
     renderAt('/seller/orders?status=PROCESSING')
-    fireEvent.click(await screen.findByRole('button', { name: 'Bàn giao vận chuyển' }))
+    const handoff = await screen.findByRole('button', { name: 'Bàn giao vận chuyển' })
+    // Nut hien ngay nhung bi khoa toi khi biet don chua duoc ban giao.
+    await waitFor(() => expect(handoff).toBeEnabled())
+    fireEvent.click(handoff)
     await waitFor(() => expect(handoffOrder).toHaveBeenCalledWith(order().id))
     expect(await screen.findByText(/Đã bàn giao đơn/)).toBeInTheDocument()
   })
@@ -110,7 +113,7 @@ describe('SellerOrdersPage', () => {
       pickups: [{ shop_id: 's1' }],
     })
     renderAt('/seller/orders?status=PROCESSING')
-    expect(await screen.findByText('Chờ phân công shipper')).toBeInTheDocument()
+    expect(await screen.findByText('Chờ phân công')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Bàn giao vận chuyển' })).not.toBeInTheDocument()
   })
 

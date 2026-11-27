@@ -138,25 +138,25 @@ function SellerOrderCard({ order, onChanged }) {
           {order.status === 'PENDING' && order.shopConfirmed && !handedOff && (
             <span className="seller-order__hint">Đã xác nhận</span>
           )}
-          {HANDOFF_STATUSES.includes(order.status) &&
-            order.shopConfirmed &&
-            delivery.status !== 'idle' &&
-            !handedOff && (
-              <button
-                type="button"
-                className="account-button account-button--secondary"
-                disabled={Boolean(busy)}
-                onClick={() =>
-                  run(
-                    'handoff',
-                    () => handoffOrder(order.id),
-                    `Đã bàn giao đơn ${shortOrderId(order.id)} cho đơn vị vận chuyển.`,
-                  )
-                }
-              >
-                {busy === 'handoff' ? 'Đang bàn giao…' : 'Bàn giao vận chuyển'}
-              </button>
-            )}
+          {/* Hien nut ngay khi shop da xac nhan (khoa trong luc kiem tra chuyen giao) thay vi
+              doi request xong moi hien - review PR 68. */}
+          {HANDOFF_STATUSES.includes(order.status) && order.shopConfirmed && !handedOff && (
+            <button
+              type="button"
+              className="account-button account-button--secondary"
+              disabled={Boolean(busy) || delivery.status === 'idle'}
+              aria-busy={delivery.status === 'idle' ? 'true' : undefined}
+              onClick={() =>
+                run(
+                  'handoff',
+                  () => handoffOrder(order.id),
+                  `Đã bàn giao đơn ${shortOrderId(order.id)} cho đơn vị vận chuyển.`,
+                )
+              }
+            >
+              {busy === 'handoff' ? 'Đang bàn giao…' : 'Bàn giao vận chuyển'}
+            </button>
+          )}
           {handedOff && HANDOFF_STATUSES.includes(order.status) && (
             <span className="seller-order__hint">Đã bàn giao</span>
           )}

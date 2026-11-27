@@ -116,11 +116,13 @@ public class DeliveryService {
     public List<Map<String, Object>> shippers(
             String actor, String province, String district, int page, int size) {
         clients.admin(actor);
-        return DeliveryRepository.lowercaseKeys(
+        List<Map<String, Object>> rows = DeliveryRepository.lowercaseKeys(
                 jdbc.queryForList(
                         """
 select s.id, s.name, s.phone, s.province, s.district, s.active,
     count(d.id) as total_orders,
+    coalesce(sum(case when d.status in ('ASSIGNED','PICKED_UP','IN_TRANSIT','FAILED','RETURNING')
+        then 1 else 0 end),0) as active_orders,
     coalesce(sum(case when d.status='DELIVERED' then 1 else 0 end),0) as delivered_orders,
     coalesce(sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end),0) as completed_orders,
     case when sum(case when d.status in ('DELIVERED','RETURNED') then 1 else 0 end) > 0
@@ -138,15 +140,45 @@ order by s.id limit ? offset ?
                         area(district),
                         size,
                         (long) page * size));
+        // Tach "Cho kich hoat" (chua xac thuc email o auth-service) khoi "Hoat dong".
+        // Khoa cuc bo (active=false) luon la LOCKED; auth-service loi thi UNKNOWN.
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> copy = new LinkedHashMap<>(row);
+            String status;
+            if (!Boolean.TRUE.equals(row.get("active"))) status = "LOCKED";
+            else {
+                try {
+                    status =
+                            clients.activeShipper((String) row.get("id"))
+                                    ? "ACTIVE"
+                                    : "PENDING_ACTIVATION";
+                } catch (RuntimeException ex) {
+                    status = "UNKNOWN";
+                }
+            }
+            copy.put("account_status", status);
+            result.add(copy);
+        }
+        return result;
     }
 
-    public List<Map<String, Object>> assignments(String actor, int page, int size) {
+    public List<Map<String, Object>> assignments(
+            String actor, String status, int page, int size) {
         clients.admin(actor);
+        String filter = status == null ? "" : status;
+        // Join ten shipper de bang dieu phoi khong phai hien id; tra version de admin phan
+        // cong ma khong can goi them chi tiet tung don.
         return DeliveryRepository.lowercaseKeys(
                 jdbc.queryForList(
-                        "select id, order_id, shipper_id, status, attempt, province, district,"
-                            + " created_at from delivery_assignments order by created_at desc, id"
-                            + " limit ? offset ?",
+                        "select d.id, d.order_id, d.shipper_id, s.name as shipper_name,"
+                            + " s.phone as shipper_phone, d.status, d.attempt, d.version,"
+                            + " d.province, d.district, d.created_at from delivery_assignments d"
+                            + " left join shippers s on s.id = d.shipper_id"
+                            + " where (? = '' or d.status = ?)"
+                            + " order by d.created_at desc, d.id limit ? offset ?",
+                        filter,
+                        filter,
                         size,
                         (long) page * size));
     }

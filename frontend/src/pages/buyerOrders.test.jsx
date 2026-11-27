@@ -487,6 +487,21 @@ describe('OrderDetailPage', () => {
     getOrder.mockResolvedValue({ ...pending, status: 'SHIPPED' })
     getDelivery.mockResolvedValue({ assignment: { status: 'IN_TRANSIT' } })
     renderAt(`/profile/orders/${pending.id}`)
-    expect(await screen.findByText('Đang giao hàng')).toBeInTheDocument()
+    const panel = await screen.findByRole('region', { name: 'Theo dõi giao hàng' })
+    expect(within(panel).getByText('Đang giao')).toBeInTheDocument()
+    expect(await within(panel).findByTestId('delivery-map')).toBeInTheDocument()
+  })
+
+  it('hides the shipper position and internal reasons while the parcel is returning', async () => {
+    getOrder.mockResolvedValue({ ...pending, status: 'SHIPPED' })
+    getDelivery.mockResolvedValue({
+      assignment: { status: 'RETURNING', latitude: 16.05, longitude: 108.2 },
+      history: [{ status: 'FAILED', occurred_at: '2026-11-26T01:00:00Z', reason: 'note nội bộ' }],
+    })
+    renderAt(`/profile/orders/${pending.id}`)
+    const panel = await screen.findByRole('region', { name: 'Theo dõi giao hàng' })
+    expect(within(panel).getByText('Giao không thành công, đang hoàn về shop')).toBeInTheDocument()
+    expect(within(panel).queryByTestId('delivery-map')).toBeNull()
+    expect(within(panel).queryByText(/note nội bộ/)).toBeNull()
   })
 })

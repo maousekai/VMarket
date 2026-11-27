@@ -220,6 +220,127 @@
 .shipper-card {
   display: grid;
   gap: 12px;
+  /* .account-card khong co padding: chu dinh sat vien (review PR 68). */
+  padding: 20px;
+}
+
+.shipper-page__more {
+  justify-self: center;
+}
+
+.shipper-gps__warning {
+  color: #b45309;
+  font-size: 0.85rem;
+}
+
+.shipper-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.shipper-topbar__brand {
+  color: var(--color-primary);
+  font-size: 1.15rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.shipper-topbar__brand span {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.shipper-topbar__account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.shipper-topbar__name {
+  overflow: hidden;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shipper-topbar__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.shipper-topbar__error {
+  margin: 12px 16px 0;
+}
+
+/* ---- Admin dieu phoi ---- */
+
+.delivery-row--attention td {
+  background: #fffbeb;
+}
+
+.delivery-attention {
+  display: inline-block;
+  margin-top: 4px;
+  color: #b45309;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.delivery-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delivery-filter select {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font: inherit;
+}
+
+.delivery-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.delivery-badge--pending_activation,
+.delivery-badge--unknown {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.delivery-badge--active {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.delivery-badge--locked {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .shipper-card__head {
