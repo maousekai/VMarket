@@ -31,3 +31,34 @@ jest.mock('expo-location', () => ({
   stopLocationUpdatesAsync: jest.fn(async () => {}),
   watchPositionAsync: jest.fn(async () => ({ remove: jest.fn() })),
 }))
+
+jest.mock('expo-keep-awake', () => ({
+  activateKeepAwakeAsync: jest.fn(async () => {}),
+  deactivateKeepAwake: jest.fn(async () => {}),
+}))
+
+jest.mock('expo-system-ui', () => ({ setBackgroundColorAsync: jest.fn(async () => {}) }))
+
+jest.mock(
+  'react-native-safe-area-context',
+  () => jest.requireActual('react-native-safe-area-context/jest/mock').default,
+)
+
+// expo-router: dieu huong ghi lai de test kiem tra; useFocusEffect chay nhu useEffect.
+jest.mock('expo-router', () => {
+  const { useEffect } = jest.requireActual('react')
+  const router = {
+    push: jest.fn(),
+    replace: jest.fn(),
+    navigate: jest.fn(),
+    back: jest.fn(),
+    canGoBack: jest.fn(() => true),
+  }
+  return {
+    router,
+    useRouter: () => router,
+    useLocalSearchParams: jest.fn(() => ({})),
+    useFocusEffect: (effect) => useEffect(effect, [effect]),
+    Link: ({ children }) => children,
+  }
+})

@@ -8,7 +8,6 @@ import {
 } from '../api/authApi'
 import AccountAccessScreen from './AccountAccessScreen'
 
-jest.mock('expo-router', () => ({ Link: () => null }))
 jest.mock('../api/authApi', () => ({
   registerBuyer: jest.fn(),
   requestPasswordReset: jest.fn(),

@@ -6,10 +6,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "vn.pbl6.vmarket"
+      "bundleIdentifier": "vn.pbl6.vmarket",
+      "userInterfaceStyle": "automatic"
     },
     "android": {
       "package": "vn.pbl6.vmarket",
@@ -19,12 +20,14 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION"]
+      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION"],
+      "userInterfaceStyle": "automatic"
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "./plugins/with-light-android-theme",
+      "expo-system-ui",
+      "./plugins/with-day-night-android-theme",
       [
         "expo-location",
         {
@@ -35,6 +38,7 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ]
-    ]
+    ],
+    "backgroundColor": "#F9FAFB"
   }
 }

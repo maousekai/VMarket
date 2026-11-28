@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, StyleSheet, Text, View } from 'react-native'
+import { Alert, Text, View } from 'react-native'
 import { getApiError } from '../api/client'
 import { endShift, getShift, startShift } from '../api/deliveryApi'
 import { Button, Notice } from '../components/ui'
-import { colors, radius, spacing } from '../theme'
+import { makeStyles, radius, spacing, type } from '../theme'
 
 const timeFormat = new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit' })
 
@@ -12,6 +12,7 @@ const timeFormat = new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '
  * dang trong ca moi duoc tu dong giao don; vao ca KHONG bat GPS.
  */
 export default function ShiftBar({ revision, onChanged }) {
+  const styles = useStyles()
   const [shift, setShift] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -78,10 +79,8 @@ export default function ShiftBar({ revision, onChanged }) {
   )
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   bar: {
-    marginHorizontal: spacing(4),
-    marginBottom: spacing(2),
     padding: spacing(4),
     borderRadius: radius.md,
     borderWidth: 1,
@@ -90,6 +89,6 @@ const styles = StyleSheet.create({
   on: { backgroundColor: colors.successSoft, borderColor: colors.success },
   off: { backgroundColor: colors.warningSoft, borderColor: colors.warning },
   text: { gap: 2 },
-  title: { fontWeight: '700', color: colors.text },
-  subtitle: { color: colors.muted },
-})
+  title: { ...type.label, color: colors.text },
+  subtitle: { ...type.body, color: colors.muted },
+}))

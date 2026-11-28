@@ -55,9 +55,17 @@ export function shipperActions(assignment) {
     case 'PICKED_UP':
       return [{ kind: 'status', status: 'IN_TRANSIT', label: 'Bắt đầu giao' }]
     case 'IN_TRANSIT':
+      // Nhan theo Figma (3.14): COD thi xac nhan thu tien khi giao.
       return [
-        { kind: 'deliver', status: 'DELIVERED', label: 'Giao thành công' },
-        { kind: 'fail', status: 'FAILED', label: 'Giao thất bại', danger: true },
+        {
+          kind: 'deliver',
+          status: 'DELIVERED',
+          label:
+            assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
+              ? 'Giao hàng và xác nhận COD'
+              : 'Đã giao hàng',
+        },
+        { kind: 'fail', status: 'FAILED', label: 'Không giao được', danger: true },
       ]
     case 'FAILED':
       return assignment.attempt < (assignment.maxAttempts || MAX_ATTEMPTS)
@@ -68,8 +76,9 @@ export function shipperActions(assignment) {
   }
 }
 
-const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
-export const formatMoney = (value) => money.format(Number(value || 0))
+const money = new Intl.NumberFormat('vi-VN')
+/** "135.000đ" theo cach viet trong Figma. */
+export const formatMoney = (value) => `${money.format(Math.round(Number(value || 0)))}đ`
 export const shortOrderId = (id) => (id ? `#${String(id).slice(-8).toUpperCase()}` : '')
 
 // Ca lam viec (review PR 68 lan 3, phan 2): {onShift, shiftChangedAt, unpickedTrips, activeTrips}.

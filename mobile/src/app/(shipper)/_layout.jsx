@@ -1,19 +1,16 @@
-import { Tabs } from 'expo-router'
-import { colors } from '../../theme'
+import { Stack } from 'expo-router'
+import { ShipperProvider } from '../../shipper/ShipperProvider'
 
-// Phan he Shipper hien trong cung app khi tai khoan co vai tro SHIPPER (khong lam app rieng).
-export default function ShipperTabs() {
+// Phan he Shipper (cung app, vai tro SHIPPER). Stack boc nhom tab de man chi tiet / thong bao
+// khong phai la tab; ShipperProvider giu danh sach chuyen va GPS chung cho moi man.
+export default function ShipperLayout() {
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarIcon: () => null,
-        tabBarLabelStyle: { fontSize: 14, fontWeight: '600' },
-      }}
-    >
-      <Tabs.Screen name="index" options={{ title: 'Đơn giao' }} />
-      <Tabs.Screen name="account" options={{ title: 'Tài khoản' }} />
-    </Tabs>
+    <ShipperProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="assignment/[id]" />
+        <Stack.Screen name="notifications" />
+      </Stack>
+    </ShipperProvider>
   )
 }

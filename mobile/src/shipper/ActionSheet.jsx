@@ -5,16 +5,16 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from 'react-native'
-import { Button, Field, Notice } from '../components/ui'
-import { formatMoney } from '../api/deliveryApi'
+import { formatMoney, shortOrderId } from '../api/deliveryApi'
+import { Body, Button, Card, Field, Heading, Label, Notice, Price } from '../components/ui'
 import { FAILURE_REASONS, MAX_ATTEMPTS } from '../deliveryStatus'
-import { colors, radius, spacing } from '../theme'
+import { makeStyles, radius, spacing, type } from '../theme'
 
-function Sheet({ title, description, onClose, children }) {
+function Sheet({ onClose, children }) {
+  const styles = useStyles()
   return (
     <Modal transparent animationType="slide" visible onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -24,10 +24,6 @@ function Sheet({ title, description, onClose, children }) {
         <View style={styles.sheet} accessibilityViewIsModal>
           {/* handled: bam nut khi ban phim dang mo thi nut nhan luon, khong chi dong ban phim. */}
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-            <Text style={styles.title} accessibilityRole="header">
-              {title}
-            </Text>
-            {description ? <Text style={styles.description}>{description}</Text> : null}
             {children}
           </ScrollView>
         </View>
@@ -36,50 +32,60 @@ function Sheet({ title, description, onClose, children }) {
   )
 }
 
-/** Xac nhan giao thanh cong: don COD phai nhap dung so tien da thu (COD_AMOUNT_MISMATCH). */
+/**
+ * Xac nhan COD (frame 3.15): so tien can thu, luu y truoc khi xac nhan, "Da thu du" gui dung so tien
+ * COD (backend tu choi neu lech - COD_AMOUNT_MISMATCH). Don tra truoc chi xac nhan da giao.
+ */
 export function DeliverSheet({ assignment, busy, error, onClose, onSubmit }) {
   const cod = Number(assignment.codAmount || 0)
   const prepaid = cod === 0
-  const [amount, setAmount] = useState('')
-  const matches = prepaid || Number(amount) === cod
   return (
-    <Sheet
-      title="Xác nhận giao thành công"
-      description={
-        prepaid
-          ? 'Đơn đã thanh toán trước, không thu tiền người nhận.'
-          : `Thu hộ COD ${formatMoney(cod)}. Nhập đúng số tiền đã thu.`
-      }
-      onClose={onClose}
-    >
-      {!prepaid && (
-        <Field
-          label="Số tiền đã thu (VND)"
-          value={amount}
-          keyboardType="number-pad"
-          onChangeText={(value) => setAmount(value.replace(/\D/g, ''))}
-          error={amount && !matches ? 'Số tiền phải khớp số COD của đơn' : ''}
-        />
+    <Sheet onClose={onClose}>
+      <Heading>{prepaid ? 'Xác nhận giao thành công' : 'Xác nhận COD'}</Heading>
+      <Label>
+        {shortOrderId(assignment.orderId)} ·{' '}
+        {prepaid ? 'Đã thanh toán trước' : `COD ${formatMoney(cod)}`}
+      </Label>
+      {prepaid ? (
+        <Body>Đơn đã thanh toán trước, không thu tiền người nhận.</Body>
+      ) : (
+        <>
+          <Price large>{formatMoney(cod)}</Price>
+          <Card title="Trước khi xác nhận">
+            <Body>
+              {`Chỉ bấm khi người nhận đã nhận hàng và bạn đã thu đủ ${formatMoney(cod)} tiền mặt.`}
+            </Body>
+          </Card>
+        </>
       )}
-      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {error ? <Notice tone="danger">{`Chưa lưu được: ${error}`}</Notice> : null}
       <Button
-        title="Xác nhận đã giao"
+        title={prepaid ? 'Xác nhận đã giao' : `Đã thu đủ ${formatMoney(cod)}`}
         loading={busy}
-        disabled={!matches}
-        onPress={() => onSubmit({ codCollected: prepaid ? 0 : Number(amount) })}
+        onPress={() => onSubmit({ codCollected: prepaid ? 0 : cod })}
       />
-      <Button title="Huỷ" variant="secondary" onPress={onClose} />
+      <Button
+        title={prepaid ? 'Huỷ' : 'Chưa thu đủ tiền'}
+        variant="secondary"
+        disabled={busy}
+        onPress={onClose}
+      />
     </Sheet>
   )
 }
 
+/** Giao that bai (frame 3.16): 6 ly do chuan, "Khac" bat buoc ghi chu; ghi chu khong hien cho nguoi mua. */
 export function FailSheet({ assignment, busy, error, onClose, onSubmit }) {
+  const styles = useStyles()
   const [code, setCode] = useState('')
   const [note, setNote] = useState('')
   const selected = FAILURE_REASONS.find((reason) => reason.code === code)
   const last = assignment.attempt >= (assignment.maxAttempts || MAX_ATTEMPTS)
   return (
-    <Sheet title="Báo giao thất bại" onClose={onClose}>
+    <Sheet onClose={onClose}>
+      <Heading>Giao thất bại</Heading>
+      <Label>{`${shortOrderId(assignment.orderId)} · Lần giao ${assignment.attempt || 1}/${assignment.maxAttempts || MAX_ATTEMPTS}`}</Label>
+      <Label>Lý do giao thất bại *</Label>
       <View accessibilityRole="radiogroup" style={styles.reasons}>
         {FAILURE_REASONS.map((reason) => (
           <Pressable
@@ -90,7 +96,9 @@ export function FailSheet({ assignment, busy, error, onClose, onSubmit }) {
             onPress={() => setCode(reason.code)}
             style={[styles.reason, reason.code === code && styles.selected]}
           >
-            <Text style={styles.reasonLabel}>{reason.label}</Text>
+            <Text style={[styles.reasonLabel, reason.code === code && styles.reasonSelected]}>
+              {reason.label}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -98,45 +106,45 @@ export function FailSheet({ assignment, busy, error, onClose, onSubmit }) {
         <Notice tone="warning">Chuyến này sẽ chuyển ngay sang hoàn hàng về gian hàng.</Notice>
       )}
       <Field
-        label={selected?.noteRequired ? 'Ghi chú nội bộ (bắt buộc)' : 'Ghi chú nội bộ'}
+        label={selected?.noteRequired ? 'Ghi chú (bắt buộc)' : 'Ghi chú'}
+        hint="Ghi chú nội bộ, người mua không thấy."
         value={note}
         onChangeText={setNote}
         maxLength={255}
         multiline
       />
-      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {error ? <Notice tone="danger">{`Chưa lưu được giao thất bại: ${error}`}</Notice> : null}
       <Button
-        title="Xác nhận thất bại"
-        variant="danger"
+        title="Lưu lý do giao thất bại"
         loading={busy}
         disabled={!selected || (selected.noteRequired && !note.trim())}
         onPress={() => onSubmit({ reasonCode: code, ...(note.trim() && { reason: note.trim() }) })}
       />
-      <Button title="Huỷ" variant="secondary" onPress={onClose} />
+      <Button title="Huỷ" variant="secondary" disabled={busy} onPress={onClose} />
     </Sheet>
   )
 }
 
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.45)' },
+const useStyles = makeStyles((colors) => ({
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    padding: spacing(5),
-    paddingBottom: spacing(8),
-    maxHeight: '90%',
+    maxHeight: '92%',
   },
-  content: { gap: spacing(3) },
-  title: { fontSize: 18, fontWeight: '700', color: colors.text },
-  description: { fontSize: 14, color: colors.muted },
+  content: { gap: spacing(3), padding: spacing(5), paddingBottom: spacing(8) },
   reasons: { gap: spacing(2) },
   reason: {
-    padding: spacing(3),
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: spacing(4),
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
+    backgroundColor: colors.surface,
   },
   selected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-  reasonLabel: { color: colors.text, fontSize: 14 },
-})
+  reasonLabel: { ...type.body, color: colors.muted },
+  reasonSelected: { color: colors.text, fontWeight: '600' },
+}))

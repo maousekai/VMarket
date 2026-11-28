@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Linking, StyleSheet, Text, View } from 'react-native'
+import { Linking, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
-import { colors, spacing } from '../theme'
+import { makeStyles, radius, spacing } from '../theme'
 
 const SOURCE = {
   html: `<!doctype html>
@@ -58,6 +58,7 @@ function point(value) {
 }
 
 export default function DeliveryMap({ location, deliveryPoint }) {
+  const styles = useStyles()
   const web = useRef(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState(false)
@@ -101,10 +102,10 @@ export default function DeliveryMap({ location, deliveryPoint }) {
   )
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   container: { gap: spacing(2) },
-  map: { height: 260, overflow: 'hidden', borderRadius: 8 },
+  map: { height: 240, overflow: 'hidden', borderRadius: radius.md },
   legend: { color: colors.muted, fontSize: 13 },
-  shipper: { color: '#0670ce' },
-  dropoff: { color: '#b54708' },
-})
+  shipper: { color: colors.primaryText },
+  dropoff: { color: colors.warning },
+}))
