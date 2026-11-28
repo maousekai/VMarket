@@ -127,8 +127,8 @@ public class AuthenticationService {
 						"Refresh token đã được dùng, hãy dùng token mới nhất");
 			}
 			if (!wasRotated) {
-				// Explicit logout/revoke-others is not evidence of token theft. A revoked
-				// device must not be able to revoke the user's remaining sessions.
+				// Token bị thu hồi mà chưa xoay vòng (ví dụ do đăng xuất) chỉ làm
+				// mất hiệu lực phiên tương ứng, các phiên khác vẫn được giữ.
 				throw new ApiException("REFRESH_TOKEN_REVOKED", HttpStatus.UNAUTHORIZED,
 						"Phiên đã bị thu hồi, vui lòng đăng nhập lại");
 			}

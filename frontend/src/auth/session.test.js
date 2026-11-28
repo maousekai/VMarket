@@ -211,16 +211,22 @@ describe('session refresh', () => {
     expect(channel.postMessage).not.toHaveBeenCalled()
   })
 
-  it('clears and broadcasts when an authenticated session actually loses its cookie', async () => {
-    const channel = { postMessage: vi.fn(), close: vi.fn() }
-    const { api, manager } = setup({ channelFactory: () => channel })
-    await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
-    manager.start()
-    api.refreshSession.mockRejectedValueOnce(apiError('REFRESH_TOKEN_MISSING'))
-    await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
-    expect(manager.getSnapshot().session).toBeNull()
-    expect(channel.postMessage).toHaveBeenCalledWith({ type: 'logout' })
-  })
+  it.each(['REFRESH_TOKEN_MISSING', 'REFRESH_TOKEN_REVOKED'])(
+    'clears and broadcasts an authenticated session on %s',
+    async (code) => {
+      const channel = { postMessage: vi.fn(), close: vi.fn() }
+      const { api, manager } = setup({ channelFactory: () => channel })
+      await manager.login({ email: 'user-1@example.com', password: 'Secret@123' })
+      manager.start()
+      api.refreshSession.mockRejectedValueOnce(apiError(code))
+
+      await expect(manager.refresh()).rejects.toMatchObject({ response: { status: 401 } })
+
+      expect(manager.getSnapshot()).toMatchObject({ session: null, bootstrapState: 'ready' })
+      expect(api.refreshSession).toHaveBeenCalledOnce()
+      expect(channel.postMessage).toHaveBeenCalledWith({ type: 'logout' })
+    },
+  )
 
   it('ignores a refresh response that arrives after logout has started', async () => {
     const request = deferred()
