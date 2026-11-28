@@ -97,7 +97,7 @@ class OrderConcurrentUpdateTest {
 			}
 
 			// Cố gắng cập nhật trạng thái đơn dựa trên version cũ (0)
-			orderInTx1.setStatus(OrderStatus.CANCELLED);
+			orderInTx1.transitionTo(OrderStatus.CANCELLED);
 			orderRepository.saveAndFlush(orderInTx1);
 			return null;
 		}));
@@ -108,7 +108,7 @@ class OrderConcurrentUpdateTest {
 		// Luồng 2 (Main thread): Cập nhật đơn hàng trong transaction riêng và COMMIT thành công (version -> 1)
 		transactionTemplate.execute(status -> {
 			Order orderInTx2 = orderRepository.findById(orderId).orElseThrow();
-			orderInTx2.setStatus(OrderStatus.PROCESSING);
+			orderInTx2.transitionTo(OrderStatus.PROCESSING);
 			orderInTx2.setNote("Đang xử lý bởi người bán");
 			return orderRepository.saveAndFlush(orderInTx2);
 		});

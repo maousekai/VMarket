@@ -98,7 +98,7 @@ class OrderDeliveryBridgeTest {
                                 .header("X-Internal-Api-Key", key.getInternalApiKey()))
                 .andExpect(status().isConflict());
         order.setStockReserved(true);
-        order.setStatus(OrderStatus.PENDING);
+        TestOrders.forceStatus(order, OrderStatus.PENDING);
         orders.saveAndFlush(order);
         mvc.perform(
                         post("/internal/delivery/orders/{id}/claim", order.getId())

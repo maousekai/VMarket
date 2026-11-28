@@ -389,8 +389,7 @@ public class OrderService {
                     "ORDER_NOT_CANCELLABLE",
                     "Đơn hàng đang được xử lý, không thể huỷ. Vui lòng liên hệ người bán.");
         }
-        var previous = order.getStatus();
-        order.setStatus(OrderStatus.CANCELLED);
+        var previous = order.transitionTo(OrderStatus.CANCELLED);
         outbox.add(
                 EventType.ORDER_STATUS_CHANGED,
                 new OrderStatusChanged(
@@ -428,7 +427,7 @@ public class OrderService {
                     "ORDER_HAS_ACTIVE_RETURN",
                     "Đơn hàng đang có yêu cầu trả hàng chưa giải quyết, không thể hoàn tất đơn.");
         }
-        order.setStatus(OrderStatus.COMPLETED);
+        order.transitionTo(OrderStatus.COMPLETED);
         outbox.add(
                 EventType.ORDER_STATUS_CHANGED,
                 new OrderStatusChanged(

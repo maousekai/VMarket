@@ -180,7 +180,7 @@ class OrderReturnApiTest {
 	@Test
 	void buyerCreatesReturn_nonDeliveredOrder_returnsConflict() throws Exception {
 		Order order = createDeliveredOrder();
-		order.setStatus(OrderStatus.SHIPPED);
+		TestOrders.forceStatus(order, OrderStatus.SHIPPED);
 		orderRepository.save(order);
 		String orderItemId = order.getItems().get(0).getId();
 
@@ -610,7 +610,7 @@ class OrderReturnApiTest {
 	@Test
 	void completedOrderCanStillBeReturnedWithinSevenDays() throws Exception {
 		Order order = createDeliveredOrder();
-		order.setStatus(OrderStatus.COMPLETED);
+		order.transitionTo(OrderStatus.COMPLETED);
 		orderRepository.save(order);
 		String body = """
 				{

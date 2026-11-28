@@ -1,5 +1,7 @@
 package com.vmarket.order.entity;
 
+import com.vmarket.order.exception.IllegalOrderTransitionException;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -19,6 +21,7 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -51,9 +54,17 @@ public class Order extends BaseEntity {
 	@Column(name = "user_id", nullable = false, length = ID_LENGTH)
 	private String userId;
 
+	/** Chỉ đổi qua {@link #transitionTo(OrderStatus)}; setter chỉ dùng để gán trạng thái ban đầu. */
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 20)
+	@Setter(AccessLevel.NONE)
 	private OrderStatus status;
+
+	/** Trục thanh toán (PBL6-63); chỉ đổi qua {@link #markPaid()} / {@link #transitionTo}. */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "payment_status", nullable = false, length = 20)
+	@Setter(AccessLevel.NONE)
+	private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
     @Column(name = "payment_method", nullable = false, length = 10) private String paymentMethod = "COD";
     @Column(name = "payment_expires_at") private Instant paymentExpiresAt;
     @Column(name = "stock_reserved", nullable = false) private boolean stockReserved;
@@ -132,4 +143,58 @@ public class Order extends BaseEntity {
 	@OneToMany(mappedBy = "order", fetch = FetchType.EAGER, cascade = CascadeType.ALL, orphanRemoval = true)
 	@OrderBy("id ASC")
 	private List<OrderItem> items = new ArrayList<>();
+
+	/**
+	 * Gán trạng thái ban đầu cho đơn mới. Đơn đã có trạng thái thì phải đi qua
+	 * {@link #transitionTo(OrderStatus)}.
+	 */
+	public void setStatus(OrderStatus initial) {
+		if (status != null) {
+			throw new IllegalStateException("Đơn " + getId() + " đã có trạng thái " + status
+					+ "; dùng transitionTo()");
+		}
+		this.status = initial;
+	}
+
+	/**
+	 * Điểm DUY NHẤT đổi trạng thái đơn đã tồn tại (PBL6-63). Cạnh không có trong bảng của
+	 * {@link OrderStatus} → {@link IllegalOrderTransitionException} (409).
+	 *
+	 * <p>Hệ quả trên trục thanh toán đi cùng: COD giao thành công thì coi như đã thu tiền
+	 * (UNPAID → PAID); huỷ đơn đã thu tiền thì đơn chờ hoàn tiền (PAID → REFUND_PENDING), khớp với
+	 * payment-service xử lý yêu cầu khi nhận {@code OrderStatusChanged(CANCELLED)}.
+	 *
+	 * @return trạng thái trước khi chuyển
+	 */
+	public OrderStatus transitionTo(OrderStatus next) {
+		OrderStatus previous = status;
+		if (previous == null || !previous.canTransitionTo(next)) {
+			throw new IllegalOrderTransitionException(getId(), previous, next);
+		}
+		status = next;
+		if (next == OrderStatus.DELIVERED && "COD".equals(paymentMethod)
+				&& paymentStatus == PaymentStatus.UNPAID) {
+			paymentStatus = PaymentStatus.PAID;
+		} else if (next == OrderStatus.CANCELLED && paymentStatus == PaymentStatus.PAID) {
+			markRefundPending();
+		}
+		return previous;
+	}
+
+	/** Ghi nhận đã thu tiền; thu lần hai / thu sau khi đã hoàn → 409. */
+	public void markPaid() {
+		movePayment(PaymentStatus.PAID);
+	}
+
+	/** Đánh dấu đang chờ hoàn tiền. Mỗi khoản đã thu chỉ chuyển sang chờ hoàn một lần. */
+	public void markRefundPending() {
+		movePayment(PaymentStatus.REFUND_PENDING);
+	}
+
+	private void movePayment(PaymentStatus next) {
+		if (!paymentStatus.canTransitionTo(next)) {
+			throw new IllegalOrderTransitionException(getId(), paymentStatus, next);
+		}
+		paymentStatus = next;
+	}
 }

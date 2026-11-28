@@ -44,7 +44,13 @@ public record OrderResponse(
 		@Schema(description = "Lần đổi trạng thái gần nhất") Instant updatedAt,
 
 		@Schema(description = "Thời điểm giao thành công; hạn trả hàng 7 ngày tính từ đây")
-		Instant deliveredAt) {
+		Instant deliveredAt,
+
+		@Schema(example = "PAID", allowableValues = {"UNPAID", "PAID", "REFUND_PENDING"},
+                description = "Trạng thái thanh toán theo đơn. PAID dựa trên PaymentSucceeded với VNPAY"
+                        + " hoặc DELIVERED với COD. Payment-service xác nhận thu COD qua COD_COLLECTED."
+                        + " REFUND_PENDING nghĩa là đơn đang chờ payment-service xử lý hoàn tiền.")
+		String paymentStatus) {
 
 	public static OrderResponse from(Order order) {
 		return new OrderResponse(
@@ -60,6 +66,6 @@ public record OrderResponse(
 				order.getTotalAmount(),
 				order.getCreatedAt(),
 				order.getItems().stream().map(OrderItemResponse::from).toList(), order.getPaymentMethod(), order.getPaymentExpiresAt(), order.isStockReserved(),
-				order.getUpdatedAt(), order.getDeliveredAt());
+				order.getUpdatedAt(), order.getDeliveredAt(), order.getPaymentStatus().name());
 	}
 }

@@ -12,10 +12,12 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.TestPropertySource;
 
 /**
- * Chạy Flyway THẬT (V1 → V8) trên H2 (MODE=PostgreSQL) và để Hibernate
+ * Chạy Flyway THẬT (V1 → V15) trên H2 (MODE=PostgreSQL) và để Hibernate
  * {@code ddl-auto: validate} đối chiếu entity với schema do migration sinh ra —
  * cùng khuôn với {@code FlywayMigrationTest} của auth-service / user-service /
  * shop-service.
@@ -42,8 +44,26 @@ class FlywayMigrationTest {
 	void migrations_applied_upToLatestVersion() {
 		var current = flyway.info().current();
 		assertThat(current).isNotNull();
-		assertThat(current.getVersion().getVersion()).isEqualTo("13");
-		assertThat(flyway.info().applied()).hasSize(13);
+		assertThat(current.getVersion().getVersion()).isEqualTo("15");
+		assertThat(flyway.info().applied()).hasSize(15);
+	}
+
+	@Test
+	void v15OnlyRenamesLegacyRefundMarkers() {
+		var db = new DriverManagerDataSource("jdbc:h2:mem:refund-upgrade;MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
+		Flyway.configure().dataSource(db).target("14").load().migrate();
+		var jdbc = new JdbcTemplate(db);
+		for (String state : new String[] {"PAID", "REFUNDED", "UNPAID"}) {
+			jdbc.update("""
+					insert into orders (id, user_id, status, recipient_name, phone, province, ward,
+					                    street_address, total_amount, payment_status)
+					values (?, 'buyer', 'CANCELLED', 'Buyer', '0900000000', 'DN', 'Ward', 'Street', 100, ?)
+					""", state, state);
+		}
+
+		Flyway.configure().dataSource(db).load().migrate();
+		assertThat(jdbc.queryForList("select payment_status from orders order by id", String.class))
+				.containsExactly("PAID", "REFUND_PENDING", "UNPAID");
 	}
 
 	@Test
