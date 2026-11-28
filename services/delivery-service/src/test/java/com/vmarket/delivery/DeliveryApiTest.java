@@ -119,7 +119,7 @@ class DeliveryApiTest {
 {"id":"order-1","userId":"buyer-1","status":"PROCESSING","stockReserved":true,
  "paymentMethod":"METHOD","totalAmount":125000,"recipientName":"Buyer","phone":"0912345678",
  "province":"Đà Nẵng","district":"Hải Châu","ward":"Phường 1","streetAddress":"2 đường giao hàng",
- "items":[{"shopId":"shop-1"}EXTRA]}
+ "items":[{"shopId":"shop-1","productId":"product-1","variantId":"variant-1","quantity":2}EXTRA]}
 """
                         .replace("METHOD", method)
                         .replace("EXTRA", twoShops ? ",{\"shopId\":\"shop-2\"}" : ""));
@@ -1977,6 +1977,11 @@ class DeliveryApiTest {
                 .andExpect(jsonPath("$[0].pickups[1].name").value("Shop 2"))
                 .andExpect(jsonPath("$[0].pickups[1].phone").value("0901111222"))
                 .andExpect(jsonPath("$[0].pickups[1].seller_id").doesNotExist())
+                // Hang can lay o tung shop (review PR 68 lan 4).
+                .andExpect(jsonPath("$[0].pickups[0].items[0].productId").value("product-1"))
+                .andExpect(jsonPath("$[0].pickups[0].items[0].variantId").value("variant-1"))
+                .andExpect(jsonPath("$[0].pickups[0].items[0].quantity").value(2))
+                .andExpect(jsonPath("$[0].pickups[1].items.length()").value(1))
                 .andExpect(jsonPath("$[0].recipient.name").value("Buyer"))
                 .andExpect(jsonPath("$[0].recipient.phone").value("0912345678"));
         pickup(id, "shop-1")

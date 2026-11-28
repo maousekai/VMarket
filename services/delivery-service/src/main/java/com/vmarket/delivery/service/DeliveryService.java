@@ -1468,6 +1468,23 @@ order by s.id limit ? offset ?
                                 p -> {
                                     Map<String, Object> copy = new LinkedHashMap<>(p);
                                     copy.remove("seller_id");
+                                    // Hang can lay o shop nay (id + so luong); app tra ten san
+                                    // pham qua API cong khai (review PR 68 lan 4, muc 1.4).
+                                    List<Map<String, Object>> shopItems = new ArrayList<>();
+                                    for (JsonNode item : order.path("items")) {
+                                        if (!Objects.equals(
+                                                item.path("shopId").asString(""),
+                                                p.get("shop_id"))) continue;
+                                        Map<String, Object> line = new LinkedHashMap<>();
+                                        line.put("productId", item.path("productId").asString(""));
+                                        JsonNode variant = item.path("variantId");
+                                        line.put(
+                                                "variantId",
+                                                variant.isTextual() ? variant.asString() : null);
+                                        line.put("quantity", item.path("quantity").asInt(0));
+                                        shopItems.add(line);
+                                    }
+                                    copy.put("items", shopItems);
                                     return (Map<String, Object>) copy;
                                 })
                         .toList());
