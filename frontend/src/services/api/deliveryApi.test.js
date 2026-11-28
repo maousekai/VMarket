@@ -11,10 +11,11 @@ const kinds = (status, attempt = 1) =>
 
 describe('shipperActions', () => {
   it('follows the delivery-service transition rules', () => {
-    expect(kinds('ASSIGNED')).toEqual(['PICKED_UP'])
+    // Lay / tra hang theo tung shop nen ASSIGNED va RETURNING khong con nut chung.
+    expect(kinds('ASSIGNED')).toEqual([])
     expect(kinds('PICKED_UP')).toEqual(['IN_TRANSIT'])
     expect(kinds('IN_TRANSIT')).toEqual(['DELIVERED', 'FAILED'])
-    expect(kinds('RETURNING')).toEqual(['RETURNED'])
+    expect(kinds('RETURNING')).toEqual([])
   })
 
   it('offers a retry only while attempts remain', () => {

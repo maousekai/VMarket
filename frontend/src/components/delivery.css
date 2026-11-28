@@ -406,3 +406,84 @@
     flex: 1 1 100%;
   }
 }
+
+/* ---- Review PR 68 lan 2: diem lay / tra hang, lien he, cac lan that bai ---- */
+
+.delivery-contact {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-left: 8px;
+}
+
+.delivery-contact__link {
+  color: var(--color-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.shipper-stops__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shipper-stops__list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.shipper-stops__list li > div {
+  display: grid;
+  gap: 2px;
+}
+
+.shipper-stops__list li.is-done {
+  background: var(--color-surface-muted);
+}
+
+.shipper-failures ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.delivery-attention--flag {
+  color: #b91c1c;
+}
+
+.delivery-map__destination {
+  font-size: 0.8rem;
+}
+
+.delivery-track__shipper {
+  margin: 0;
+}
+
+.location-picker__field {
+  display: grid;
+  gap: 6px;
+}
+
+.location-picker__label {
+  font-weight: 600;
+}
+
+.location-picker__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.location-picker {
+  height: 260px;
+}

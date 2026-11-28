@@ -71,7 +71,7 @@ describe('AdminShippersPage dispatch', () => {
     render(<AdminShippersPage />)
     const table = await screen.findByRole('table', { name: 'Danh sách chuyến giao' })
     expect(within(table).getByText('Trần Giao')).toBeTruthy()
-    expect(within(table).getAllByText('Hải Châu, Đà Nẵng')).toHaveLength(2)
+    expect(within(table).getAllByText('khu Hải Châu, Đà Nẵng')).toHaveLength(2)
     expect(within(table).getByText('Cần phân công')).toBeTruthy()
     expect(await screen.findByText(/1 chuyến chưa có shipper/)).toBeTruthy()
   })
@@ -102,7 +102,7 @@ describe('AdminShippersPage dispatch', () => {
     expect(listShippers).toHaveBeenCalledWith({ province: 'da nang', size: 100 })
     expect(getDelivery).not.toHaveBeenCalled()
     expect(dialog.getByRole('option', { name: /Trần Giao · Hải Châu · 2 chuyến/ })).toBeTruthy()
-    expect(dialog.getByRole('option', { name: /Lê Sơn Trà.*Khác quận/ })).toBeTruthy()
+    expect(dialog.getByRole('option', { name: /Lê Sơn Trà.*Khác khu/ })).toBeTruthy()
     expect(dialog.queryByRole('option', { name: /Chờ Kích Hoạt|Bị Khoá/ })).toBeNull()
 
     fireEvent.change(dialog.getByLabelText(/^Shipper/), { target: { value: 's1' } })
@@ -162,7 +162,7 @@ describe('AdminShippersPage shippers', () => {
     expect(table.getByText('Hoạt động')).toBeTruthy()
     expect(table.getByText('Chờ kích hoạt')).toBeTruthy()
     expect(table.getByText('Đã khoá')).toBeTruthy()
-    expect(table.getAllByText('Hải Châu, Đà Nẵng')).toHaveLength(3)
+    expect(table.getAllByText('khu Hải Châu, Đà Nẵng')).toHaveLength(3)
   })
 
   it('confirms locking and shows the unfinished trips', async () => {
@@ -194,7 +194,7 @@ describe('AdminShippersPage shippers', () => {
     fill(/Mật khẩu tạm/, 'matkhau123')
     const submit = dialog.getByRole('button', { name: 'Tạo shipper' })
     expect(submit.disabled).toBe(true)
-    fill(/Quận \/ huyện phụ trách/, 'Sơn Trà')
+    fill(/Khu phụ trách/, 'Sơn Trà')
     fireEvent.click(submit)
     expect(await dialog.findByText('Lỗi mạng')).toBeTruthy()
     fireEvent.click(submit)

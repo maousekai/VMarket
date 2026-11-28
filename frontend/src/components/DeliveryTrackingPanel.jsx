@@ -8,7 +8,12 @@ import {
   isTrackingStatus,
   serverNow,
 } from '../services/api/deliveryApi'
-import { BUYER_MAP_STATUSES, deliveryStatusLabel, publicHistory } from '../utils/deliveryStatus'
+import {
+  BUYER_MAP_STATUSES,
+  deliveryStatusLabel,
+  publicHistory,
+  telUrl,
+} from '../utils/deliveryStatus'
 import { formatDateTime } from '../utils/formatDate'
 import './delivery.css'
 
@@ -111,6 +116,8 @@ export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', sho
     : isTrackingStatus(status) || route.length > 0
   const position = useMemo(() => {
     if (update?.location?.latitude != null) return toPoint(update.location)
+    // Nguoi mua: API chi tra vi tri khi PICKED_UP / IN_TRANSIT (assignment.location).
+    if (assignment?.location?.latitude != null) return toPoint(assignment.location)
     if (assignment?.latitude != null)
       return {
         latitude: assignment.latitude,
@@ -143,6 +150,16 @@ export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', sho
     )
 
   const history = buyer ? publicHistory(detail.data?.history) : detail.data?.history || []
+  // Diem giao (toa do nguoi mua chon khi luu dia chi): buyer / admin / shipper.
+  const order = detail.data?.order
+  const destination =
+    assignment?.deliveryPoint ||
+    assignment?.recipient?.location ||
+    (order && Number.isFinite(order.latitude)
+      ? { latitude: order.latitude, longitude: order.longitude }
+      : null)
+  const shipper = buyer ? assignment?.shipper : null
+  const retryAt = buyer && status === 'FAILED' ? assignment?.earliestRetryAt : null
 
   return (
     <section className="delivery-track" aria-label="Theo dõi giao hàng">
@@ -164,10 +181,25 @@ export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', sho
         )}
       </div>
 
+      {shipper && (
+        <p className="delivery-track__shipper">
+          Shipper: <strong>{shipper.name}</strong>
+          {shipper.phone && (
+            <>
+              {' · '}
+              <a href={telUrl(shipper.phone)}>{shipper.phone}</a>
+            </>
+          )}
+        </p>
+      )}
+      {retryAt && (
+        <p className="delivery-track__muted">Dự kiến giao lại từ {formatDateTime(retryAt)}.</p>
+      )}
+
       {showMap && (
         <>
           <Suspense fallback={<div className="delivery-map delivery-map--placeholder" />}>
-            <DeliveryMap position={position} route={route} />
+            <DeliveryMap position={position} route={route} destination={destination} />
           </Suspense>
           <p className="delivery-track__muted">
             {position
@@ -190,6 +222,9 @@ export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', sho
               <li key={`${entry.status}-${entry.occurred_at}-${index}`}>
                 <strong>{deliveryStatusLabel(entry.status, buyer ? 'buyer' : 'staff')}</strong>
                 <span>{formatDateTime(entry.occurred_at)}</span>
+                {entry.public_reason && (
+                  <span className="delivery-track__muted">{entry.public_reason}</span>
+                )}
                 {!buyer && entry.reason && (
                   <span className="delivery-track__muted">Ghi chú nội bộ: {entry.reason}</span>
                 )}

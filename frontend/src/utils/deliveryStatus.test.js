@@ -40,7 +40,7 @@ describe('areas', () => {
   })
 
   it('shows the accented name for normalised keys', () => {
-    expect(displayArea({ province: 'da nang', district: 'hai chau' })).toBe('Hải Châu, Đà Nẵng')
+    expect(displayArea({ province: 'da nang', district: 'hai chau' })).toBe('khu Hải Châu, Đà Nẵng')
     expect(displayArea({ province: 'da nang', district: null })).toBe('Đà Nẵng')
     expect(displayArea({})).toBe('—')
   })

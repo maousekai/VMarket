@@ -36,6 +36,10 @@ const orderUrl = (orderId) => `/api/delivery/orders/${enc(orderId)}`
 export const handoffOrder = async (orderId) =>
   (await apiClient.post(`/api/delivery/seller/orders/${enc(orderId)}/handoff`)).data
 
+/** Seller xac nhan "Da nhan lai hang" cho don hoan (RETURN_DROPPED_OFF). */
+export const confirmReturnReceived = async (orderId) =>
+  (await apiClient.post(`/api/delivery/seller/orders/${enc(orderId)}/return-received`)).data
+
 /** {assignment:{status,version,...}, order:{...}, pickups:[...], history:[{status, occurred_at}]} */
 export const getDelivery = async (orderId) =>
   recordServerClock(await apiClient.get(orderUrl(orderId))).data
@@ -78,6 +82,10 @@ export const createShipper = async (body, key = idempotencyKey()) =>
 
 export const newIdempotencyKey = idempotencyKey
 
+/** Gui lai email kich hoat cho shipper "Cho kich hoat". */
+export const resendActivationEmail = async (shipperId) =>
+  (await apiClient.post(`/api/delivery/admin/shippers/${enc(shipperId)}/activation-email`)).data
+
 export const setShipperLocked = async (shipperId, locked) =>
   (await apiClient.put(`/api/delivery/admin/shippers/${enc(shipperId)}/lock`, { locked })).data
 
@@ -104,9 +112,44 @@ export const adminRetryAssignment = async (assignmentId, expectedVersion) =>
 
 // ---- Shipper ----
 
-/** Assignment day du (camelCase), `orderSnapshot` la chuoi JSON cua don. */
-export const listMyAssignments = async ({ page = 0, size = 50 } = {}) =>
-  (await apiClient.get('/api/delivery/shipper/assignments', { params: { page, size } })).data
+/**
+ * Chuyen cua shipper. scope=active: MOI chuyen con viec (khong phan trang) de khong chuyen dang
+ * chay nao roi sang trang sau; scope=finished: da xong, phan trang. Moi chuyen: {id, status,
+ * version, recipient, pickups[], failures[], earliestRetryAt, zone, ward, codAmount, ...}.
+ */
+export const listMyAssignments = async ({ scope = 'active', page = 0, size = 20 } = {}) =>
+  (await apiClient.get('/api/delivery/shipper/assignments', { params: { scope, page, size } })).data
+
+/** Xac nhan da lay hang o mot shop; du moi shop thi chuyen PICKED_UP. */
+export const confirmPickup = async (assignmentId, shopId, expectedVersion) =>
+  (
+    await apiClient.post(
+      `/api/delivery/shipper/assignments/${enc(assignmentId)}/pickups/${enc(shopId)}`,
+      { expectedVersion },
+    )
+  ).data
+
+/** Xac nhan da tra hang hoan cho mot shop; du moi shop thi chuyen RETURN_DROPPED_OFF. */
+export const confirmReturn = async (assignmentId, shopId, expectedVersion) =>
+  (
+    await apiClient.post(
+      `/api/delivery/shipper/assignments/${enc(assignmentId)}/returns/${enc(shopId)}`,
+      { expectedVersion },
+    )
+  ).data
+
+/**
+ * Mot diem GPS cho moi chuyen dang chay; ket qua tung chuyen: OK | PING_TOO_FREQUENT |
+ * GPS_SOURCE_CONFLICT | TRACKING_STOPPED. Web gui voi source WEB (mobile la nguon chinh).
+ */
+export const sendLocations = async ({ latitude, longitude }) =>
+  (
+    await apiClient.post('/api/delivery/shipper/locations', {
+      latitude,
+      longitude,
+      source: 'WEB',
+    })
+  ).data
 
 export const updateAssignmentStatus = async (assignmentId, body) =>
   (await apiClient.put(`/api/delivery/shipper/assignments/${enc(assignmentId)}/status`, body)).data
@@ -116,6 +159,7 @@ export const sendLocation = async (assignmentId, { latitude, longitude }) =>
     await apiClient.post(`/api/delivery/shipper/assignments/${enc(assignmentId)}/location`, {
       latitude,
       longitude,
+      source: 'WEB',
     })
   ).data
 
@@ -138,13 +182,11 @@ export function parseOrderSnapshot(snapshot) {
 }
 
 /**
- * Hanh dong shipper duoc phep o moi trang thai, khop voi DeliveryService.status/retry:
- * ASSIGNED->PICKED_UP->IN_TRANSIT->(DELIVERED|FAILED), FAILED->retry, RETURNING->RETURNED.
+ * Hanh dong shipper duoc phep o moi trang thai (lay / tra hang nam o tung diem shop):
+ * PICKED_UP->IN_TRANSIT->(DELIVERED|FAILED), FAILED->giao lai (sau >= 2 gio).
  */
 export function shipperActions(assignment) {
   switch (assignment?.status) {
-    case 'ASSIGNED':
-      return [{ kind: 'status', status: 'PICKED_UP', label: 'Đã lấy hàng' }]
     case 'PICKED_UP':
       return [{ kind: 'status', status: 'IN_TRANSIT', label: 'Bắt đầu giao' }]
     case 'IN_TRANSIT':
@@ -153,9 +195,9 @@ export function shipperActions(assignment) {
         { kind: 'fail', status: 'FAILED', label: 'Giao thất bại', danger: true },
       ]
     case 'FAILED':
-      return assignment.attempt < 3 ? [{ kind: 'retry', label: 'Giao lại' }] : []
-    case 'RETURNING':
-      return [{ kind: 'status', status: 'RETURNED', label: 'Đã hoàn hàng về shop' }]
+      return assignment.attempt < (assignment.maxAttempts || 3)
+        ? [{ kind: 'retry', label: 'Giao lại' }]
+        : []
     default:
       return []
   }

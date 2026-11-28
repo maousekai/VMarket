@@ -22,7 +22,7 @@ import {
   getOrder,
   listOrderReturns,
 } from '../services/api/orderApi'
-import { getPaymentByOrder } from '../services/api/paymentApi'
+import { getPaymentByOrder, listPaymentRefunds } from '../services/api/paymentApi'
 import { useReloadOnNotification } from '../notifications/events'
 import { formatDateTime } from '../utils/formatDate'
 import { paymentCode, PAYMENT_STATUS_LABELS } from '../utils/payment'
@@ -47,8 +47,38 @@ const DISPUTE_MAX = 500
 
 // PBL6-33: trang thai van chuyen + ban do vi tri shipper theo thoi gian thuc.
 function DeliveryStatus({ orderId, status }) {
-  if (!['PROCESSING', 'SHIPPED', 'DELIVERED'].includes(status)) return null
+  if (
+    !['PROCESSING', 'SHIPPED', 'DELIVERED', 'DELIVERY_FAILED', 'RETURNED_TO_SELLER'].includes(
+      status,
+    )
+  )
+    return null
   return <DeliveryTrackingPanel orderId={orderId} />
+}
+
+/**
+ * Don tra truoc bi hoan ve shop: hien "Da hoan tien" / "Dang hoan tien" theo yeu cau hoan tien cua
+ * payment-service (review PR 68 lan 2, muc 4.7).
+ */
+function RefundStatus({ payment }) {
+  const [refunds, setRefunds] = useState(null)
+  useEffect(() => {
+    if (!payment?.id) return undefined
+    let current = true
+    listPaymentRefunds(payment.id)
+      .then((items) => current && setRefunds(items || []))
+      .catch(() => current && setRefunds([]))
+    return () => {
+      current = false
+    }
+  }, [payment?.id])
+  if (!refunds || !refunds.length) return null
+  const done = refunds.some((refund) => refund.status === 'COMPLETED')
+  return (
+    <p className={`order-refund order-refund--${done ? 'done' : 'pending'}`} role="status">
+      {done ? 'Đã hoàn tiền' : 'Đang hoàn tiền'} cho đơn hàng này.
+    </p>
+  )
 }
 
 function ReturnCard({ item, onDispute }) {
@@ -358,9 +388,13 @@ export default function OrderDetailPage() {
           <section className="account-card order-detail__section" aria-labelledby="order-payment">
             <h2 id="order-payment">Thanh toán</h2>
             <p>{PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod}</p>
+            <p className="order-detail__hint">Phí vận chuyển: Miễn phí</p>
             <p className="order-detail__total">
               Tổng tiền hàng <strong>{formatMoney(order.totalAmount)}</strong>
             </p>
+            {order.status === 'RETURNED_TO_SELLER' && state.payment && (
+              <RefundStatus payment={state.payment} />
+            )}
             {state.payment && (
               <p>
                 Giao dịch {paymentCode(state.payment)}:{' '}

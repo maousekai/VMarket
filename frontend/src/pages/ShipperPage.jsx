@@ -5,19 +5,25 @@ import Modal from '../components/Modal'
 import useShipperGps, { GPS_PERMISSION_LABELS } from '../hooks/useShipperGps'
 import { getApiError } from '../services/api/apiClient'
 import {
-  DELIVERY_STATUS_LABELS,
+  confirmPickup,
+  confirmReturn,
   isTerminalStatus,
-  isTrackingStatus,
   listMyAssignments,
-  parseOrderSnapshot,
   retryAssignment,
   shipperActions,
   updateAssignmentStatus,
 } from '../services/api/deliveryApi'
-import { displayArea } from '../utils/deliveryStatus'
+import {
+  DELIVERY_STATUS_LABELS,
+  FAILURE_REASONS,
+  directionsUrl,
+  failureReason,
+  isReturnStatus,
+  telUrl,
+} from '../utils/deliveryStatus'
 import { formatDateTime } from '../utils/formatDate'
 import { formatMoney } from '../utils/formatMoney'
-import { orderAddress, shortOrderId } from '../utils/order'
+import { shortOrderId } from '../utils/order'
 import '../components/account.css'
 import '../components/accountForms.css'
 import '../components/delivery.css'
@@ -26,65 +32,99 @@ const TABS = [
   ['active', 'Đang xử lý'],
   ['done', 'Đã kết thúc'],
 ]
-const PAGE_SIZE = 50
+const PAGE_SIZE = 20
 // Tu lam moi de chuyen moi duoc phan cong hien len ma shipper khong phai bam "Lam moi".
 const AUTO_REFRESH_MS = 30_000
-const RETURN_STATUSES = ['RETURNING', 'RETURN_DROPPED_OFF']
 const groupThousands = (digits) => (digits ? Number(digits).toLocaleString('vi-VN') : '')
 
-/** Chia se GPS cho chuyen dang chay; tu dung khi chuyen roi khoi trang thai theo doi. */
-function GpsSharing({ assignment, onStopped }) {
-  const tracking = isTrackingStatus(assignment.status)
-  const [wanted, setWanted] = useState(true)
-  const gps = useShipperGps(assignment.id, { enabled: tracking && wanted, onStopped })
+function useMinuteClock() {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
 
-  if (!tracking) return null
+/**
+ * Chia se vi tri tu trinh duyet (du phong). Ung dung di dong la nguon GPS chinh; web chi gui khi
+ * shipper chu dong bat (review PR 68, muc 4.12).
+ */
+function BrowserGpsPanel({ trackingCount }) {
+  const [enabled, setEnabled] = useState(false)
+  const gps = useShipperGps({ enabled: enabled && trackingCount > 0 })
 
   function requestPermission() {
     navigator.geolocation?.getCurrentPosition(
-      () => setWanted(true),
+      () => setEnabled(true),
       () => {},
       { enableHighAccuracy: true, timeout: 20000 },
     )
   }
 
   return (
-    <div className="shipper-gps" role="group" aria-label="Chia sẻ vị trí">
+    <section className="shipper-gps" aria-label="Chia sẻ vị trí từ trình duyệt">
       <div>
         <strong>
-          {gps.sharing ? 'Đang chia sẻ vị trí' : wanted ? 'Đang lấy vị trí…' : 'Đã tạm dừng'}
+          {!enabled
+            ? 'Vị trí đang được gửi từ ứng dụng di động'
+            : gps.sharing
+              ? 'Trình duyệt này đang chia sẻ vị trí'
+              : gps.watching
+                ? 'Đang chờ máy chủ nhận vị trí…'
+                : 'Đã dừng chia sẻ từ trình duyệt'}
         </strong>
         <span className="delivery-track__muted">
-          {GPS_PERMISSION_LABELS[gps.permission]}
-          {gps.lastSentAt && ` · gửi lúc ${formatDateTime(gps.lastSentAt)}`}
+          {enabled
+            ? `${GPS_PERMISSION_LABELS[gps.permission]}${gps.lastSentAt ? ` · gửi lúc ${formatDateTime(gps.lastSentAt)}` : ''}`
+            : 'Dùng ứng dụng VMarket trên điện thoại để gửi vị trí. Chỉ bật ở đây khi không dùng được ứng dụng.'}
         </span>
         {gps.error && (
           <span className="shipper-gps__error" role="alert">
             {gps.error}
           </span>
         )}
-        {!gps.error && gps.warning && (
+        {!gps.error && gps.warning && enabled && (
           <span className="shipper-gps__warning" role="status">
             {gps.warning}
           </span>
         )}
       </div>
       <div className="shipper-gps__actions">
-        {gps.permission === 'prompt' && (
+        {enabled && gps.permission === 'prompt' && (
           <button className="account-button" type="button" onClick={requestPermission}>
             Cấp quyền vị trí
           </button>
         )}
         <button
-          className="account-button account-button--secondary"
+          className={`account-button${enabled ? ' account-button--secondary' : ''}`}
           type="button"
-          aria-pressed={wanted}
-          onClick={() => setWanted((value) => !value)}
+          aria-pressed={enabled}
+          disabled={!trackingCount && !enabled}
+          onClick={() => setEnabled((value) => !value)}
         >
-          {wanted ? 'Tạm dừng chia sẻ' : 'Tiếp tục chia sẻ'}
+          {enabled ? 'Dừng chia sẻ từ trình duyệt này' : 'Chia sẻ từ trình duyệt này'}
         </button>
       </div>
-    </div>
+    </section>
+  )
+}
+
+function ContactLinks({ phone, location, address }) {
+  const directions = directionsUrl({ location, address })
+  return (
+    <span className="delivery-contact">
+      {phone && (
+        <a className="delivery-contact__link" href={telUrl(phone)}>
+          Gọi {phone}
+        </a>
+      )}
+      {directions && (
+        <a className="delivery-contact__link" href={directions} target="_blank" rel="noreferrer">
+          Chỉ đường
+        </a>
+      )}
+    </span>
   )
 }
 
@@ -98,7 +138,7 @@ function DeliverDialog({ assignment, busy, error, onClose, onSubmit }) {
       description={
         prepaid
           ? 'Đơn đã thanh toán trước, không thu tiền người nhận.'
-          : `Thu hộ COD ${formatMoney(cod)}. Nhập đúng số tiền đã thu để xác nhận.`
+          : `Thu hộ COD ${formatMoney(cod)} (miễn phí vận chuyển). Nhập đúng số tiền đã thu.`
       }
       onClose={onClose}
     >
@@ -147,17 +187,18 @@ function DeliverDialog({ assignment, busy, error, onClose, onSubmit }) {
   )
 }
 
+/** Bao giao that bai bang 6 ly do chuan; "Khac" bat buoc ghi chu (review PR 68, muc 1.4). */
 function FailDialog({ assignment, busy, error, onClose, onSubmit }) {
-  const [reason, setReason] = useState('')
-  const last = assignment.attempt >= 3
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState('')
+  const reason = failureReason(code)
+  const lastAttempt = assignment.attempt >= (assignment.maxAttempts || 3)
+  const returning = Boolean(reason?.returnImmediately) || lastAttempt
+  const ready = reason && (!reason.noteRequired || note.trim())
   return (
     <Modal
       title="Báo giao thất bại"
-      description={
-        last
-          ? 'Đây là lần giao thứ 3: đơn sẽ chuyển sang hoàn hàng về gian hàng.'
-          : `Lần giao ${assignment.attempt}/3. Bạn có thể giao lại sau.`
-      }
+      description={`Lần giao ${assignment.attempt || 1}/${assignment.maxAttempts || 3}. Người mua chỉ thấy lý do bạn chọn, không thấy ghi chú.`}
       onClose={onClose}
     >
       <form
@@ -165,19 +206,39 @@ function FailDialog({ assignment, busy, error, onClose, onSubmit }) {
         noValidate
         onSubmit={(event) => {
           event.preventDefault()
-          onSubmit({ reason: reason.trim() })
+          onSubmit({ reasonCode: code, ...(note.trim() ? { reason: note.trim() } : {}) })
         }}
       >
         <AccountField
-          as="textarea"
+          as="select"
           label="Lý do"
           required
-          maxLength={255}
           data-autofocus
-          placeholder="Ví dụ: không liên lạc được người nhận"
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+        >
+          <option value="">Chọn lý do</option>
+          {FAILURE_REASONS.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.label}
+            </option>
+          ))}
+        </AccountField>
+        <AccountField
+          as="textarea"
+          label={reason?.noteRequired ? 'Ghi chú (bắt buộc)' : 'Ghi chú nội bộ (không bắt buộc)'}
+          required={Boolean(reason?.noteRequired)}
+          maxLength={255}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
         />
+        {reason && returning && (
+          <p className="account-notice account-notice--warning" role="status">
+            {reason.returnImmediately
+              ? `"${reason.label}": chuyến sẽ chuyển sang hoàn hàng về shop ngay.`
+              : 'Đây là lần giao cuối: chuyến sẽ chuyển sang hoàn hàng về shop.'}
+          </p>
+        )}
         {error && (
           <p className="account-notice account-notice--error" role="alert">
             {error}
@@ -187,7 +248,7 @@ function FailDialog({ assignment, busy, error, onClose, onSubmit }) {
           <button
             className="account-button account-button--danger"
             type="submit"
-            disabled={busy || !reason.trim()}
+            disabled={busy || !ready}
           >
             {busy ? 'Đang gửi…' : 'Xác nhận thất bại'}
           </button>
@@ -204,15 +265,63 @@ function FailDialog({ assignment, busy, error, onClose, onSubmit }) {
   )
 }
 
-function AssignmentCard({ assignment, onChanged, onStale }) {
-  const order = parseOrderSnapshot(assignment.orderSnapshot)
+/** Diem lay hang (ASSIGNED) hoac tra hang (RETURNING) theo tung shop. */
+function ShopStops({ assignment, busy, onPickup, onReturn }) {
+  const pickups = assignment.pickups || []
+  const returning = assignment.status === 'RETURNING' || assignment.status === 'RETURN_DROPPED_OFF'
+  if (!pickups.length || (assignment.status !== 'ASSIGNED' && !returning)) return null
+  return (
+    <div className="shipper-stops">
+      <h3 className="delivery-track__title">
+        {returning ? 'Trả hàng về các shop' : 'Điểm lấy hàng'}
+      </h3>
+      <ol className="shipper-stops__list">
+        {pickups.map((shop) => {
+          const done = returning ? shop.returned_at : shop.picked_up_at
+          return (
+            <li key={shop.shop_id} className={done ? 'is-done' : undefined}>
+              <div>
+                <strong>{shop.name || `Shop ${shop.shop_id}`}</strong>
+                {shop.address && <span className="delivery-track__muted">{shop.address}</span>}
+                <ContactLinks phone={shop.phone} location={shop.location} address={shop.address} />
+              </div>
+              {done ? (
+                <span className="delivery-badge delivery-badge--delivered">
+                  {returning ? 'Đã trả' : 'Đã lấy'} · {formatDateTime(done)}
+                </span>
+              ) : assignment.status === 'RETURN_DROPPED_OFF' ? null : (
+                <button
+                  type="button"
+                  className="account-button"
+                  disabled={busy}
+                  onClick={() => (returning ? onReturn(shop) : onPickup(shop))}
+                >
+                  {returning ? 'Đã trả hàng cho shop này' : 'Đã lấy hàng ở shop này'}
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+      {assignment.status === 'RETURN_DROPPED_OFF' && (
+        <p className="delivery-track__muted">
+          Đã trả hàng cho mọi shop. Chờ shop xác nhận đã nhận lại hàng.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AssignmentCard({ assignment, onChanged, onStale, now }) {
   const [dialog, setDialog] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
-  const items = order.items || []
-  // Hoan hang: khong hien dia chi nguoi mua va COD vi khong giao / khong thu tien nua.
-  const returning = RETURN_STATUSES.includes(assignment.status)
+  const recipient = assignment.recipient
+  const returning = isReturnStatus(assignment.status)
+  const cod = !returning && Number(assignment.codAmount) > 0
+  const retryAt = assignment.earliestRetryAt ? new Date(assignment.earliestRetryAt) : null
+  const retryLocked = Boolean(retryAt && retryAt.getTime() > now)
 
   async function run(action) {
     setBusy(true)
@@ -251,7 +360,9 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
         <div>
           <strong>Đơn {shortOrderId(assignment.orderId)}</strong>
           <span className="delivery-track__muted">
-            Lần giao {assignment.attempt || 1}/3 · nhận {formatDateTime(assignment.createdAt)}
+            Lần giao {assignment.attempt || 1}/{assignment.maxAttempts || 3} · nhận{' '}
+            {formatDateTime(assignment.createdAt)}
+            {assignment.completedAt && ` · kết thúc ${formatDateTime(assignment.completedAt)}`}
           </span>
         </div>
         <span className={`delivery-badge delivery-badge--${assignment.status.toLowerCase()}`}>
@@ -259,61 +370,87 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
         </span>
       </div>
 
-      {returning ? (
-        <dl className="shipper-card__info">
+      <dl className="shipper-card__info">
+        {returning ? (
           <div>
             <dt>Nhiệm vụ</dt>
             <dd>Hoàn hàng về shop — không thu tiền người mua.</dd>
           </div>
-          {items.length > 0 && (
-            <div>
-              <dt>Hàng hoá</dt>
-              <dd>{items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)} sản phẩm</dd>
-            </div>
-          )}
-        </dl>
-      ) : (
-        <dl className="shipper-card__info">
-          <div>
-            <dt>Người nhận</dt>
-            <dd>
-              {order.recipientName || '—'}
-              {order.phone && (
-                <>
-                  {' · '}
-                  <a href={`tel:${order.phone}`}>{order.phone}</a>
-                </>
+        ) : (
+          recipient && (
+            <>
+              <div>
+                <dt>Người nhận</dt>
+                <dd>
+                  {recipient.name || '—'}
+                  <ContactLinks
+                    phone={recipient.phone}
+                    location={recipient.location}
+                    address={recipient.address}
+                  />
+                </dd>
+              </div>
+              <div>
+                <dt>Địa chỉ giao</dt>
+                <dd>{recipient.address || '—'}</dd>
+              </div>
+              {recipient.note && (
+                <div>
+                  <dt>Ghi chú</dt>
+                  <dd>{recipient.note}</dd>
+                </div>
               )}
-            </dd>
-          </div>
-          <div>
-            <dt>Địa chỉ</dt>
-            <dd>{orderAddress(order) || displayArea(assignment)}</dd>
-          </div>
-          {order.note && (
-            <div>
-              <dt>Ghi chú</dt>
-              <dd>{order.note}</dd>
-            </div>
-          )}
+            </>
+          )
+        )}
+        <div>
+          <dt>Khu giao hàng</dt>
+          <dd>
+            {[assignment.ward, assignment.zone && `khu ${assignment.zone}`]
+              .filter(Boolean)
+              .join(', ') || '—'}
+          </dd>
+        </div>
+        {!returning && (
           <div>
             <dt>Thu hộ</dt>
             <dd>
-              {assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
-                ? `COD ${formatMoney(Number(assignment.codAmount))}`
-                : 'Đã thanh toán trước'}
+              {cod ? `COD ${formatMoney(Number(assignment.codAmount))}` : 'Đã thanh toán trước'}
             </dd>
           </div>
-          {items.length > 0 && (
-            <div>
-              <dt>Hàng hoá</dt>
-              <dd>{items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)} sản phẩm</dd>
-            </div>
-          )}
-        </dl>
+        )}
+        {assignment.itemCount > 0 && (
+          <div>
+            <dt>Hàng hoá</dt>
+            <dd>{assignment.itemCount} sản phẩm</dd>
+          </div>
+        )}
+      </dl>
+
+      {(assignment.failures || []).length > 0 && (
+        <div className="shipper-failures">
+          <h3 className="delivery-track__title">Các lần giao chưa thành công</h3>
+          <ul>
+            {assignment.failures.map((item) => (
+              <li key={`${item.attempt}-${item.occurred_at}`}>
+                Lần {item.attempt}: {item.public_reason || 'Không rõ lý do'} ·{' '}
+                {formatDateTime(item.occurred_at)}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      <GpsSharing assignment={assignment} onStopped={onStale} />
+      <ShopStops
+        assignment={assignment}
+        busy={busy}
+        onPickup={(shop) =>
+          run(() => confirmPickup(assignment.id, shop.shop_id, assignment.version))
+        }
+        onReturn={(shop) =>
+          run(() => confirmReturn(assignment.id, shop.shop_id, assignment.version))
+        }
+      />
 
       {error && !dialog && (
         <p className="account-notice account-notice--error" role="alert">
@@ -322,17 +459,20 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
       )}
 
       <div className="account-actions shipper-card__actions">
-        {shipperActions(assignment).map((action) => (
-          <button
-            key={action.label}
-            type="button"
-            className={`account-button${action.danger ? ' account-button--danger' : ''}`}
-            disabled={busy}
-            onClick={() => onAction(action)}
-          >
-            {action.label}
-          </button>
-        ))}
+        {shipperActions(assignment).map((action) => {
+          const locked = action.kind === 'retry' && retryLocked
+          return (
+            <button
+              key={action.label}
+              type="button"
+              className={`account-button${action.danger ? ' account-button--danger' : ''}`}
+              disabled={busy || locked}
+              onClick={() => onAction(action)}
+            >
+              {locked ? `Giao lại từ ${formatDateTime(retryAt)}` : action.label}
+            </button>
+          )
+        })}
         {!isTerminalStatus(assignment.status) && (
           <button
             type="button"
@@ -375,31 +515,54 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
   )
 }
 
-/** Phan he shipper (PBL6-33): don duoc phan cong, xu ly giao va chia se GPS. */
+/**
+ * Phan he shipper tren web (PBL6-33) - ban du phong; ung dung di dong la ban chinh.
+ * Tab "Dang xu ly" tai MOI chuyen con viec (scope=active); "Da ket thuc" phan trang rieng.
+ */
 export default function ShipperPage() {
   const [tab, setTab] = useState('active')
-  const [state, setState] = useState({ status: 'loading', items: [], error: '', hasMore: false })
+  const [active, setActive] = useState({ status: 'loading', items: [], error: '' })
+  const [done, setDone] = useState({ status: 'idle', items: [], error: '', hasMore: false })
   const [pages, setPages] = useState(1)
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey((key) => key + 1), [])
+  const now = useMinuteClock()
 
   useEffect(() => {
     let current = true
+    listMyAssignments({ scope: 'active' })
+      .then((items) => current && setActive({ status: 'ready', items: items || [], error: '' }))
+      .catch(
+        (failure) =>
+          current &&
+          setActive((previous) => ({
+            ...previous,
+            status: previous.items.length ? 'ready' : 'error',
+            error: getApiError(failure).message,
+          })),
+      )
+    return () => {
+      current = false
+    }
+  }, [reloadKey])
+
+  useEffect(() => {
+    if (tab !== 'done') return undefined
+    let current = true
     ;(async () => {
       try {
-        // Tai lai du so trang da xem de "Tai them" va tu lam moi khong lam mat chuyen cu.
         const items = []
         let last = []
         for (let page = 0; page < pages; page += 1) {
-          last = (await listMyAssignments({ page, size: PAGE_SIZE })) || []
+          last = (await listMyAssignments({ scope: 'finished', page, size: PAGE_SIZE })) || []
           items.push(...last)
           if (last.length < PAGE_SIZE) break
         }
         if (current)
-          setState({ status: 'ready', items, error: '', hasMore: last.length === PAGE_SIZE })
+          setDone({ status: 'ready', items, error: '', hasMore: last.length === PAGE_SIZE })
       } catch (failure) {
         if (current)
-          setState((previous) => ({
+          setDone((previous) => ({
             ...previous,
             status: previous.items.length ? 'ready' : 'error',
             error: getApiError(failure).message,
@@ -409,7 +572,7 @@ export default function ShipperPage() {
     return () => {
       current = false
     }
-  }, [reloadKey, pages])
+  }, [tab, pages, reloadKey])
 
   useEffect(() => {
     const timer = setInterval(reload, AUTO_REFRESH_MS)
@@ -426,16 +589,20 @@ export default function ShipperPage() {
   }, [reload])
 
   function onChanged(updated) {
-    setState((previous) => ({
+    const replace = (previous) => ({
       ...previous,
       items: previous.items.map((item) => (item.id === updated.id ? updated : item)),
-    }))
+    })
+    setActive(replace)
+    setDone(replace)
   }
 
-  const visible = state.items.filter((item) =>
-    tab === 'active' ? !isTerminalStatus(item.status) : isTerminalStatus(item.status),
-  )
-  const activeCount = state.items.filter((item) => !isTerminalStatus(item.status)).length
+  const state = tab === 'active' ? active : done
+  const visible =
+    tab === 'active' ? active.items.filter((item) => !isTerminalStatus(item.status)) : done.items
+  const trackingCount = active.items.filter((item) =>
+    ['PICKED_UP', 'IN_TRANSIT', 'RETURNING'].includes(item.status),
+  ).length
 
   return (
     <main className="account-page shipper-page">
@@ -444,14 +611,16 @@ export default function ShipperPage() {
           <span className="account-eyebrow">Khu vực giao hàng</span>
           <h1>Đơn được phân công</h1>
           <p className="account-subtitle">
-            Cập nhật trạng thái từng chuyến. Vị trí được chia sẻ tự động khi bạn đang giao và dừng
-            khi chuyến kết thúc — giữ trang này mở trong lúc giao.
+            Lấy hàng ở từng shop, cập nhật trạng thái giao và trả hàng hoàn. Ứng dụng VMarket trên
+            điện thoại là kênh chính; trang web này để dự phòng.
           </p>
         </div>
         <button className="account-button account-button--secondary" type="button" onClick={reload}>
           Làm mới
         </button>
       </div>
+
+      <BrowserGpsPanel trackingCount={trackingCount} />
 
       <div className="admin-users__tabs" role="group" aria-label="Lọc chuyến giao">
         {TABS.map(([value, label]) => (
@@ -463,12 +632,14 @@ export default function ShipperPage() {
             onClick={() => setTab(value)}
           >
             {label}
-            {value === 'active' && state.status === 'ready' && ` (${activeCount})`}
+            {value === 'active' && active.status === 'ready' && ` (${active.items.length})`}
           </button>
         ))}
       </div>
 
-      {state.status === 'loading' && <p className="delivery-track__muted">Đang tải…</p>}
+      {(state.status === 'loading' || state.status === 'idle') && (
+        <p className="delivery-track__muted">Đang tải…</p>
+      )}
       {state.status === 'error' && (
         <section className="account-card account-state">
           <p role="alert">{state.error}</p>
@@ -490,11 +661,12 @@ export default function ShipperPage() {
               assignment={assignment}
               onChanged={onChanged}
               onStale={reload}
+              now={now}
             />
           ))}
         </ul>
       )}
-      {state.status === 'ready' && state.hasMore && (
+      {tab === 'done' && done.status === 'ready' && done.hasMore && (
         <button
           className="account-button account-button--secondary shipper-page__more"
           type="button"

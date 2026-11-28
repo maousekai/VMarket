@@ -4,7 +4,12 @@ import Modal from '../components/Modal'
 import { OrderItemsList, OrderStatusBadge, ReturnStatusBadge } from '../components/OrderParts'
 import Pagination from '../components/Pagination'
 import { getApiError } from '../services/api/apiClient'
-import { DELIVERY_STATUS_LABELS, getDelivery, handoffOrder } from '../services/api/deliveryApi'
+import {
+  confirmReturnReceived,
+  DELIVERY_STATUS_LABELS,
+  getDelivery,
+  handoffOrder,
+} from '../services/api/deliveryApi'
 import {
   acceptReturn,
   confirmReturnReceipt,
@@ -48,7 +53,9 @@ const HANDOFF_STATUSES = ['PENDING', 'PROCESSING']
 function useDelivery(order, version) {
   const [delivery, setDelivery] = useState({ status: 'idle', data: null })
   const relevant =
-    (HANDOFF_STATUSES.includes(order.status) && order.shopConfirmed) || order.status === 'SHIPPED'
+    (HANDOFF_STATUSES.includes(order.status) && order.shopConfirmed) ||
+    order.status === 'SHIPPED' ||
+    order.status === 'DELIVERY_FAILED'
   useEffect(() => {
     if (!relevant) return undefined
     let current = true
@@ -69,6 +76,10 @@ function SellerOrderCard({ order, onChanged }) {
   const delivery = useDelivery(order, version)
   const handedOff = (delivery.data?.pickups || []).length > 0
   const deliveryStatus = delivery.data?.assignment?.status
+  // Hang hoan da ve shop: seller xac nhan "Da nhan lai hang" (review PR 68 lan 2, muc 4.5).
+  const awaitingReturnReceipt =
+    deliveryStatus === 'RETURN_DROPPED_OFF' &&
+    (delivery.data?.pickups || []).some((pickup) => !pickup.return_received_at)
 
   async function run(name, action, message) {
     setBusy(name)
@@ -159,6 +170,22 @@ function SellerOrderCard({ order, onChanged }) {
           )}
           {handedOff && HANDOFF_STATUSES.includes(order.status) && (
             <span className="seller-order__hint">Đã bàn giao</span>
+          )}
+          {awaitingReturnReceipt && (
+            <button
+              type="button"
+              className="account-button"
+              disabled={Boolean(busy)}
+              onClick={() =>
+                run(
+                  'return',
+                  () => confirmReturnReceived(order.id),
+                  `Đã xác nhận nhận lại hàng hoàn của đơn ${shortOrderId(order.id)}.`,
+                )
+              }
+            >
+              {busy === 'return' ? 'Đang xác nhận…' : 'Đã nhận lại hàng'}
+            </button>
           )}
         </div>
       </footer>

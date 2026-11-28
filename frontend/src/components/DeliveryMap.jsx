@@ -17,7 +17,12 @@ const toLatLng = (point) =>
  * Ban do Leaflet + OpenStreetMap: duong da di (route) va vi tri shipper hien tai.
  * Dung circleMarker (ve bang SVG) de khong phu thuoc anh marker mac dinh cua Leaflet.
  */
-export default function DeliveryMap({ position, route = [], label = 'Bản đồ vị trí shipper' }) {
+export default function DeliveryMap({
+  position,
+  route = [],
+  destination = null,
+  label = 'Bản đồ vị trí shipper',
+}) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const layersRef = useRef(null)
@@ -34,6 +39,7 @@ export default function DeliveryMap({ position, route = [], label = 'Bản đồ
     layersRef.current = {
       path: L.polyline([], { color: '#0670ce', weight: 4, opacity: 0.7 }).addTo(map),
       marker: null,
+      destination: null,
     }
     mapRef.current = map
     return () => {
@@ -70,6 +76,34 @@ export default function DeliveryMap({ position, route = [], label = 'Bản đồ
       map.fitBounds(L.latLngBounds(points), { padding: [24, 24] })
     }
   }, [position, route])
+
+  // Marker diem giao (review PR 68, muc 4.10): toa do nguoi mua chon khi luu dia chi.
+  const destinationPoint = toLatLng(destination)
+  const destinationKey = destinationPoint ? destinationPoint.join(',') : ''
+  useEffect(() => {
+    const map = mapRef.current
+    const layers = layersRef.current
+    if (!map || !layers) return
+    const point = destinationKey ? destinationKey.split(',').map(Number) : null
+    if (!point) {
+      layers.destination?.remove()
+      layers.destination = null
+      return
+    }
+    if (!layers.destination) {
+      layers.destination = L.circleMarker(point, {
+        radius: 8,
+        color: '#fff',
+        weight: 3,
+        fillColor: '#15803d',
+        fillOpacity: 1,
+      })
+        .bindTooltip('Điểm giao')
+        .addTo(map)
+    } else layers.destination.setLatLng(point)
+    if (!toLatLng(position)) map.setView(point, Math.max(map.getZoom(), 14))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destinationKey])
 
   return (
     <div className="delivery-map" role="region" aria-label={label}>

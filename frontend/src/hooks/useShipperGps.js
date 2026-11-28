@@ -3,7 +3,7 @@ import { getApiError } from '../services/api/apiClient'
 import {
   GPS_MIN_INTERVAL_MS,
   GPS_SEND_INTERVAL_MS,
-  sendLocation,
+  sendLocations,
 } from '../services/api/deliveryApi'
 
 export const GPS_PERMISSION_LABELS = Object.freeze({
@@ -13,6 +13,9 @@ export const GPS_PERMISSION_LABELS = Object.freeze({
   denied: 'Quyền vị trí bị chặn — hãy bật lại trong cài đặt trình duyệt',
   unknown: 'Chưa rõ quyền vị trí',
 })
+
+/** Chi bao "dang chia se" khi server da nhan mot diem gan day. */
+const FRESH_MS = 60_000
 
 const geolocation = () =>
   typeof navigator !== 'undefined' && navigator.geolocation ? navigator.geolocation : null
@@ -44,84 +47,82 @@ export function useGeolocationPermission() {
 }
 
 /**
- * Chia se GPS cua shipper cho mot chuyen dang chay (PBL6-33).
+ * Chia se GPS tu TRINH DUYET cho moi chuyen dang chay (PBL6-33, review PR 68 muc 4.12).
  *
- * watchPosition giu vi tri moi nhat; moi GPS_SEND_INTERVAL_MS (12s, tren gioi han 10s cua server) gui mot
- * diem neu co vi tri moi. Server day diem do toi nguoi mua qua WebSocket ngay lap tuc nen do tre
- * hien thi = do tre mang, duoi 5 giay. Wake Lock giu man hinh sang de trinh duyet di dong khong
- * dung GPS khi dang giao.
+ * Mobile la nguon GPS chinh; web chi gui khi shipper chu dong bat "Chia se tu trinh duyet nay".
+ * Moi GPS_SEND_INTERVAL_MS (12s, tren gioi han 10s cua server) gui MOT request cho moi chuyen.
+ * Ket qua tung chuyen: GPS_SOURCE_CONFLICT (app di dong dang gui) va PING_TOO_FREQUENT duoc bao
+ * ro; 403 (bi khoa / mat quyen) thi dung han. Wake Lock giu man hinh sang va duoc xin lai khi tab
+ * hien tro lai.
  */
-export default function useShipperGps(assignmentId, { enabled, onStopped } = {}) {
+export default function useShipperGps({ enabled } = {}) {
   const [state, setState] = useState({
-    sharing: false,
     lastSentAt: null,
     error: '',
     warning: '',
     revoked: false,
+    watching: false,
   })
   const [permission, setPermission] = useGeolocationPermission()
   const latest = useRef(null)
   const sentStamp = useRef(null)
   const lastAttemptAt = useRef(0)
   const inFlight = useRef(false)
-  const stoppedRef = useRef(onStopped)
-  useEffect(() => {
-    stoppedRef.current = onStopped
-  }, [onStopped])
-
-  // Doi chuyen thi bo trang thai "mat quyen" cua chuyen cu.
-  useEffect(() => {
-    setState((previous) =>
-      previous.revoked ? { ...previous, revoked: false, error: '' } : previous,
-    )
-  }, [assignmentId])
 
   const push = useCallback(async () => {
     const position = latest.current
-    if (!assignmentId || !position || inFlight.current) return
-    if (position.timestamp === sentStamp.current) return
-    // Khong bao gio gui nhanh hon gioi han cua server, ke ca khi lan truoc that bai.
+    if (!position || inFlight.current || position.timestamp === sentStamp.current) return
     if (Date.now() - lastAttemptAt.current < GPS_MIN_INTERVAL_MS) return
     lastAttemptAt.current = Date.now()
     inFlight.current = true
     try {
-      await sendLocation(assignmentId, position)
-      // Chi danh dau "da gui" khi server nhan; 429 thi diem nay duoc gui lai o luot sau.
-      sentStamp.current = position.timestamp
-      setState((previous) => ({ ...previous, lastSentAt: Date.now(), error: '', warning: '' }))
-    } catch (failure) {
-      const error = getApiError(failure)
-      const status = failure?.response?.status
-      if (status === 429) {
+      const { results = [] } = (await sendLocations(position)) || {}
+      const codes = results.map((row) => row.result)
+      if (codes.includes('OK')) {
+        sentStamp.current = position.timestamp
+        setState((previous) => ({ ...previous, lastSentAt: Date.now(), error: '', warning: '' }))
+      } else if (codes.length && codes.every((code) => code === 'GPS_SOURCE_CONFLICT')) {
+        setState((previous) => ({
+          ...previous,
+          warning:
+            'Ứng dụng di động đang gửi vị trí cho chuyến này, trình duyệt tạm không gửi để tránh trùng.',
+        }))
+      } else if (codes.includes('PING_TOO_FREQUENT')) {
         setState((previous) => ({
           ...previous,
           warning: 'Máy chủ yêu cầu gửi chậm lại, vị trí sẽ được gửi lại ở lượt sau.',
         }))
-      } else if (error.code === 'TRACKING_STOPPED') {
-        stoppedRef.current?.()
-      } else if (status === 403) {
-        // Shipper bi doi hoac bi khoa: dung han viec lay vi tri cho chuyen nay.
+      } else if (!codes.length) {
+        setState((previous) => ({ ...previous, warning: 'Không có chuyến nào đang giao.' }))
+      }
+    } catch (failure) {
+      const status = failure?.response?.status
+      if (status === 403) {
         setState((previous) => ({
           ...previous,
-          sharing: false,
           revoked: true,
-          error: 'Bạn không còn quyền gửi vị trí cho chuyến này.',
+          watching: false,
+          error: 'Bạn không còn quyền gửi vị trí (tài khoản bị khoá hoặc mất phân công).',
         }))
-        stoppedRef.current?.()
+      } else if (status === 429) {
+        setState((previous) => ({
+          ...previous,
+          warning: 'Máy chủ yêu cầu gửi chậm lại, vị trí sẽ được gửi lại ở lượt sau.',
+        }))
       } else {
-        setState((previous) => ({ ...previous, error: error.message }))
+        setState((previous) => ({ ...previous, error: getApiError(failure).message }))
       }
     } finally {
       inFlight.current = false
     }
-  }, [assignmentId])
+  }, [])
 
-  const active = Boolean(enabled && assignmentId && !state.revoked)
+  const active = Boolean(enabled && !state.revoked)
 
   useEffect(() => {
     const geo = geolocation()
     if (!active || !geo) {
-      setState((previous) => (previous.sharing ? { ...previous, sharing: false } : previous))
+      setState((previous) => (previous.watching ? { ...previous, watching: false } : previous))
       return undefined
     }
     let wakeLock = null
@@ -145,6 +146,7 @@ export default function useShipperGps(assignmentId, { enabled, onStopped } = {})
     }
     acquireWakeLock()
     document.addEventListener('visibilitychange', acquireWakeLock)
+    setState((previous) => ({ ...previous, watching: true, error: '' }))
 
     const watchId = geo.watchPosition(
       (position) => {
@@ -154,18 +156,12 @@ export default function useShipperGps(assignmentId, { enabled, onStopped } = {})
           timestamp: position.timestamp,
         }
         setPermission('granted')
-        setState((previous) =>
-          previous.sharing && !previous.error
-            ? previous
-            : { ...previous, sharing: true, error: '' },
-        )
         if (lastAttemptAt.current === 0) push()
       },
       (failure) => {
         if (failure.code === 1) setPermission('denied')
         setState((previous) => ({
           ...previous,
-          sharing: false,
           error:
             failure.code === 1
               ? GPS_PERMISSION_LABELS.denied
@@ -187,5 +183,6 @@ export default function useShipperGps(assignmentId, { enabled, onStopped } = {})
     }
   }, [active, push, setPermission])
 
-  return { ...state, permission }
+  const sharing = Boolean(state.lastSentAt && Date.now() - state.lastSentAt < FRESH_MS)
+  return { ...state, sharing, permission }
 }

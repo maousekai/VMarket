@@ -8,10 +8,10 @@ import {
   assignShipper,
   createShipper,
   getDelivery,
-  isTerminalStatus,
   listAssignments,
   listShippers,
   newIdempotencyKey,
+  resendActivationEmail,
   returnAssignment,
   setShipperLocked,
 } from '../services/api/deliveryApi'
@@ -21,6 +21,7 @@ import {
   displayAreaName,
   isAreaMismatch,
   NEEDS_DISPATCH_STATUS,
+  PICKED_UP_STATUSES,
   SHIPPER_ACCOUNT_LABELS,
   SHIPPER_DISTRICTS,
   SHIPPER_PROVINCES,
@@ -191,8 +192,8 @@ function CreateShipperDialog({ onClose, onCreated }) {
             </option>
           ))}
         </AccountField>
-        <AccountField as="select" label="Quận / huyện phụ trách" required {...field('district')}>
-          <option value="">Chọn quận / huyện</option>
+        <AccountField as="select" label="Khu phụ trách" required {...field('district')}>
+          <option value="">Chọn khu giao hàng</option>
           {SHIPPER_DISTRICTS.map((district) => (
             <option key={district} value={district}>
               {district}
@@ -285,11 +286,21 @@ function ShippersTab() {
   const [notice, setNotice] = useState('')
   const shippers = usePaged((page) => listShippers({ district, page, size: PAGE_SIZE }), [district])
 
+  async function resend(shipper) {
+    setNotice('')
+    try {
+      await resendActivationEmail(shipper.id)
+      setNotice(`Đã gửi lại email kích hoạt cho ${shipper.name}.`)
+    } catch (failure) {
+      setNotice(getApiError(failure).message)
+    }
+  }
+
   return (
     <>
       <div className="admin-users__toolbar">
         <label className="delivery-filter">
-          <span>Quận / huyện</span>
+          <span>Khu giao hàng</span>
           <select
             value={district}
             onChange={(event) => {
@@ -364,13 +375,24 @@ function ShippersTab() {
                         <AccountBadge shipper={shipper} />
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className={`account-button${locked ? ' account-button--secondary' : ' account-button--danger'}`}
-                          onClick={() => setLocking(shipper)}
-                        >
-                          {locked ? 'Mở khoá' : 'Khoá'}
-                        </button>
+                        <div className="delivery-row-actions">
+                          {shipperAccountStatus(shipper) === 'PENDING_ACTIVATION' && (
+                            <button
+                              type="button"
+                              className="account-button account-button--secondary"
+                              onClick={() => resend(shipper)}
+                            >
+                              Gửi lại email kích hoạt
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={`account-button${locked ? ' account-button--secondary' : ' account-button--danger'}`}
+                            onClick={() => setLocking(shipper)}
+                          >
+                            {locked ? 'Mở khoá' : 'Khoá'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -416,11 +438,10 @@ function AssignDialog({ assignment, onClose, onDone }) {
   const [form, setForm] = useState({ shipperId: '', reason: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const inProgress = !['WAITING_ASSIGNMENT', 'ASSIGNED'].includes(assignment.status)
 
   useEffect(() => {
     let current = true
-    // Ca tinh, de admin thay ca shipper khac quan (gan nhan "Khac quan") khi khu vuc het nguoi.
+    // Ca tinh, de admin thay ca shipper khu khac (gan nhan "Khac khu") khi khu het nguoi.
     const loads = [listShippers({ province: assignment.province, size: 100 })]
     if (version === null) loads.push(getDelivery(assignment.order_id))
     Promise.all(loads)
@@ -442,9 +463,9 @@ function AssignDialog({ assignment, onClose, onDone }) {
   }, [assignment])
 
   const selected = shippers?.find((shipper) => shipper.id === form.shipperId)
-  // Ly do (noi bo) bat buoc dung theo backend: gan khac khu vuc hoac doi shipper giua chuyen.
+  // Ly do (noi bo) bat buoc dung theo backend: gan shipper khac khu.
   const mismatch = Boolean(selected?.mismatch)
-  const needsReason = mismatch || inProgress
+  const needsReason = mismatch
 
   async function submit(event) {
     event.preventDefault()
@@ -493,13 +514,13 @@ function AssignDialog({ assignment, onClose, onDone }) {
             <option key={shipper.id} value={shipper.id}>
               {shipper.name} · {displayAreaName(shipper.district) || 'Cả tỉnh'} ·{' '}
               {Number(shipper.active_orders || 0)} chuyến đang chạy
-              {shipper.mismatch ? ' · Khác quận' : ''}
+              {shipper.mismatch ? ' · Khác khu' : ''}
             </option>
           ))}
         </AccountField>
         {mismatch && (
           <p className="account-notice account-notice--warning" role="status">
-            Shipper này không phụ trách quận của đơn. Cần ghi lý do để gán vượt khu vực.
+            Shipper này không phụ trách khu của đơn. Cần ghi lý do để gán khác khu.
           </p>
         )}
         {needsReason && (
@@ -508,11 +529,7 @@ function AssignDialog({ assignment, onClose, onDone }) {
             label="Lý do (nội bộ, người mua không thấy)"
             required
             maxLength={255}
-            hint={
-              inProgress
-                ? 'Bắt buộc khi đổi shipper giữa chuyến.'
-                : 'Bắt buộc khi gán shipper khác quận.'
-            }
+            hint="Bắt buộc khi gán shipper khác khu."
             value={form.reason}
             onChange={(event) =>
               setForm((previous) => ({ ...previous, reason: event.target.value }))
@@ -568,8 +585,8 @@ function ReturnDialog({ assignment, onClose, onDone }) {
   }
   return (
     <Modal
-      title={`Hoàn hàng đơn ${shortOrderId(assignment.order_id)}`}
-      description="Đơn giao thất bại sẽ được chuyển về gian hàng."
+      title={`Chuyển hoàn hàng đơn ${shortOrderId(assignment.order_id)}`}
+      description="Hàng đã rời shop nên không đổi shipper được; chuyến sẽ chuyển sang hoàn hàng về các shop."
       onClose={onClose}
     >
       <form className="profile-form" noValidate onSubmit={submit}>
@@ -704,7 +721,7 @@ function AssignmentsTab() {
                 <tr>
                   <th scope="col">Đơn</th>
                   <th scope="col">Shipper</th>
-                  <th scope="col">Khu vực</th>
+                  <th scope="col">Phường / khu</th>
                   <th scope="col">Trạng thái</th>
                   <th scope="col">Lần giao</th>
                   <th scope="col">Tạo lúc</th>
@@ -715,15 +732,23 @@ function AssignmentsTab() {
               </thead>
               <tbody>
                 {assignments.items.map((assignment) => {
-                  const attention = assignment.status === NEEDS_DISPATCH_STATUS
+                  const waitingDispatch = assignment.status === NEEDS_DISPATCH_STATUS
+                  const flagged = Boolean(assignment.needs_attention)
                   return (
                     <tr
                       key={assignment.id}
-                      className={attention ? 'delivery-row--attention' : undefined}
+                      className={waitingDispatch || flagged ? 'delivery-row--attention' : undefined}
                     >
                       <td>
                         <strong>{shortOrderId(assignment.order_id)}</strong>
-                        {attention && <span className="delivery-attention">Cần phân công</span>}
+                        {waitingDispatch && (
+                          <span className="delivery-attention">Cần phân công</span>
+                        )}
+                        {flagged && (
+                          <span className="delivery-attention delivery-attention--flag">
+                            Cần xử lý: shipper bị khoá khi đang giữ hàng
+                          </span>
+                        )}
                       </td>
                       <td>
                         {assignment.shipper_name ? (
@@ -747,16 +772,16 @@ function AssignmentsTab() {
                       <td>{formatDateTime(assignment.created_at)}</td>
                       <td>
                         <div className="delivery-row-actions">
-                          {assignment.status !== 'WAITING_HANDOFF' &&
-                            !isTerminalStatus(assignment.status) && (
-                              <button
-                                type="button"
-                                className="account-button"
-                                onClick={() => setDialog({ kind: 'assign', assignment })}
-                              >
-                                {assignment.shipper_id ? 'Đổi shipper' : 'Phân công'}
-                              </button>
-                            )}
+                          {/* Chi doi shipper truoc khi lay hang (review PR 68 lan 2, muc 4.6). */}
+                          {['WAITING_ASSIGNMENT', 'ASSIGNED'].includes(assignment.status) && (
+                            <button
+                              type="button"
+                              className="account-button"
+                              onClick={() => setDialog({ kind: 'assign', assignment })}
+                            >
+                              {assignment.shipper_id ? 'Đổi shipper' : 'Phân công'}
+                            </button>
+                          )}
                           {assignment.status === 'FAILED' && assignment.attempt < 3 && (
                             <button
                               type="button"
@@ -766,13 +791,13 @@ function AssignmentsTab() {
                               Giao lại
                             </button>
                           )}
-                          {assignment.status === 'FAILED' && (
+                          {PICKED_UP_STATUSES.includes(assignment.status) && (
                             <button
                               type="button"
                               className="account-button account-button--danger"
                               onClick={() => setDialog({ kind: 'return', assignment })}
                             >
-                              Hoàn hàng
+                              Chuyển hoàn hàng
                             </button>
                           )}
                           <button
