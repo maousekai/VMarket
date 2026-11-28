@@ -28,6 +28,8 @@ import com.vmarket.order.service.OrderCreator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.AmqpConnectException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,7 +76,7 @@ class OrderStockEventFlowTest {
         orders.deleteAll();
     }
 
-    private String checkout() {
+    private String checkout(String paymentMethod) {
         var address =
                 new AddressView(
                         "01JBQ9ADDR0000000000TEST01",
@@ -97,7 +99,7 @@ class OrderStockEventFlowTest {
                         address,
                         List.of(item),
                         UUID.randomUUID().toString(),
-                        new PlaceOrderRequest(address.id(), null, "COD"))
+                        new PlaceOrderRequest(address.id(), null, paymentMethod))
                 .id();
     }
 
@@ -107,7 +109,7 @@ class OrderStockEventFlowTest {
                 .when(publisher)
                 .publish(anyString(), any());
 
-        String orderId = checkout();
+        String orderId = checkout("COD");
 
         // Đơn đã commit cùng outbox row dù broker đang chết.
         assertThat(orders.findById(orderId)).isPresent();
@@ -146,17 +148,24 @@ class OrderStockEventFlowTest {
         assertThat(events.count()).isZero();
     }
 
-    @Test
-    void stockReservationFailureCancelsOrderAndAnnouncesCancellation() {
-        String orderId = checkout();
+    private EventEnvelope stockFailure(String orderId) {
+        return new EventEnvelope(
+                UUID.randomUUID().toString(),
+                EventType.STOCK_RESERVATION_FAILED,
+                System.currentTimeMillis(),
+                new StockReservationFailed(orderId, "INSUFFICIENT_STOCK", "Hết hàng"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"COD, PENDING", "VNPAY, WAITING_PAYMENT"})
+    void stockReservationFailureCancelsOrderAndAnnouncesCancellation(
+            String paymentMethod, OrderStatus previousStatus) {
+        String orderId = checkout(paymentMethod);
+        assertThat(orders.findById(orderId).orElseThrow().getStatus()).isEqualTo(previousStatus);
         events.deleteAll(); // bỏ OrderPlaced, chỉ quan tâm event sinh ra từ việc huỷ
 
-        consumers.dispatch(
-                new EventEnvelope(
-                        UUID.randomUUID().toString(),
-                        EventType.STOCK_RESERVATION_FAILED,
-                        System.currentTimeMillis(),
-                        new StockReservationFailed(orderId, "INSUFFICIENT_STOCK", "Hết hàng")));
+        var failure = stockFailure(orderId);
+        consumers.dispatch(failure);
 
         assertThat(orders.findById(orderId).orElseThrow().getStatus())
                 .isEqualTo(OrderStatus.CANCELLED);
@@ -167,18 +176,26 @@ class OrderStockEventFlowTest {
                             assertThat(e.getEventType())
                                     .isEqualTo(EventType.ORDER_STATUS_CHANGED);
                             assertThat(e.getPayload())
-                                    .contains("\"previousStatus\":\"PENDING\"")
+                                    .contains("\"previousStatus\":\"" + previousStatus.name() + "\"")
                                     .contains("\"status\":\"CANCELLED\"");
                         });
 
-        // Redelivery của cùng event không huỷ lại / không phát thêm event.
-        consumers.dispatch(
-                new EventEnvelope(
-                        UUID.randomUUID().toString(),
-                        EventType.STOCK_RESERVATION_FAILED,
-                        System.currentTimeMillis(),
-                        new StockReservationFailed(orderId, "INSUFFICIENT_STOCK", "Hết hàng")));
+        // Khi nhận lại cùng message, stockFailed bỏ qua đơn vì trạng thái đã là CANCELLED.
+        consumers.dispatch(failure);
         assertThat(events.count()).isEqualTo(1);
+    }
+
+    @Test
+    void stockReservationFailureLeavesProcessingOrderUnchanged() {
+        String orderId = checkout("COD");
+        jdbc.update("update orders set status='PROCESSING' where id=?", orderId);
+        events.deleteAll();
+
+        consumers.dispatch(stockFailure(orderId));
+
+        assertThat(orders.findById(orderId).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.PROCESSING);
+        assertThat(events.count()).isZero();
     }
 
     @Test
@@ -187,8 +204,14 @@ class OrderStockEventFlowTest {
         doThrow(new AmqpConnectException(new ConnectException("Connection refused")))
                 .when(publisher)
                 .publish(anyString(), any());
-        checkout();
+        checkout("COD");
         new OutboxJob(dispatcher).run();
-        assertThat(events.count()).isEqualTo(1);
+        assertThat(events.findAll())
+                .singleElement()
+                .satisfies(
+                        e -> {
+                            assertThat(e.getState()).isEqualTo("PENDING");
+                            assertThat(e.getRetryAttempts()).isEqualTo(1);
+                        });
     }
 }
