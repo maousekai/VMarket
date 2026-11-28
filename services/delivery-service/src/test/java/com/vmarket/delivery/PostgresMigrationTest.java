@@ -5,13 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationState;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -23,14 +24,19 @@ import java.util.Arrays;
  * chỉ {@code validate} (không tự sinh/sửa bảng). Mọi file migration trên classpath (kể cả
  * {@code db/vendor/postgresql}) phải được áp dụng, không còn migration nào treo.
  *
- * <p>{@code disabledWithoutDocker}: máy không có Docker tự bỏ qua; CI có Docker sẵn.
+ * <p>Máy dev thiếu Docker có thể bỏ qua test. CI luôn phải khởi động PostgreSQL.
  */
 @SpringBootTest
-@Testcontainers(disabledWithoutDocker = true)
+@EnabledIf("dockerTestsEnabled")
+@Testcontainers
 class PostgresMigrationTest {
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine");
+
+    static boolean dockerTestsEnabled() {
+        return Boolean.parseBoolean(System.getenv("CI")) || DockerClientFactory.instance().isDockerAvailable();
+    }
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
@@ -43,7 +49,6 @@ class PostgresMigrationTest {
     }
 
     @Autowired Flyway flyway;
-    @Autowired JdbcTemplate jdbc;
     @Autowired Environment env;
 
     @Test

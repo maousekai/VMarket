@@ -3,6 +3,10 @@ package com.vmarket.user;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySourcesPropertyResolver;
+import org.springframework.core.io.FileSystemResource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,16 +28,20 @@ class SchemaManagementConfigTest {
                     .toList();
         }
         assertThat(profiles).isNotEmpty();
+        var loader = new YamlPropertySourceLoader();
         for (Path profile : profiles) {
-            for (String line : Files.readAllLines(profile)) {
-                String setting = line.replaceAll("#.*", "").trim();
-                if (setting.startsWith("ddl-auto:")) {
-                    assertThat(setting).as(profile + ": " + line).isEqualTo("ddl-auto: validate");
+            for (var document : loader.load(profile.toString(), new FileSystemResource(profile))) {
+                var sources = new MutablePropertySources();
+                sources.addLast(document);
+                var config = new PropertySourcesPropertyResolver(sources);
+                // Profile overrides may inherit ddl-auto from application.yml.
+                if (config.containsProperty("spring.jpa.hibernate.ddl-auto")) {
+                    assertThat(config.getProperty("spring.jpa.hibernate.ddl-auto"))
+                            .as("%s ddl-auto", document.getName()).isEqualTo("validate");
                 }
+                assertThat(config.getProperty("spring.flyway.enabled", "true"))
+                        .as("%s flyway.enabled", document.getName()).isEqualToIgnoringCase("true");
             }
-            assertThat(Files.readString(profile))
-                    .as(profile + " không được tắt Flyway")
-                    .doesNotContainPattern("(?m)^\\s*flyway:\\s*\\n\\s*enabled:\\s*false");
         }
     }
 }
