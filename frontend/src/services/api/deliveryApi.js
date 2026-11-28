@@ -59,10 +59,17 @@ export const issueTrackingTicket = async (orderId) =>
  * [{id, name, phone, province, district, active, account_status, total_orders, active_orders,
  *   delivered_orders, success_rate_percent}] - province/district la khoa da chuan hoa.
  */
-export const listShippers = async ({ province = '', district = '', page = 0, size = 20 } = {}) =>
+/** shift: '' (tat ca) | 'on' (dang trong ca) | 'off' (ngoai ca). */
+export const listShippers = async ({
+  province = '',
+  district = '',
+  shift = '',
+  page = 0,
+  size = 20,
+} = {}) =>
   (
     await apiClient.get('/api/delivery/admin/shippers', {
-      params: { province, district, page, size },
+      params: { province, district, shift, page, size },
     })
   ).data
 
@@ -102,6 +109,25 @@ export const assignShipper = async (assignmentId, body) =>
 
 export const returnAssignment = async (assignmentId, body) =>
   (await apiClient.post(`/api/delivery/admin/assignments/${enc(assignmentId)}/return`, body)).data
+
+/** Chuyen dang hoan bi ket (shipper bi khoa): admin xac nhan hang da ve shop. */
+export const confirmReturnDroppedOff = async (assignmentId, body) =>
+  (
+    await apiClient.post(
+      `/api/delivery/admin/assignments/${enc(assignmentId)}/return-dropped-off`,
+      body,
+    )
+  ).data
+
+/** Ca lam viec cua shipper: {onShift, shiftChangedAt, unpickedTrips, activeTrips}. */
+export const getShift = async () => (await apiClient.get('/api/delivery/shipper/shift')).data
+
+export const startShift = async () =>
+  (await apiClient.post('/api/delivery/shipper/shift/start')).data
+
+/** releaseUnpicked=true: xac nhan chuyen chua lay hang chuyen cho shipper khac. */
+export const endShift = async ({ releaseUnpicked = false } = {}) =>
+  (await apiClient.post('/api/delivery/shipper/shift/end', { releaseUnpicked })).data
 
 export const adminRetryAssignment = async (assignmentId, expectedVersion) =>
   (

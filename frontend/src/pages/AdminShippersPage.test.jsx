@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import AdminShippersPage from './AdminShippersPage'
 import {
   assignShipper,
+  confirmReturnDroppedOff,
   createShipper,
   getDelivery,
   listAssignments,
@@ -20,6 +21,7 @@ vi.mock('../services/api/deliveryApi', async (importOriginal) => ({
   assignShipper: vi.fn(),
   getDelivery: vi.fn(),
   returnAssignment: vi.fn(),
+  confirmReturnDroppedOff: vi.fn(),
   adminRetryAssignment: vi.fn(),
 }))
 vi.mock('../components/DeliveryTrackingPanel', () => ({ default: () => <div>bản đồ</div> }))
@@ -37,6 +39,7 @@ const shipper = (overrides = {}) => ({
   active_orders: 2,
   delivered_orders: 7,
   success_rate_percent: 87.5,
+  on_shift: true,
   ...overrides,
 })
 const waiting = {
@@ -137,6 +140,58 @@ describe('AdminShippersPage dispatch', () => {
         expectedVersion: 5,
         overrideArea: true,
         reason: 'Hải Châu hết người',
+      }),
+    )
+  })
+})
+
+describe('AdminShippersPage shifts and stuck returns', () => {
+  it('tags off-shift shippers and asks for a reason before assigning them', async () => {
+    mockAssignments([waiting])
+    listShippers.mockResolvedValue([shipper({ on_shift: false })])
+    assignShipper.mockResolvedValue({})
+    render(<AdminShippersPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Phân công' }))
+    const dialog = within(screen.getByRole('dialog'))
+    await waitFor(() => expect(dialog.getAllByRole('option')).toHaveLength(2))
+    expect(dialog.getByRole('option', { name: /Trần Giao.*Ngoài ca/ })).toBeTruthy()
+    fireEvent.change(dialog.getByLabelText(/^Shipper/), { target: { value: 's1' } })
+    expect(dialog.getByText('Shipper này đang ngoài ca. Cần ghi lý do để gán.')).toBeTruthy()
+    const submit = dialog.getByRole('button', { name: 'Phân công' })
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(dialog.getByLabelText(/Lý do/), { target: { value: 'Đã gọi xác nhận' } })
+    fireEvent.click(submit)
+    await waitFor(() =>
+      expect(assignShipper).toHaveBeenCalledWith('a1', {
+        shipperId: 's1',
+        expectedVersion: 5,
+        overrideArea: undefined,
+        reason: 'Đã gọi xác nhận',
+      }),
+    )
+  })
+
+  it('lets the admin confirm a stuck return has reached the shops', async () => {
+    mockAssignments([
+      {
+        ...waiting,
+        status: 'RETURNING',
+        shipper_id: 's1',
+        shipper_name: 'Trần Giao',
+        needs_attention: true,
+      },
+    ])
+    confirmReturnDroppedOff.mockResolvedValue({})
+    render(<AdminShippersPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Xác nhận hàng đã về shop' }))
+    expect(screen.queryByRole('button', { name: 'Chuyển hoàn hàng' })).toBeNull()
+    const dialog = within(screen.getByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText(/Lý do/), { target: { value: 'Kho đã nhận' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Xác nhận đã về shop' }))
+    await waitFor(() =>
+      expect(confirmReturnDroppedOff).toHaveBeenCalledWith('a1', {
+        expectedVersion: 5,
+        reason: 'Kho đã nhận',
       }),
     )
   })

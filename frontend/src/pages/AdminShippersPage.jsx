@@ -6,6 +6,7 @@ import { getApiError } from '../services/api/apiClient'
 import {
   adminRetryAssignment,
   assignShipper,
+  confirmReturnDroppedOff,
   createShipper,
   getDelivery,
   listAssignments,
@@ -279,12 +280,30 @@ function LockDialog({ shipper, onClose, onDone }) {
   )
 }
 
+const SHIFT_FILTERS = [
+  ['', 'Tất cả'],
+  ['on', 'Đang trong ca'],
+  ['off', 'Ngoài ca'],
+]
+
+function ShiftBadge({ shipper }) {
+  return shipper.on_shift ? (
+    <span className="delivery-badge delivery-badge--delivered">Trong ca</span>
+  ) : (
+    <span className="delivery-badge delivery-badge--waiting_handoff">Ngoài ca</span>
+  )
+}
+
 function ShippersTab() {
   const [district, setDistrict] = useState('')
+  const [shift, setShift] = useState('')
   const [creating, setCreating] = useState(false)
   const [locking, setLocking] = useState(null)
   const [notice, setNotice] = useState('')
-  const shippers = usePaged((page) => listShippers({ district, page, size: PAGE_SIZE }), [district])
+  const shippers = usePaged(
+    (page) => listShippers({ district, shift, page, size: PAGE_SIZE }),
+    [district, shift],
+  )
 
   async function resend(shipper) {
     setNotice('')
@@ -312,6 +331,22 @@ function ShippersTab() {
             {SHIPPER_DISTRICTS.map((name) => (
               <option key={name} value={name}>
                 {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="delivery-filter">
+          <span>Ca</span>
+          <select
+            value={shift}
+            onChange={(event) => {
+              shippers.setPage(0)
+              setShift(event.target.value)
+            }}
+          >
+            {SHIFT_FILTERS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
@@ -347,6 +382,7 @@ function ShippersTab() {
                 <tr>
                   <th scope="col">Shipper</th>
                   <th scope="col">Khu vực</th>
+                  <th scope="col">Ca</th>
                   <th scope="col">Đang chạy</th>
                   <th scope="col">Đã giao / tổng</th>
                   <th scope="col">Tỉ lệ thành công</th>
@@ -366,6 +402,9 @@ function ShippersTab() {
                         <span className="admin-cell__sub">{shipper.phone}</span>
                       </td>
                       <td>{displayArea(shipper)}</td>
+                      <td>
+                        <ShiftBadge shipper={shipper} />
+                      </td>
                       <td>{Number(shipper.active_orders || 0)}</td>
                       <td>
                         {shipper.delivered_orders} / {shipper.total_orders}
@@ -465,7 +504,9 @@ function AssignDialog({ assignment, onClose, onDone }) {
   const selected = shippers?.find((shipper) => shipper.id === form.shipperId)
   // Ly do (noi bo) bat buoc dung theo backend: gan shipper khac khu.
   const mismatch = Boolean(selected?.mismatch)
-  const needsReason = mismatch
+  // Gan tay cho shipper ngoai ca duoc nhung bat buoc ly do (review PR 68 lan 3, phan 2).
+  const offShift = Boolean(selected) && !selected.on_shift
+  const needsReason = mismatch || offShift
 
   async function submit(event) {
     event.preventDefault()
@@ -515,6 +556,7 @@ function AssignDialog({ assignment, onClose, onDone }) {
               {shipper.name} · {displayAreaName(shipper.district) || 'Cả tỉnh'} ·{' '}
               {Number(shipper.active_orders || 0)} chuyến đang chạy
               {shipper.mismatch ? ' · Khác khu' : ''}
+              {shipper.on_shift ? '' : ' · Ngoài ca'}
             </option>
           ))}
         </AccountField>
@@ -523,13 +565,18 @@ function AssignDialog({ assignment, onClose, onDone }) {
             Shipper này không phụ trách khu của đơn. Cần ghi lý do để gán khác khu.
           </p>
         )}
+        {offShift && (
+          <p className="account-notice account-notice--warning" role="status">
+            Shipper này đang ngoài ca. Cần ghi lý do để gán.
+          </p>
+        )}
         {needsReason && (
           <AccountField
             as="textarea"
             label="Lý do (nội bộ, người mua không thấy)"
             required
             maxLength={255}
-            hint="Bắt buộc khi gán shipper khác khu."
+            hint="Bắt buộc khi gán shipper khác khu hoặc đang ngoài ca."
             value={form.reason}
             onChange={(event) =>
               setForm((previous) => ({ ...previous, reason: event.target.value }))
@@ -564,7 +611,7 @@ function AssignDialog({ assignment, onClose, onDone }) {
   )
 }
 
-function ReturnDialog({ assignment, onClose, onDone }) {
+function ReturnDialog({ assignment, dropOff = false, onClose, onDone }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -575,8 +622,14 @@ function ReturnDialog({ assignment, onClose, onDone }) {
     try {
       const version =
         assignment.version ?? (await getDelivery(assignment.order_id)).assignment.version
-      await returnAssignment(assignment.id, { expectedVersion: version, reason: reason.trim() })
-      onDone('Đã chuyển đơn sang hoàn hàng.')
+      const body = { expectedVersion: version, reason: reason.trim() }
+      if (dropOff) {
+        await confirmReturnDroppedOff(assignment.id, body)
+        onDone('Đã xác nhận hàng hoàn đã về shop; chờ shop xác nhận nhận lại.')
+      } else {
+        await returnAssignment(assignment.id, body)
+        onDone('Đã chuyển đơn sang hoàn hàng.')
+      }
     } catch (failure) {
       setError(getApiError(failure).message)
     } finally {
@@ -585,8 +638,12 @@ function ReturnDialog({ assignment, onClose, onDone }) {
   }
   return (
     <Modal
-      title={`Chuyển hoàn hàng đơn ${shortOrderId(assignment.order_id)}`}
-      description="Hàng đã rời shop nên không đổi shipper được; chuyến sẽ chuyển sang hoàn hàng về các shop."
+      title={`${dropOff ? 'Xác nhận hàng đã về shop' : 'Chuyển hoàn hàng'} đơn ${shortOrderId(assignment.order_id)}`}
+      description={
+        dropOff
+          ? 'Dùng khi shipper bị khoá giữa lúc hoàn hàng: ghi nhận hàng đã trả về mọi shop, shop sẽ xác nhận đã nhận lại.'
+          : 'Hàng đã rời shop nên không đổi shipper được; chuyến sẽ chuyển sang hoàn hàng về các shop.'
+      }
       onClose={onClose}
     >
       <form className="profile-form" noValidate onSubmit={submit}>
@@ -610,7 +667,7 @@ function ReturnDialog({ assignment, onClose, onDone }) {
             type="submit"
             disabled={busy || !reason.trim()}
           >
-            {busy ? 'Đang xử lý…' : 'Hoàn hàng'}
+            {busy ? 'Đang xử lý…' : dropOff ? 'Xác nhận đã về shop' : 'Hoàn hàng'}
           </button>
           <button
             className="account-button account-button--secondary"
@@ -800,6 +857,15 @@ function AssignmentsTab() {
                               Chuyển hoàn hàng
                             </button>
                           )}
+                          {assignment.status === 'RETURNING' && assignment.needs_attention && (
+                            <button
+                              type="button"
+                              className="account-button account-button--danger"
+                              onClick={() => setDialog({ kind: 'dropOff', assignment })}
+                            >
+                              Xác nhận hàng đã về shop
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="account-button account-button--secondary"
@@ -829,9 +895,10 @@ function AssignmentsTab() {
           onDone={done}
         />
       )}
-      {dialog?.kind === 'return' && (
+      {(dialog?.kind === 'return' || dialog?.kind === 'dropOff') && (
         <ReturnDialog
           assignment={dialog.assignment}
+          dropOff={dialog.kind === 'dropOff'}
           onClose={() => setDialog(null)}
           onDone={done}
         />

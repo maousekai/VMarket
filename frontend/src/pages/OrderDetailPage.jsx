@@ -53,7 +53,7 @@ function DeliveryStatus({ orderId, status }) {
     )
   )
     return null
-  return <DeliveryTrackingPanel orderId={orderId} />
+  return <DeliveryTrackingPanel orderId={orderId} orderStatus={status} />
 }
 
 /**

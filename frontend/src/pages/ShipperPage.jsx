@@ -7,10 +7,13 @@ import { getApiError } from '../services/api/apiClient'
 import {
   confirmPickup,
   confirmReturn,
+  endShift,
+  getShift,
   isTerminalStatus,
   listMyAssignments,
   retryAssignment,
   shipperActions,
+  startShift,
   updateAssignmentStatus,
 } from '../services/api/deliveryApi'
 import {
@@ -106,6 +109,100 @@ function BrowserGpsPanel({ trackingCount }) {
           {enabled ? 'Dừng chia sẻ từ trình duyệt này' : 'Chia sẻ từ trình duyệt này'}
         </button>
       </div>
+    </section>
+  )
+}
+
+/**
+ * Ca lam viec (review PR 68 lan 3, phan 2): chi shipper dang trong ca moi duoc tu dong giao don.
+ * Vao ca khong bat GPS; ket thuc ca khi con chuyen chua lay hang thi hoi xac nhan.
+ */
+function ShiftBar({ reloadKey, onChanged }) {
+  const [shift, setShift] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [confirming, setConfirming] = useState('')
+
+  useEffect(() => {
+    let current = true
+    getShift()
+      .then((data) => current && setShift(data))
+      .catch((failure) => current && setError(getApiError(failure).message))
+    return () => {
+      current = false
+    }
+  }, [reloadKey])
+
+  async function run(action) {
+    setBusy(true)
+    setError('')
+    try {
+      setShift(await action())
+      setConfirming('')
+      onChanged()
+    } catch (failure) {
+      const apiError = getApiError(failure)
+      if (apiError.code === 'SHIFT_END_CONFIRM_REQUIRED') setConfirming(apiError.message)
+      else setError(apiError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!shift && !error) return null
+  const onShift = Boolean(shift?.onShift)
+  return (
+    <section className={`shipper-shift${onShift ? ' is-on' : ''}`} aria-label="Ca làm việc">
+      <div>
+        <strong>{onShift ? 'Bạn đang trong ca' : 'Bạn đang ngoài ca'}</strong>
+        <span className="delivery-track__muted">
+          {onShift
+            ? `Đang nhận đơn mới${shift.shiftChangedAt ? ` · vào ca lúc ${formatDateTime(shift.shiftChangedAt)}` : ''}`
+            : 'Bạn đang ngoài ca, sẽ không được giao đơn mới.'}
+        </span>
+        {error && (
+          <span className="shipper-gps__error" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+      {shift && (
+        <button
+          type="button"
+          className={`account-button${onShift ? ' account-button--secondary' : ''}`}
+          disabled={busy}
+          onClick={() => run(onShift ? () => endShift() : startShift)}
+        >
+          {busy ? 'Đang cập nhật…' : onShift ? 'Kết thúc ca' : 'Bắt đầu ca'}
+        </button>
+      )}
+      {confirming && (
+        <Modal
+          title="Kết thúc ca?"
+          description={`${confirming}. Bạn vẫn muốn kết thúc ca?`}
+          onClose={() => !busy && setConfirming('')}
+        >
+          <div className="account-actions">
+            <button
+              type="button"
+              className="account-button account-button--danger"
+              data-autofocus
+              disabled={busy}
+              onClick={() => run(() => endShift({ releaseUnpicked: true }))}
+            >
+              {busy ? 'Đang kết thúc…' : 'Kết thúc ca'}
+            </button>
+            <button
+              type="button"
+              className="account-button account-button--secondary"
+              disabled={busy}
+              onClick={() => setConfirming('')}
+            >
+              Ở lại ca
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   )
 }
@@ -619,6 +716,8 @@ export default function ShipperPage() {
           Làm mới
         </button>
       </div>
+
+      <ShiftBar reloadKey={reloadKey} onChanged={reload} />
 
       <BrowserGpsPanel trackingCount={trackingCount} />
 

@@ -5,6 +5,9 @@ import ShipperPage from './ShipperPage'
 import {
   confirmPickup,
   confirmReturn,
+  endShift,
+  getShift,
+  startShift,
   listMyAssignments,
   retryAssignment,
   sendLocations,
@@ -19,6 +22,9 @@ vi.mock('../services/api/deliveryApi', async (importOriginal) => ({
   confirmPickup: vi.fn(),
   confirmReturn: vi.fn(),
   sendLocations: vi.fn(),
+  getShift: vi.fn(),
+  startShift: vi.fn(),
+  endShift: vi.fn(),
 }))
 vi.mock('../components/DeliveryTrackingPanel', () => ({ default: () => <div>bản đồ</div> }))
 
@@ -78,6 +84,12 @@ const geolocation = {
 beforeEach(() => {
   vi.stubGlobal('navigator', { ...navigator, geolocation })
   sendLocations.mockResolvedValue({ results: [{ assignmentId: 'a1', result: 'OK' }] })
+  getShift.mockResolvedValue({
+    onShift: true,
+    shiftChangedAt: null,
+    unpickedTrips: 1,
+    activeTrips: 0,
+  })
   listMyAssignments.mockImplementation(async ({ scope }) => (scope === 'active' ? [trip()] : []))
 })
 afterEach(() => {
@@ -91,6 +103,61 @@ const active = (overrides) =>
   listMyAssignments.mockImplementation(async ({ scope }) =>
     scope === 'active' ? [trip(overrides)] : [],
   )
+
+describe('ShipperPage shift', () => {
+  it('warns while off shift and starts a shift', async () => {
+    getShift.mockResolvedValue({ onShift: false, unpickedTrips: 0, activeTrips: 0 })
+    startShift.mockResolvedValue({ onShift: true, unpickedTrips: 0, activeTrips: 0 })
+    render(<ShipperPage />)
+    expect(await screen.findByText('Bạn đang ngoài ca, sẽ không được giao đơn mới.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Bắt đầu ca' }))
+    expect(await screen.findByText('Bạn đang trong ca')).toBeTruthy()
+    expect(startShift).toHaveBeenCalled()
+    // Vao ca khong tu bat GPS.
+    expect(geolocation.watchPosition).not.toHaveBeenCalled()
+  })
+
+  it('asks before ending a shift that still has trips to pick up', async () => {
+    endShift
+      .mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            error: {
+              code: 'SHIFT_END_CONFIRM_REQUIRED',
+              message: 'Còn 1 chuyến chưa lấy hàng sẽ chuyển cho shipper khác',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ onShift: false, unpickedTrips: 0, activeTrips: 0 })
+    render(<ShipperPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Kết thúc ca' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByText(/Còn 1 chuyến chưa lấy hàng/)).toBeTruthy()
+    fireEvent.click(dialog.getByRole('button', { name: 'Kết thúc ca' }))
+    await waitFor(() => expect(endShift).toHaveBeenLastCalledWith({ releaseUnpicked: true }))
+    expect(await screen.findByText('Bạn đang ngoài ca')).toBeTruthy()
+  })
+
+  it('explains why a shift with picked-up cargo cannot end', async () => {
+    endShift.mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          error: {
+            code: 'SHIFT_HAS_ACTIVE_TRIPS',
+            message: 'Còn 1 chuyến đã lấy hàng; hãy giao xong hoặc trả hàng trước khi kết thúc ca',
+          },
+        },
+      },
+    })
+    render(<ShipperPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Kết thúc ca' }))
+    expect(await screen.findByText(/Còn 1 chuyến đã lấy hàng/)).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
 
 describe('ShipperPage', () => {
   it('loads every running trip with the active scope and shows recipient, zone and COD', async () => {

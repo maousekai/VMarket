@@ -487,3 +487,26 @@
 .location-picker {
   height: 260px;
 }
+
+/* Ca lam viec cua shipper (review PR 68 lan 3) */
+.shipper-shift {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-md);
+  background: #fffbeb;
+}
+
+.shipper-shift > div {
+  display: grid;
+  gap: 2px;
+}
+
+.shipper-shift.is-on {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}

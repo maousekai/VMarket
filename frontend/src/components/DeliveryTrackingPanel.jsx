@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import useDeliveryTracking from '../hooks/useDeliveryTracking'
+import { useReloadOnNotification } from '../notifications/events'
 import { getApiError } from '../services/api/apiClient'
 import {
   getDelivery,
@@ -19,6 +20,10 @@ import './delivery.css'
 
 // Leaflet nang (~150KB) va can DOM that: chi tai khi thuc su mo ban do.
 const DeliveryMap = lazy(() => import('./DeliveryMap'))
+
+// Chua duoc cap ve theo doi (chuyen chua lay hang): tai lai chi tiet dinh ky de tu chuyen sang ban
+// do khi shipper lay hang (review PR 68 lan 3, muc 1.2).
+const WAITING_REFRESH_MS = 10_000
 
 const CONNECTION_LABELS = {
   idle: 'Chưa kết nối',
@@ -51,7 +56,12 @@ function useServerNow(active) {
  *  - buyer: chi thay ban do khi chuyen o PICKED_UP / IN_TRANSIT; khong thay ly do noi bo.
  *  - admin / shipper: thay vi tri bat cu khi nao chuyen co GPS.
  */
-export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', showHistory = true }) {
+export default function DeliveryTrackingPanel({
+  orderId,
+  audience = 'buyer',
+  showHistory = true,
+  orderStatus,
+}) {
   const [detail, setDetail] = useState({ status: 'loading', data: null, error: '' })
   const [route, setRoute] = useState([])
   const [reloadKey, setReloadKey] = useState(0)
@@ -74,22 +84,38 @@ export default function DeliveryTrackingPanel({ orderId, audience = 'buyer', sho
       })
       .catch((failure) => {
         if (!current) return
-        setDetail({
-          status: failure?.response?.status === 404 ? 'missing' : 'error',
-          data: null,
-          error: getApiError(failure).message,
-        })
+        // Lan tai lai dinh ky bi loi thi giu du lieu cu, khong lam mat khung theo doi.
+        setDetail((previous) =>
+          previous.data && failure?.response?.status !== 404
+            ? { ...previous, status: 'ready' }
+            : {
+                status: failure?.response?.status === 404 ? 'missing' : 'error',
+                data: null,
+                error: getApiError(failure).message,
+              },
+        )
       })
     return () => {
       current = false
     }
-  }, [orderId, reloadKey, buyer])
+  }, [orderId, reloadKey, buyer, orderStatus])
 
   const trackable =
     Boolean(assignment) &&
     !isTerminalStatus(loadedStatus) &&
     (buyer ? BUYER_MAP_STATUSES.includes(loadedStatus) : true)
   const live = useDeliveryTracking(orderId, { enabled: trackable })
+
+  // Trong luc cho (chua mo WebSocket): hoi lai dinh ky va khi co thong bao moi / quay lai tab.
+  const waiting = detail.status !== 'missing' && !trackable && !isTerminalStatus(loadedStatus)
+  useReloadOnNotification(() => waiting && setReloadKey((k) => k + 1))
+  useEffect(() => {
+    if (!waiting) return undefined
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') setReloadKey((k) => k + 1)
+    }, WAITING_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [waiting])
   const update = live.update
 
   // Diem GPS moi tu WebSocket noi vao duong di da tai.

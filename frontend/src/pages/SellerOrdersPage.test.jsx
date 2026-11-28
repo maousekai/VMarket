@@ -106,6 +106,24 @@ describe('SellerOrdersPage', () => {
     expect(await screen.findByText(/Đã bàn giao đơn/)).toBeInTheDocument()
   })
 
+  it('locks the handoff briefly while the stock is still being reserved', async () => {
+    listSellerOrders.mockResolvedValue(page([order({ status: 'PROCESSING', shopConfirmed: true })]))
+    handoffOrder.mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          error: { code: 'ORDER_NOT_READY', message: 'Đơn đang giữ hàng, thử lại sau vài giây' },
+        },
+      },
+    })
+    renderAt('/seller/orders?status=PROCESSING')
+    const handoff = await screen.findByRole('button', { name: 'Bàn giao vận chuyển' })
+    await waitFor(() => expect(handoff).toBeEnabled())
+    fireEvent.click(handoff)
+    expect(await screen.findByText(/Đơn đang giữ hàng, thử lại sau vài giây/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Đang giữ hàng…' })).toBeDisabled()
+  })
+
   it('shows delivery progress instead of the handoff button once handed off', async () => {
     listSellerOrders.mockResolvedValue(page([order({ status: 'PROCESSING', shopConfirmed: true })]))
     getDelivery.mockResolvedValue({

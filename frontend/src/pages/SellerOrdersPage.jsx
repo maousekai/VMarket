@@ -69,9 +69,19 @@ function useDelivery(order, version) {
   return delivery
 }
 
+// Ton kho duoc giu bat dong bo sau khi xac nhan: delivery tu cho vai giay, het luot thi tra
+// ORDER_NOT_READY; khoa nut them mot luc roi cho thu lai (review PR 68 lan 3, muc 1.3).
+const HANDOFF_COOLDOWN_MS = 5000
+
 function SellerOrderCard({ order, onChanged }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [coolingDown, setCoolingDown] = useState(false)
+  useEffect(() => {
+    if (!coolingDown) return undefined
+    const timer = setTimeout(() => setCoolingDown(false), HANDOFF_COOLDOWN_MS)
+    return () => clearTimeout(timer)
+  }, [coolingDown])
   const [version, setVersion] = useState(0)
   const delivery = useDelivery(order, version)
   const handedOff = (delivery.data?.pickups || []).length > 0
@@ -89,7 +99,9 @@ function SellerOrderCard({ order, onChanged }) {
       setVersion((value) => value + 1)
       onChanged(message)
     } catch (failure) {
-      setError(getApiError(failure).message)
+      const apiError = getApiError(failure)
+      setError(apiError.message)
+      if (name === 'handoff' && apiError.code === 'ORDER_NOT_READY') setCoolingDown(true)
     } finally {
       setBusy('')
     }
@@ -155,7 +167,7 @@ function SellerOrderCard({ order, onChanged }) {
             <button
               type="button"
               className="account-button account-button--secondary"
-              disabled={Boolean(busy) || delivery.status === 'idle'}
+              disabled={Boolean(busy) || delivery.status === 'idle' || coolingDown}
               aria-busy={delivery.status === 'idle' ? 'true' : undefined}
               onClick={() =>
                 run(
@@ -165,7 +177,11 @@ function SellerOrderCard({ order, onChanged }) {
                 )
               }
             >
-              {busy === 'handoff' ? 'Đang bàn giao…' : 'Bàn giao vận chuyển'}
+              {busy === 'handoff'
+                ? 'Đang bàn giao…'
+                : coolingDown
+                  ? 'Đang giữ hàng…'
+                  : 'Bàn giao vận chuyển'}
             </button>
           )}
           {handedOff && HANDOFF_STATUSES.includes(order.status) && (
