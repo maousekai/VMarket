@@ -62,6 +62,7 @@ class DeliveryApiTest {
     org.springframework.amqp.core.Declarables notificationTopology;
 
     @Autowired com.vmarket.delivery.config.DeliveryProperties properties;
+    @Autowired com.vmarket.delivery.service.DeliveryService deliveryService;
     @LocalServerPort int port;
     @MockitoBean DeliveryClients clients;
     @MockitoBean StringRedisTemplate redis;
@@ -143,7 +144,7 @@ class DeliveryApiTest {
                         .getRequestURI();
         var matcher =
                 java.util.regex.Pattern.compile(
-                                "/assignments/([^/]+)/(status|assign|retry|return)$")
+                                "/assignments/([^/]+)/(status|assign|retry|return|pickups/[^/]+|returns/[^/]+)$")
                         .matcher(uri);
         if (matcher.find()) {
             var node =
@@ -151,6 +152,17 @@ class DeliveryApiTest {
                             json.readTree(body == null ? "{}" : body);
             if (!node.has("expectedVersion"))
                 node.put("expectedVersion", repo.find(matcher.group(1), false).getVersion());
+            // Test cu chi ghi ly do tu do: dung ly do chuan "giao lai" (ly do tu do = ghi chu noi bo).
+            if ("FAILED".equals(node.path("status").asString(""))
+                    && node.has("reason")
+                    && !node.has("reasonCode"))
+                node.put("reasonCode", "CUSTOMER_UNREACHABLE");
+            // Giao lai phai cach lan that bai >= 2 gio: test cu gia lap da qua 2 gio.
+            if (matcher.group(2).equals("retry") && skipRetryWait)
+                jdbc.update(
+                        "update delivery_assignments set last_failed_at=? where id=?",
+                        java.sql.Timestamp.from(Instant.now().minus(java.time.Duration.ofHours(3))),
+                        matcher.group(1));
             body = json.writeValueAsString(node);
         }
         if (body != null) req.contentType(MediaType.APPLICATION_JSON).content(body);
@@ -174,7 +186,46 @@ class DeliveryApiTest {
         return json.readTree(result.getResponse().getContentAsString()).path("id").asString();
     }
 
+    /** Bo qua dieu kien 2 gio khi giao lai (test RETRY_TOO_EARLY tat co nay). */
+    private boolean skipRetryWait = true;
+
     private void state(String id, String next) throws Exception {
+        if (next.equals("PICKED_UP")) {
+            // Lay hang theo tung shop: xac nhan du moi shop thi chuyen PICKED_UP.
+            for (var h : repo.handoffs(id))
+                call(
+                                post(
+                                        "/api/delivery/shipper/assignments/{id}/pickups/{shop}",
+                                        id,
+                                        h.get("shop_id")),
+                                SHIPPER,
+                                "SHIPPER",
+                                null)
+                        .andExpect(status().isOk());
+            return;
+        }
+        if (next.equals("RETURNED")) {
+            // Tra hang tung shop -> RETURN_DROPPED_OFF, roi seller xac nhan -> RETURNED.
+            for (var h : repo.handoffs(id))
+                call(
+                                post(
+                                        "/api/delivery/shipper/assignments/{id}/returns/{shop}",
+                                        id,
+                                        h.get("shop_id")),
+                                SHIPPER,
+                                "SHIPPER",
+                                null)
+                        .andExpect(status().isOk());
+            call(
+                            post(
+                                    "/api/delivery/seller/orders/{id}/return-received",
+                                    repo.find(id, false).getOrderId()),
+                            SELLER,
+                            "SELLER",
+                            null)
+                    .andExpect(status().isOk());
+            return;
+        }
         call(
                         put("/api/delivery/shipper/assignments/{id}/status", id),
                         SHIPPER,
@@ -636,14 +687,22 @@ class DeliveryApiTest {
     @Test
     void adminShipperListSeparatesPendingActivationActiveAndLocked() throws Exception {
         handoff();
+        when(clients.shipperStatuses(any())).thenReturn(Map.of(SHIPPER, "ACTIVE"));
         call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].account_status").value("ACTIVE"))
-                .andExpect(jsonPath("$[0].active_orders").value(1));
-        when(clients.activeShipper(SHIPPER)).thenReturn(false);
+                .andExpect(jsonPath("$[0].active_orders").value(1))
+                .andExpect(jsonPath("$[0].district_name").value("Hải Châu"));
+        // Mot request toi auth cho ca trang, khong goi tung dong.
+        verify(clients, atLeastOnce()).shipperStatuses(List.of(SHIPPER));
+        when(clients.shipperStatuses(any())).thenReturn(Map.of(SHIPPER, "PENDING_ACTIVATION"));
         call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
                 .andExpect(jsonPath("$[0].account_status").value("PENDING_ACTIVATION"));
-        when(clients.activeShipper(SHIPPER)).thenThrow(new IllegalStateException("auth down"));
+        // Bi khoa phia auth (khong phai chua kich hoat) -> Da khoa.
+        when(clients.shipperStatuses(any())).thenReturn(Map.of(SHIPPER, "SUSPENDED"));
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].account_status").value("LOCKED"));
+        when(clients.shipperStatuses(any())).thenThrow(new IllegalStateException("auth down"));
         call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
                 .andExpect(jsonPath("$[0].account_status").value("UNKNOWN"));
         jdbc.update("update shippers set active=false where id=?", SHIPPER);
@@ -755,7 +814,7 @@ class DeliveryApiTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(
             strings = {"PICKED_UP", "IN_TRANSIT", "FAILED", "RETURNING"})
-    void adminCanRecoverCargoFromLockedShipperWithoutResettingProgress(String deliveryStatus)
+    void lockingShipperHoldingCargoFlagsTripAndForbidsReassignment(String deliveryStatus)
             throws Exception {
         String id = handoff();
         state(id, "PICKED_UP");
@@ -782,34 +841,59 @@ class DeliveryApiTest {
                         "ADMIN",
                         "{\"locked\":true}")
                 .andExpect(status().isOk());
+        assertThat(repo.find(id, false).isNeedsAttention()).isTrue();
+        assertThat(repo.find(id, false).getStatus().name()).isEqualTo(deliveryStatus);
+        call(get("/api/delivery/admin/assignments"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].needs_attention").value(true));
+        jdbc.update(
+                "insert into shippers"
+                    + " (id,provision_key,name,phone,province,district,active,created_at) values"
+                    + " ('shipper-2','provision-2','Backup','0900000000','da nang','hai"
+                    + " chau',true,CURRENT_TIMESTAMP)");
+        // Hang da roi shop: khong doi shipper, chi chuyen hoan hang.
+        call(
+                        post("/api/delivery/admin/assignments/{id}/assign", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"shipperId\":\"shipper-2\",\"reason\":\"Tiếp nhận hàng\"}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("REASSIGN_NOT_ALLOWED"));
+        if (!deliveryStatus.equals("RETURNING")) {
+            call(
+                            post("/api/delivery/admin/assignments/{id}/return", id),
+                            "admin",
+                            "ADMIN",
+                            "{\"reason\":\"Shipper bị khoá giữa chuyến\"}")
+                    .andExpect(status().isOk());
+            assertThat(repo.find(id, false).isNeedsAttention()).isFalse();
+        }
+        call(post("/api/delivery/shipper/assignments/{id}/retry", id), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void lockingShipperReturnsNotPickedUpTripToDispatchAndReassignsIt() throws Exception {
+        String id = handoff("ASSIGNED");
         jdbc.update(
                 "insert into shippers"
                     + " (id,provision_key,name,phone,province,district,active,created_at) values"
                     + " ('shipper-2','provision-2','Backup','0900000000','da nang','hai"
                     + " chau',true,CURRENT_TIMESTAMP)");
         call(
-                        post("/api/delivery/admin/assignments/{id}/assign", id),
+                        put("/api/delivery/admin/shippers/{id}/lock", SHIPPER),
                         "admin",
                         "ADMIN",
-                        "{\"shipperId\":\"shipper-2\"}")
-                .andExpect(status().isBadRequest());
-        call(
-                        post("/api/delivery/admin/assignments/{id}/assign", id),
-                        "admin",
-                        "ADMIN",
-                        "{\"shipperId\":\"shipper-2\",\"reason\":\"Tiếp nhận hàng từ shipper bị"
-                                + " khoá\"}")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value(deliveryStatus))
-                .andExpect(jsonPath("$.attempt").value(1));
+                        "{\"locked\":true}")
+                .andExpect(status().isOk());
+        var trip = repo.find(id, false);
+        assertThat(trip.getStatus()).isEqualTo(DeliveryStatus.ASSIGNED);
+        assertThat(trip.getShipperId()).isEqualTo("shipper-2");
         assertThat(
                         jdbc.queryForObject(
-                                "select previous_shipper_id from delivery_status_history where"
-                                        + " shipper_id='shipper-2'",
-                                String.class))
-                .isEqualTo(SHIPPER);
-        call(post("/api/delivery/shipper/assignments/{id}/retry", id), SHIPPER, "SHIPPER", null)
-                .andExpect(status().isForbidden());
+                                "select count(*) from delivery_status_history where"
+                                        + " status='WAITING_ASSIGNMENT' and reason='Shipper bị khoá'",
+                                Integer.class))
+                .isEqualTo(1);
     }
 
     @Test
@@ -996,21 +1080,34 @@ class DeliveryApiTest {
                         "orderSnapshot",
                         "codAmount",
                         "totalAmount");
-        call(get("/api/delivery/orders/{id}", ORDER), BUYER, "BUYER", null)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.order.items.length()").value(2))
-                .andExpect(jsonPath("$.order.streetAddress").exists());
+        var buyer =
+                call(get("/api/delivery/orders/{id}", ORDER), BUYER, "BUYER", null)
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.assignment.status").value("ASSIGNED"))
+                        .andExpect(jsonPath("$.assignment.shipper.name").value("Shipper"))
+                        .andExpect(jsonPath("$.order").doesNotExist())
+                        .andExpect(jsonPath("$.pickups").doesNotExist())
+                        .andReturn();
+        assertThat(buyer.getResponse().getContentAsString())
+                .doesNotContain(
+                        "pickup_snapshot",
+                        "seller_id",
+                        "actor_id",
+                        "shipper_id",
+                        "previous_shipper_id",
+                        "orderSnapshot");
         for (String actor : List.of(SELLER, "seller-2")) {
             call(get("/api/delivery/orders/{id}/route", ORDER), actor, "SELLER", null)
                     .andExpect(status().isForbidden());
             call(post("/api/delivery/orders/{id}/tracking-ticket", ORDER), actor, "SELLER", null)
                     .andExpect(status().isForbidden());
         }
+        // Nguoi mua chi theo doi khi PICKED_UP / IN_TRANSIT; luc nay chuyen moi ASSIGNED.
+        call(get("/api/delivery/orders/{id}/route", ORDER), BUYER, "BUYER", null)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("TRACKING_NOT_AVAILABLE"));
         for (String[] allowed :
-                List.of(
-                        new String[] {BUYER, "BUYER"},
-                        new String[] {SHIPPER, "SHIPPER"},
-                        new String[] {"admin", "ADMIN"})) {
+                List.of(new String[] {SHIPPER, "SHIPPER"}, new String[] {"admin", "ADMIN"})) {
             call(get("/api/delivery/orders/{id}/route", ORDER), allowed[0], allowed[1], null)
                     .andExpect(status().isOk());
         }
@@ -1321,23 +1418,47 @@ class DeliveryApiTest {
     // =========================================================================
 
     @Test
-    void donKhongCoQuanHuyen_tuDongGhepShipperTrongTinhVaLuuNull() throws Exception {
+    void donKhongCoQuanHuyen_traPhuongRaKhuGiaoHangVaGanShipperCuaKhu() throws Exception {
+        // Review PR 68 lan 2, muc 3: dia chi chi co tinh + phuong; Phuong Hoa Cuong thuoc khu Hai Chau.
         var snapshot = (tools.jackson.databind.node.ObjectNode) order("COD", false);
         snapshot.putNull("district");
+        snapshot.put("ward", "Phường Hòa Cường");
         when(clients.order(anyString(), anyBoolean())).thenReturn(snapshot);
 
         String id = handoff("ASSIGNED");
 
         var assignment = repo.find(id, false);
-        assertThat(assignment.getDistrict()).isNull();
+        assertThat(assignment.getDistrict()).isEqualTo("hai chau");
+        assertThat(assignment.getWard()).isEqualTo("Phường Hòa Cường");
         assertThat(assignment.getShipperId()).isEqualTo(SHIPPER);
-        assertThat(assignment.getStatus()).isEqualTo(DeliveryStatus.ASSIGNED);
-        assertThat(jdbc.queryForObject("select district from delivery_assignments where id=?", String.class, id))
-                .isNull();
     }
 
     @Test
-    void donKhongCoQuanHuyen_khiCoNhieuShipperKhacQuanTrongTinh_vanTuDongGhepShipperItDonNhat() throws Exception {
+    void phuongLa_chuyenOLaiChoPhanCongVaBaoAdminMotLan() throws Exception {
+        var snapshot = (tools.jackson.databind.node.ObjectNode) order("COD", false);
+        snapshot.putNull("district");
+        snapshot.put("ward", "Phường Không Có");
+        when(clients.order(anyString(), anyBoolean())).thenReturn(snapshot);
+
+        String id = handoff("WAITING_ASSIGNMENT");
+        assertThat(repo.find(id, false).getDistrict()).isNull();
+        assertThat(repo.find(id, false).getShipperId()).isNull();
+        // Lan thu lai sau khong bao them.
+        assignmentRetry.runBatch();
+        jdbc.update(
+                "update delivery_assignments set next_assignment_at=?",
+                java.sql.Timestamp.from(Instant.EPOCH));
+        assignmentRetry.runBatch();
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from delivery_outbox where"
+                                        + " event_type='DeliveryAssignmentFailed'",
+                                Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void donKhongCoQuanHuyen_ganShipperDungKhuCuaPhuong() throws Exception {
         String shipper2 = "shipper-2";
         jdbc.update(
                 "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
@@ -1345,13 +1466,11 @@ class DeliveryApiTest {
                 shipper2);
         when(clients.activeShipper(shipper2)).thenReturn(true);
 
-        // Shipper 1 đã có 1 đơn đang giao
-        handoff("ASSIGNED");
-
-        // Đơn thứ hai không có quận/huyện -> phải gán cho Shipper 2 (đang rảnh hơn)
+        // Phuong An Hai thuoc khu Son Tra -> shipper khu Son Tra, khong phai shipper Hai Chau.
         var snapshot2 = (tools.jackson.databind.node.ObjectNode) order("COD", false);
         snapshot2.put("id", "order-2");
         snapshot2.putNull("district");
+        snapshot2.put("ward", "Phường An Hải");
         when(clients.order(eq("order-2"), anyBoolean())).thenReturn(snapshot2);
 
         var result = call(
@@ -1365,7 +1484,7 @@ class DeliveryApiTest {
 
         String id2 = json.readTree(result.getResponse().getContentAsString()).path("id").asString();
         var assignment2 = repo.find(id2, false);
-        assertThat(assignment2.getDistrict()).isNull();
+        assertThat(assignment2.getDistrict()).isEqualTo("son tra");
         assertThat(assignment2.getShipperId()).isEqualTo(shipper2);
     }
 
@@ -1482,7 +1601,8 @@ class DeliveryApiTest {
         snapshot.putNull("district");
         when(clients.order(anyString(), anyBoolean())).thenReturn(snapshot);
 
-        String id = handoff("ASSIGNED");
+        // Phuong la -> khong tu dong phan cong.
+        String id = handoff("WAITING_ASSIGNMENT");
 
         // Gán shipper Hà Nội cho đơn Đà Nẵng -> lỗi AREA_MISMATCH vì khác tỉnh
         call(
@@ -1502,14 +1622,14 @@ class DeliveryApiTest {
                 .andExpect(jsonPath("$.shipperId").value(shipperHanoi));
     }
     @Test
-    void adminGanShipper_donKhongCoQuanHuyen_shipperCoQuanHuyenCungTinh_khongBiAreaMismatch() throws Exception {
+    void adminGanShipper_donKhongCoKhu_shipperCoKhuCungTinh_khongBiAreaMismatch() throws Exception {
         var snapshot = (tools.jackson.databind.node.ObjectNode) order("COD", false);
         snapshot.putNull("district");
         when(clients.order(anyString(), anyBoolean())).thenReturn(snapshot);
 
-        String id = handoff("ASSIGNED");
+        // Phuong la -> cho admin; gan shipper cung tinh khong can ly do.
+        String id = handoff("WAITING_ASSIGNMENT");
 
-        // Gán cho shipper có quận 'hai chau' trong cùng tỉnh Đà Nẵng -> thành công không bị AREA_MISMATCH
         call(
                 post("/api/delivery/admin/assignments/{id}/assign", id),
                 "admin",
@@ -1517,6 +1637,28 @@ class DeliveryApiTest {
                 "{\"shipperId\":\"" + SHIPPER + "\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.shipperId").value(SHIPPER));
+    }
+
+    @Test
+    void ganShipperKhacKhu_batBuocLyDo() throws Exception {
+        jdbc.update(
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
+                        + " values ('shipper-st', 'provision-st', 'Son Tra', '0906666666', 'da nang', 'son tra', true, CURRENT_TIMESTAMP)");
+        when(clients.activeShipper("shipper-st")).thenReturn(true);
+        String id = handoff("ASSIGNED");
+        call(
+                        post("/api/delivery/admin/assignments/{id}/assign", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"shipperId\":\"shipper-st\",\"overrideArea\":true}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("ASSIGNMENT_REASON_REQUIRED"));
+        call(
+                        post("/api/delivery/admin/assignments/{id}/assign", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"shipperId\":\"shipper-st\",\"overrideArea\":true,\"reason\":\"Hai Chau het nguoi\"}")
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -1555,4 +1697,330 @@ class DeliveryApiTest {
         // Ưu tiên SHIPPER chuyên quận 'hai chau' dù shipper toàn tỉnh đang có 0 đơn
         assertThat(assignment2.getShipperId()).isEqualTo(SHIPPER);
     }
+
+    // ======================= Review PR 68 lan 2: nghiep vu giao hang da chot =======================
+
+    private String twoShopHandoff() throws Exception {
+        when(clients.order(anyString(), anyBoolean())).thenReturn(order("COD", true));
+        call(post("/api/delivery/seller/orders/{id}/handoff", ORDER), SELLER, "SELLER", null)
+                .andExpect(status().isOk());
+        when(clients.shop(anyString()))
+                .thenReturn(
+                        json.readTree(
+                                """
+{"id":"shop-2","ownerId":"seller-2","status":"ACTIVE","name":"Shop 2","phone":"0901111222",
+ "province":"Đà Nẵng","ward":"Phường Thanh Khê","streetAddress":"9 Lê Duẩn",
+ "bankAccountNumber":"123456789","bankName":"VCB","email":"shop2@example.com"}
+"""));
+        var result =
+                call(post("/api/delivery/seller/orders/{id}/handoff", ORDER), "seller-2", "SELLER", null)
+                        .andExpect(status().isOk())
+                        .andReturn();
+        return json.readTree(result.getResponse().getContentAsString()).path("id").asString();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions pickup(String id, String shop)
+            throws Exception {
+        return call(
+                post("/api/delivery/shipper/assignments/{id}/pickups/{shop}", id, shop),
+                SHIPPER,
+                "SHIPPER",
+                null);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions fail(String id, String body)
+            throws Exception {
+        return call(
+                put("/api/delivery/shipper/assignments/{id}/status", id), SHIPPER, "SHIPPER", body);
+    }
+
+    @Test
+    void pickupSnapshotKeepsOnlyNamePhoneAndAddress() throws Exception {
+        String id = twoShopHandoff();
+        String stored =
+                jdbc.queryForObject(
+                        "select pickup_snapshot from delivery_handoffs where assignment_id=? and shop_id='shop-2'",
+                        String.class,
+                        id);
+        assertThat(stored)
+                .contains("Shop 2", "0901111222", "9 Lê Duẩn")
+                .doesNotContain("bankAccountNumber", "123456789", "email", "ownerId", "seller-2");
+    }
+
+    @Test
+    void pickupIsConfirmedPerShopAndOnlyAllShopsMovePickedUp() throws Exception {
+        String id = twoShopHandoff();
+        assertThat(repo.find(id, false).getStatus()).isEqualTo(DeliveryStatus.ASSIGNED);
+        // Khong con PUT PICKED_UP thang.
+        call(
+                        put("/api/delivery/shipper/assignments/{id}/status", id),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"status\":\"PICKED_UP\"}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("PICKUP_PER_SHOP"));
+        call(get("/api/delivery/shipper/assignments?scope=active"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$[0].pickups.length()").value(2))
+                .andExpect(jsonPath("$[0].pickups[1].name").value("Shop 2"))
+                .andExpect(jsonPath("$[0].pickups[1].phone").value("0901111222"))
+                .andExpect(jsonPath("$[0].pickups[1].seller_id").doesNotExist())
+                .andExpect(jsonPath("$[0].recipient.name").value("Buyer"))
+                .andExpect(jsonPath("$[0].recipient.phone").value("0912345678"));
+        pickup(id, "shop-1")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ASSIGNED"))
+                .andExpect(jsonPath("$.pickups[0].picked_up_at").exists())
+                .andExpect(jsonPath("$.pickups[1].picked_up_at").value(nullValue()));
+        pickup(id, "shop-2").andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PICKED_UP"));
+        pickup(id, "shop-x").andExpect(status().isNotFound());
+    }
+
+    @Test
+    void failureNeedsAStandardReasonAndOtherNeedsANote() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        String version = String.valueOf(repo.find(id, false).getVersion());
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"NOPE\",\"expectedVersion\":" + version + "}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("FAILURE_REASON_REQUIRED"));
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"OTHER\",\"expectedVersion\":" + version + "}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("FAILURE_NOTE_REQUIRED"));
+        fail(
+                        id,
+                        "{\"status\":\"FAILED\",\"reasonCode\":\"CUSTOMER_UNREACHABLE\","
+                                + "\"reason\":\"gọi 3 lần không nghe\",\"expectedVersion\":" + version + "}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.earliestRetryAt").exists())
+                .andExpect(jsonPath("$.failures[0].public_reason").value("Không liên lạc được khách"));
+        // Nguoi mua chi thay nhan cong khai, khong thay ghi chu noi bo.
+        var buyer =
+                call(get("/api/delivery/orders/{id}", ORDER), BUYER, "BUYER", null)
+                        .andExpect(jsonPath("$.history[-1].public_reason").value("Không liên lạc được khách"))
+                        .andReturn();
+        assertThat(buyer.getResponse().getContentAsString()).doesNotContain("gọi 3 lần không nghe");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select reason from delivery_status_history where status='FAILED'",
+                                String.class))
+                .isEqualTo("gọi 3 lần không nghe");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"CUSTOMER_REFUSED", "WRONG_ADDRESS"})
+    void refusalOrWrongAddressReturnsImmediately(String code) throws Exception {
+        String id = handoff();
+        inTransit(id);
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"" + code + "\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RETURNING"))
+                .andExpect(jsonPath("$.attempt").value(1))
+                .andExpect(jsonPath("$.codAmount").value(0))
+                .andExpect(jsonPath("$.recipient").value(nullValue()));
+    }
+
+    @Test
+    void retryIsBlockedForTwoHoursAfterAFailure() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"CUSTOMER_RESCHEDULED\"}").andExpect(status().isOk());
+        skipRetryWait = false;
+        call(post("/api/delivery/shipper/assignments/{id}/retry", id), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("RETRY_TOO_EARLY"));
+        skipRetryWait = true;
+        call(post("/api/delivery/shipper/assignments/{id}/retry", id), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
+                .andExpect(jsonPath("$.attempt").value(2));
+    }
+
+    @Test
+    void returnIsDroppedOffPerShopThenSellersConfirmReceipt() throws Exception {
+        String id = twoShopHandoff();
+        pickup(id, "shop-1").andExpect(status().isOk());
+        pickup(id, "shop-2").andExpect(status().isOk());
+        state(id, "IN_TRANSIT");
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"CUSTOMER_REFUSED\"}").andExpect(status().isOk());
+        String returns = "/api/delivery/shipper/assignments/{id}/returns/{shop}";
+        call(post(returns, id, "shop-1"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$.status").value("RETURNING"));
+        call(post(returns, id, "shop-2"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$.status").value("RETURN_DROPPED_OFF"));
+        // Het GPS khi da tra hang.
+        call(
+                        post("/api/delivery/shipper/assignments/{id}/location", id),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"latitude\":16.05,\"longitude\":108.2}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("TRACKING_STOPPED"));
+        // Seller shop-2 dang la shop hien tai cua mock; shop-1 xac nhan sau.
+        call(post("/api/delivery/seller/orders/{id}/return-received", ORDER), "seller-2", "SELLER", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RETURN_DROPPED_OFF"));
+        when(clients.shop(anyString()))
+                .thenReturn(json.readTree("{\"id\":\"shop-1\",\"ownerId\":\"seller-1\",\"status\":\"ACTIVE\"}"));
+        call(post("/api/delivery/seller/orders/{id}/return-received", ORDER), SELLER, "SELLER", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RETURNED"));
+    }
+
+    @Test
+    void unconfirmedReturnClosesAutomaticallyAfterThreeDays() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"WRONG_ADDRESS\"}").andExpect(status().isOk());
+        call(post("/api/delivery/shipper/assignments/{id}/returns/{shop}", id, "shop-1"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$.status").value("RETURN_DROPPED_OFF"));
+        assertThat(deliveryService.autoCloseReturns()).isZero();
+        jdbc.update(
+                "update delivery_assignments set dropped_off_at=? where id=?",
+                java.sql.Timestamp.from(Instant.now().minus(java.time.Duration.ofDays(4))),
+                id);
+        assertThat(deliveryService.autoCloseReturns()).isEqualTo(1);
+        assertThat(repo.find(id, false).getStatus()).isEqualTo(DeliveryStatus.RETURNED);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select actor_id from delivery_status_history where status='RETURNED'",
+                                String.class))
+                .isEqualTo("system:return-auto-close");
+    }
+
+    @Test
+    void buyerSeesLocationOnlyOnTheWayAndShipperContactUntilDelivered() throws Exception {
+        String id = handoff();
+        call(get("/api/delivery/orders/{id}", ORDER), BUYER, "BUYER", null)
+                .andExpect(jsonPath("$.assignment.shipper.phone").value("0901234567"))
+                .andExpect(jsonPath("$.assignment.location").value(nullValue()));
+        call(post("/api/delivery/orders/{id}/tracking-ticket", ORDER), BUYER, "BUYER", null)
+                .andExpect(status().isConflict());
+        inTransit(id);
+        call(
+                        post("/api/delivery/shipper/assignments/{id}/location", id),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"latitude\":16.05,\"longitude\":108.2}")
+                .andExpect(status().isOk());
+        call(get("/api/delivery/orders/{id}", ORDER), BUYER, "BUYER", null)
+                .andExpect(jsonPath("$.assignment.location.latitude").value(16.05));
+        call(post("/api/delivery/orders/{id}/tracking-ticket", ORDER), BUYER, "BUYER", null)
+                .andExpect(status().isOk());
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"CUSTOMER_REFUSED\"}").andExpect(status().isOk());
+        call(get("/api/delivery/orders/{id}", ORDER), BUYER, "BUYER", null)
+                .andExpect(jsonPath("$.assignment.status").value("RETURNING"))
+                .andExpect(jsonPath("$.assignment.location").value(nullValue()))
+                .andExpect(jsonPath("$.assignment.shipper").value(nullValue()));
+        call(get("/api/delivery/orders/{id}/route", ORDER), BUYER, "BUYER", null)
+                .andExpect(status().isConflict());
+        call(get("/api/delivery/orders/{id}/route", ORDER), "admin", "ADMIN", null)
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void onlyOneGpsSourcePerTripAndMobileWins() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        String path = "/api/delivery/shipper/assignments/{id}/location";
+        call(post(path, id), SHIPPER, "SHIPPER", "{\"latitude\":16.05,\"longitude\":108.2,\"source\":\"MOBILE\"}")
+                .andExpect(status().isOk());
+        jdbc.update(
+                "update delivery_assignments set location_at=? where id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(15)),
+                id);
+        call(post(path, id), SHIPPER, "SHIPPER", "{\"latitude\":16.06,\"longitude\":108.2,\"source\":\"WEB\"}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("GPS_SOURCE_CONFLICT"));
+        // Mobile im lang qua 2 phut thi web duoc gui.
+        jdbc.update(
+                "update delivery_assignments set gps_source_at=?, location_at=? where id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(180)),
+                java.sql.Timestamp.from(Instant.now().minusSeconds(180)),
+                id);
+        call(post(path, id), SHIPPER, "SHIPPER", "{\"latitude\":16.06,\"longitude\":108.2,\"source\":\"WEB\"}")
+                .andExpect(status().isOk());
+        jdbc.update(
+                "update delivery_assignments set location_at=? where id=?",
+                java.sql.Timestamp.from(Instant.now().minusSeconds(15)),
+                id);
+        // Mobile gianh lai quyen tu web.
+        call(post(path, id), SHIPPER, "SHIPPER", "{\"latitude\":16.07,\"longitude\":108.2,\"source\":\"MOBILE\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gpsSource").value("MOBILE"));
+    }
+
+    @Test
+    void batchLocationReportsEachTrip() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        call(
+                        post("/api/delivery/shipper/locations"),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"latitude\":16.05,\"longitude\":108.2,\"source\":\"MOBILE\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[0].assignmentId").value(id))
+                .andExpect(jsonPath("$.results[0].result").value("OK"));
+        call(
+                        post("/api/delivery/shipper/locations"),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"latitude\":16.05,\"longitude\":108.2,\"source\":\"MOBILE\"}")
+                .andExpect(jsonPath("$.results[0].result").value("PING_TOO_FREQUENT"));
+        jdbc.update("update shippers set active=false where id=?", SHIPPER);
+        call(
+                        post("/api/delivery/shipper/locations"),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"latitude\":16.05,\"longitude\":108.2}")
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void activeScopeReturnsEveryRunningTripAndFinishedIsPaged() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        call(get("/api/delivery/shipper/assignments?scope=active"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].zone").value("Hải Châu"));
+        call(get("/api/delivery/shipper/assignments?scope=finished"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$.length()").value(0));
+        call(
+                        put("/api/delivery/shipper/assignments/{id}/status", id),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"status\":\"DELIVERED\",\"codCollected\":125000}")
+                .andExpect(status().isOk());
+        call(get("/api/delivery/shipper/assignments?scope=finished"), SHIPPER, "SHIPPER", null)
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].completedAt").exists());
+        call(get("/api/delivery/shipper/assignments?scope=bogus"), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void successRateCountsOnlyShipperFaultReturns() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        fail(id, "{\"status\":\"FAILED\",\"reasonCode\":\"CUSTOMER_REFUSED\"}").andExpect(status().isOk());
+        state(id, "RETURNED");
+        when(clients.shipperStatuses(any())).thenReturn(Map.of(SHIPPER, "ACTIVE"));
+        // Hoan vi khach tu choi: khong tinh vao shipper -> 0 lan "do loi", ti le giu 0 (chua co mau).
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].shipper_fault_returns").value(0))
+                .andExpect(jsonPath("$[0].success_rate_percent").value(0));
+        jdbc.update("update delivery_assignments set failure_reason_code='SHIPPER_ISSUE' where id=?", id);
+        call(get("/api/delivery/admin/shippers"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$[0].shipper_fault_returns").value(1));
+    }
+
+    @Test
+    void adminResendsActivationEmail() throws Exception {
+        call(post("/api/delivery/admin/shippers/{id}/activation-email", SHIPPER), "admin", "ADMIN", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sent").value(true));
+        verify(clients).resendActivation("admin", SHIPPER);
+    }
+
 }

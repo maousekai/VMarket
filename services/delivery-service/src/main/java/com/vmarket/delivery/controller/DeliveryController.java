@@ -51,12 +51,28 @@ public class DeliveryController {
         service.lock(auth.getName(), id, body.locked());
     }
 
+    /** Gui lai email kich hoat cho shipper chua xac thuc email. */
+    @PostMapping("/admin/shippers/{id}/activation-email")
+    public Map<String, Object> resendActivation(Authentication auth, @PathVariable String id) {
+        service.resendActivation(auth.getName(), id);
+        return Map.of("sent", true);
+    }
+
     @PostMapping("/seller/orders/{order}/handoff")
     public Map<String, Object> handoff(
             Authentication auth,
             @RequestHeader("Authorization") String bearer,
             @PathVariable String order) {
         return service.sellerAssignment(service.handoff(auth.getName(), bearer, order));
+    }
+
+    /** Seller xac nhan da nhan lai hang hoan (RETURN_DROPPED_OFF -> RETURNED khi du moi shop). */
+    @PostMapping("/seller/orders/{order}/return-received")
+    public Map<String, Object> returnReceived(
+            Authentication auth,
+            @RequestHeader("Authorization") String bearer,
+            @PathVariable String order) {
+        return service.sellerReturnReceived(auth.getName(), bearer, order);
     }
 
     @GetMapping("/admin/assignments")
@@ -81,31 +97,65 @@ public class DeliveryController {
         return service.returnFailed(auth.getName(), id, body);
     }
 
+    /**
+     * scope=active: moi chuyen con viec (khong phan trang) - khong chuyen dang chay nao roi sang
+     * trang sau; scope=finished: chuyen da xong, phan trang.
+     */
     @GetMapping("/shipper/assignments")
-    public List<Assignment> assigned(
+    public List<Map<String, Object>> assigned(
             Authentication auth,
+            @RequestParam(defaultValue = "active") @Pattern(regexp = "active|finished")
+                    String scope,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return service.assigned(auth.getName(), page, size);
+        return service.assigned(auth.getName(), scope, page, size);
+    }
+
+    @PostMapping("/shipper/assignments/{id}/pickups/{shop}")
+    public Map<String, Object> pickup(
+            Authentication auth,
+            @PathVariable String id,
+            @PathVariable String shop,
+            @Valid @RequestBody Revision body) {
+        return service.shipperView(
+                service.confirmPickup(auth.getName(), id, shop, body.expectedVersion()));
+    }
+
+    @PostMapping("/shipper/assignments/{id}/returns/{shop}")
+    public Map<String, Object> returned(
+            Authentication auth,
+            @PathVariable String id,
+            @PathVariable String shop,
+            @Valid @RequestBody Revision body) {
+        return service.shipperView(
+                service.confirmReturn(auth.getName(), id, shop, body.expectedVersion()));
+    }
+
+    /** Mot diem GPS cho moi chuyen dang chay (thay cho N request rieng le). */
+    @PostMapping("/shipper/locations")
+    public Map<String, Object> locations(
+            Authentication auth, @Valid @RequestBody Location body) {
+        return service.batchLocations(auth.getName(), body);
     }
 
     @PutMapping("/shipper/assignments/{id}/status")
-    public Assignment status(
+    public Map<String, Object> status(
             Authentication auth, @PathVariable String id, @Valid @RequestBody Status body) {
-        return service.status(auth.getName(), id, body);
+        return service.shipperView(service.status(auth.getName(), id, body));
     }
 
     @PostMapping("/shipper/assignments/{id}/location")
-    public Assignment location(
+    public Map<String, Object> location(
             Authentication auth, @PathVariable String id, @Valid @RequestBody Location body) {
-        return service.location(auth.getName(), id, body);
+        return service.shipperView(service.location(auth.getName(), id, body));
     }
 
     @PostMapping({"/shipper/assignments/{id}/retry", "/admin/assignments/{id}/retry"})
-    public Assignment retry(
+    public Map<String, Object> retry(
             Authentication auth, @PathVariable String id, @Valid @RequestBody Revision body) {
-        return service.retry(
-                auth.getName(), id, DeliveryService.admin(auth), body.expectedVersion());
+        return service.shipperView(
+                service.retry(
+                        auth.getName(), id, DeliveryService.admin(auth), body.expectedVersion()));
     }
 
     @GetMapping("/orders/{order}")
