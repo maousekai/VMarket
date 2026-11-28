@@ -38,6 +38,7 @@ import {
 import { colors, radius, spacing } from '../theme'
 import { DeliverSheet, FailSheet } from './ActionSheet'
 import { stopTracking } from './locationTracking'
+import ShiftBar from './ShiftBar'
 import useShipperTracking from './useShipperTracking'
 
 const TABS = [
@@ -572,6 +573,7 @@ export default function AssignmentsScreen() {
           ))}
         </View>
       </View>
+      <ShiftBar revision={state.revision} onChanged={load} />
       <TrackingBanner tracking={tracking} />
       {state.status === 'error' && (
         <View style={styles.banner}>

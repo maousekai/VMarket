@@ -71,3 +71,11 @@ export function shipperActions(assignment) {
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' })
 export const formatMoney = (value) => money.format(Number(value || 0))
 export const shortOrderId = (id) => (id ? `#${String(id).slice(-8).toUpperCase()}` : '')
+
+// Ca lam viec (review PR 68 lan 3, phan 2): {onShift, shiftChangedAt, unpickedTrips, activeTrips}.
+export const getShift = async () => (await client.get('/api/delivery/shipper/shift')).data
+
+export const startShift = async () => (await client.post('/api/delivery/shipper/shift/start')).data
+
+export const endShift = async ({ releaseUnpicked = false } = {}) =>
+  (await client.post('/api/delivery/shipper/shift/end', { releaseUnpicked })).data

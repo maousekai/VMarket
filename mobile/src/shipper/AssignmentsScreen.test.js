@@ -12,6 +12,9 @@ import {
   retryAssignment,
   sendLocations,
   updateAssignmentStatus,
+  getShift,
+  startShift,
+  endShift,
 } from '../api/deliveryApi'
 
 jest.mock('../api/deliveryApi', () => ({
@@ -22,6 +25,9 @@ jest.mock('../api/deliveryApi', () => ({
   updateAssignmentStatus: jest.fn(),
   retryAssignment: jest.fn(),
   sendLocations: jest.fn(async () => ({})),
+  getShift: jest.fn(async () => ({ onShift: true, unpickedTrips: 0, activeTrips: 0 })),
+  startShift: jest.fn(),
+  endShift: jest.fn(),
 }))
 
 const trip = (overrides = {}) => ({
@@ -309,4 +315,63 @@ it('explains how to fix a denied location permission', async () => {
   await render(<AssignmentsScreen />)
   expect(await screen.findByText(/Chưa có quyền vị trí/)).toBeTruthy()
   expect(screen.getByText('Mở cài đặt')).toBeTruthy()
+})
+
+describe('shift', () => {
+  it('warns while off shift and starts a shift without turning GPS on', async () => {
+    listMyAssignments.mockResolvedValue([])
+    getShift.mockResolvedValueOnce({ onShift: false, unpickedTrips: 0, activeTrips: 0 })
+    startShift.mockResolvedValue({ onShift: true, unpickedTrips: 0, activeTrips: 0 })
+    await render(<AssignmentsScreen />)
+    expect(await screen.findByText('Bạn đang ngoài ca, sẽ không được giao đơn mới.')).toBeTruthy()
+    await fireEvent.press(screen.getByText('Bắt đầu ca'))
+    expect(await screen.findByText('Bạn đang trong ca')).toBeTruthy()
+    expect(startShift).toHaveBeenCalled()
+    expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled()
+  })
+
+  it('asks before ending a shift that still has trips to pick up', async () => {
+    listMyAssignments.mockResolvedValue([])
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
+    endShift
+      .mockRejectedValueOnce({
+        response: {
+          status: 409,
+          data: {
+            error: {
+              code: 'SHIFT_END_CONFIRM_REQUIRED',
+              message: 'Còn 1 chuyến chưa lấy hàng sẽ chuyển cho shipper khác',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({ onShift: false, unpickedTrips: 0, activeTrips: 0 })
+    await render(<AssignmentsScreen />)
+    await fireEvent.press(await screen.findByText('Kết thúc ca'))
+    await waitFor(() => expect(alert).toHaveBeenCalled())
+    const [title, , buttons] = alert.mock.calls[0]
+    expect(title).toBe('Kết thúc ca?')
+    await buttons.find((button) => button.text === 'Kết thúc ca').onPress()
+    await waitFor(() => expect(endShift).toHaveBeenLastCalledWith({ releaseUnpicked: true }))
+    expect(await screen.findByText('Bạn đang ngoài ca')).toBeTruthy()
+    alert.mockRestore()
+  })
+
+  it('shows why a shift with picked-up cargo cannot end', async () => {
+    listMyAssignments.mockResolvedValue([])
+    endShift.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          error: {
+            code: 'SHIFT_HAS_ACTIVE_TRIPS',
+            message: 'Còn 1 chuyến đã lấy hàng; hãy giao xong hoặc trả hàng trước khi kết thúc ca',
+          },
+        },
+      },
+    })
+    await render(<AssignmentsScreen />)
+    await fireEvent.press(await screen.findByText('Kết thúc ca'))
+    expect(await screen.findByText(/Còn 1 chuyến đã lấy hàng/)).toBeTruthy()
+  })
 })
