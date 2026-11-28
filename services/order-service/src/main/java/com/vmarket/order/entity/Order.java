@@ -161,8 +161,8 @@ public class Order extends BaseEntity {
 	 * {@link OrderStatus} → {@link IllegalOrderTransitionException} (409).
 	 *
 	 * <p>Hệ quả trên trục thanh toán đi cùng: COD giao thành công thì coi như đã thu tiền
-	 * (UNPAID → PAID); huỷ đơn đã thu tiền thì đơn được hoàn (PAID → REFUNDED), khớp với
-	 * payment-service hoàn tiền khi nhận {@code OrderStatusChanged(CANCELLED)}.
+	 * (UNPAID → PAID); huỷ đơn đã thu tiền thì đơn chờ hoàn tiền (PAID → REFUND_PENDING), khớp với
+	 * payment-service xử lý yêu cầu khi nhận {@code OrderStatusChanged(CANCELLED)}.
 	 *
 	 * @return trạng thái trước khi chuyển
 	 */
@@ -176,7 +176,7 @@ public class Order extends BaseEntity {
 				&& paymentStatus == PaymentStatus.UNPAID) {
 			paymentStatus = PaymentStatus.PAID;
 		} else if (next == OrderStatus.CANCELLED && paymentStatus == PaymentStatus.PAID) {
-			paymentStatus = PaymentStatus.REFUNDED;
+			markRefundPending();
 		}
 		return previous;
 	}
@@ -186,9 +186,9 @@ public class Order extends BaseEntity {
 		movePayment(PaymentStatus.PAID);
 	}
 
-	/** Ghi nhận đã hoàn tiền; hoàn khi chưa thu / hoàn lần hai → 409. */
-	public void markRefunded() {
-		movePayment(PaymentStatus.REFUNDED);
+	/** Đánh dấu đang chờ hoàn tiền. Mỗi khoản đã thu chỉ chuyển sang chờ hoàn một lần. */
+	public void markRefundPending() {
+		movePayment(PaymentStatus.REFUND_PENDING);
 	}
 
 	private void movePayment(PaymentStatus next) {

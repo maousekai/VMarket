@@ -46,7 +46,10 @@ public record OrderResponse(
 		@Schema(description = "Thời điểm giao thành công; hạn trả hàng 7 ngày tính từ đây")
 		Instant deliveredAt,
 
-		@Schema(example = "PAID", description = "UNPAID / PAID / REFUNDED (PBL6-63)")
+		@Schema(example = "PAID", allowableValues = {"UNPAID", "PAID", "REFUND_PENDING"},
+                description = "Trạng thái thanh toán theo đơn. PAID dựa trên PaymentSucceeded với VNPAY"
+                        + " hoặc DELIVERED với COD. Payment-service xác nhận thu COD qua COD_COLLECTED."
+                        + " REFUND_PENDING nghĩa là đơn đang chờ payment-service xử lý hoàn tiền.")
 		String paymentStatus) {
 
 	public static OrderResponse from(Order order) {

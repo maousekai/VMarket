@@ -12,7 +12,7 @@ import java.util.Set;
  *        │                       │                                     │
  *        └──fail/expire/cancel───┴──────────> CANCELLED <──────────────┤
  *                                                ▲                     ▼
- *                                                ├──── RETURNED ── SHIPPED
+ *                                                ├──delivery RETURNED── SHIPPED
  *                                                │                     │
  *                                                └──admin── DELIVERED <┘ (PROCESSING ──> DELIVERED
  *                                                              │        khi event giao hàng tới lệch thứ tự)
@@ -24,7 +24,7 @@ import java.util.Set;
  * {@link #canTransitionTo(OrderStatus)}. Bảng là TRẦN quyền hạn: từng tác nhân (người mua,
  * seller, admin, event) có thể hẹp hơn, nhưng không ai đi được cạnh không có trong bảng.
  *
- * <p>Trạng thái thanh toán (PAID/REFUNDED) là trục riêng — xem {@link PaymentStatus}.
+ * <p>Trạng thái thanh toán (PAID/REFUND_PENDING) là trục riêng — xem {@link PaymentStatus}.
  */
 public enum OrderStatus {
 

@@ -124,8 +124,8 @@ public class OrderDeliveryBridge {
             if (!before.canTransitionTo(next)) {
                 // Event giao hàng không khớp vòng đời đơn (vd đơn đã COMPLETED): bỏ qua thay vì
                 // làm consumer lỗi rồi rơi vào DLQ.
-                log.warn("Bỏ qua DeliveryStatusChanged {} cho đơn {} ở trạng thái {}",
-                        event.status(), order.getId(), before);
+                log.warn("Bỏ qua DeliveryStatusChanged {} (version={}) cho đơn {} ở trạng thái {}",
+                        event.status(), event.version(), order.getId(), before);
                 return;
             }
             order.transitionTo(next);

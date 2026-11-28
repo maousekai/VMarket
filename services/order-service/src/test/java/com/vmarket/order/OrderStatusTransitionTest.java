@@ -83,7 +83,7 @@ class OrderStatusTransitionTest {
         order.setTotalAmount(new BigDecimal("100000"));
         TestOrders.forceStatus(order, status);
         if (payment != PaymentStatus.UNPAID) order.markPaid();
-        if (payment == PaymentStatus.REFUNDED) order.markRefunded();
+        if (payment == PaymentStatus.REFUND_PENDING) order.markRefundPending();
         return orders.saveAndFlush(order).getId();
     }
 
@@ -135,10 +135,10 @@ class OrderStatusTransitionTest {
     }
 
     @Test
-    void pendingToCancelled_byBuyer_refundsPaidOrder() {
+    void pendingToCancelled_byBuyer_requestsRefundForPaidOrder() {
         String id = order(OrderStatus.PENDING, "VNPAY", PaymentStatus.PAID);
         buyer.cancelMyOrder(BUYER, id);
-        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUNDED);
+        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUND_PENDING);
         assertOneStatusEvent(OrderStatus.PENDING, OrderStatus.CANCELLED);
     }
 
@@ -153,7 +153,7 @@ class OrderStatusTransitionTest {
     }
 
     @Test
-    void processingToDelivered_onOutOfOrderDelivered_collectsCod() {
+    void processingToDelivered_onOutOfOrderDelivered_infersCodPayment() {
         String id = order(OrderStatus.PROCESSING, "COD", PaymentStatus.UNPAID);
         deliveryEvent(id, "DELIVERED");
         assertState(id, OrderStatus.DELIVERED, PaymentStatus.PAID);
@@ -170,17 +170,17 @@ class OrderStatusTransitionTest {
     // ---- SHIPPED ----
 
     @Test
-    void shippedToDelivered_collectsCod() {
+    void shippedToDelivered_infersCodPayment() {
         String id = order(OrderStatus.SHIPPED, "COD", PaymentStatus.UNPAID);
         deliveryEvent(id, "DELIVERED");
         assertState(id, OrderStatus.DELIVERED, PaymentStatus.PAID);
     }
 
     @Test
-    void shippedToCancelled_onReturnedParcel_refundsPrepaidOrder() {
+    void shippedToCancelled_onReturnedParcel_requestsRefundForPrepaidOrder() {
         String id = order(OrderStatus.SHIPPED, "VNPAY", PaymentStatus.PAID);
         deliveryEvent(id, "RETURNED");
-        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUNDED);
+        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUND_PENDING);
         assertOneStatusEvent(OrderStatus.SHIPPED, OrderStatus.CANCELLED);
     }
 
@@ -195,10 +195,10 @@ class OrderStatusTransitionTest {
     }
 
     @Test
-    void deliveredToCancelled_byAdmin_refundsCollectedCod() {
+    void deliveredToCancelled_byAdmin_requestsCodRefund() {
         String id = order(OrderStatus.DELIVERED, "COD", PaymentStatus.PAID);
         admin.cancelOrder(ADMIN, id, "dispute");
-        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUNDED);
+        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUND_PENDING);
     }
 
     // ---- Payment axis ----
@@ -213,23 +213,23 @@ class OrderStatusTransitionTest {
     }
 
     @Test
-    void paymentAfterCancellationIsRefundedExactlyOnce() {
+    void paymentAfterCancellationRequestsRefundExactlyOnce() {
         String id = order(OrderStatus.CANCELLED, "VNPAY", PaymentStatus.UNPAID);
         payments.paid(id);
         payments.paid(id);
-        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUNDED);
+        assertState(id, OrderStatus.CANCELLED, PaymentStatus.REFUND_PENDING);
         assertThat(events.count()).as("chỉ một yêu cầu hoàn tiền").isEqualTo(1);
     }
 
     @Test
-    void refundRequiresPriorPaymentAndHappensOnce() {
+    void refundRequestRequiresPriorPaymentAndHappensOnce() {
         var order = new Order();
         order.setStatus(OrderStatus.PENDING);
-        assertThatThrownBy(order::markRefunded).isInstanceOf(IllegalOrderTransitionException.class);
+        assertThatThrownBy(order::markRefundPending).isInstanceOf(IllegalOrderTransitionException.class);
         order.markPaid();
         assertThatThrownBy(order::markPaid).isInstanceOf(IllegalOrderTransitionException.class);
-        order.markRefunded();
-        assertThatThrownBy(order::markRefunded).isInstanceOf(IllegalOrderTransitionException.class);
+        order.markRefundPending();
+        assertThatThrownBy(order::markRefundPending).isInstanceOf(IllegalOrderTransitionException.class);
     }
 
     // ---- Illegal transitions ----

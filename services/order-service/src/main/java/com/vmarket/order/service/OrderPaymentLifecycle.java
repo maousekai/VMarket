@@ -25,7 +25,7 @@ public class OrderPaymentLifecycle {
         var optional = repository.lock(id);
         if (optional.isEmpty()) return;
         var order = optional.get();
-        // PaymentSucceeded giao lại (at-least-once) khi đơn đã PAID/REFUNDED: không thu lần hai,
+        // PaymentSucceeded giao lại (at-least-once) khi đơn đã PAID/REFUND_PENDING: không thu lần hai,
         // không phát thêm yêu cầu hoàn tiền (PBL6-63).
         if (order.getPaymentStatus() != PaymentStatus.UNPAID) return;
         if (order.getStatus() == OrderStatus.WAITING_PAYMENT
@@ -36,7 +36,7 @@ public class OrderPaymentLifecycle {
             // Reconcile success racing cancellation, including cancellation consumed before the
             // webhook: tiền đã vào sau khi huỷ nên phải hoàn đúng một lần.
             order.markPaid();
-            order.markRefunded();
+            order.markRefundPending();
             outbox.add(
                     EventType.ORDER_STATUS_CHANGED,
                     new OrderStatusChanged(id, "CANCELLED", "CANCELLED", order.getPaymentMethod()));
