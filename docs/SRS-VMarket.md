@@ -213,7 +213,7 @@ Ngoài ra, các hệ thống ngoài (cổng thanh toán VNPay, dịch vụ email
 
 - Trình duyệt hỗ trợ: hai phiên bản mới nhất của Chrome, Edge, Firefox, Safari; giao diện web đáp ứng (responsive).
 
-- Thiết bị di động: Android 8.0 trở lên, iOS 13 trở lên; build/chạy thử Android trực tiếp trên máy Windows qua Android Studio; build iOS cần macOS hoặc dịch vụ build đám mây (ví dụ EAS Build) do hạn chế của môi trường Windows. Thiết bị của Shipper phải bật định vị GPS khi giao hàng.
+- Thiết bị di động: Android 8.0 trở lên, iOS 15.1 trở lên (yêu cầu tối thiểu của Expo SDK 58 / React Native 0.88); build/chạy thử Android trực tiếp trên máy Windows qua Android Studio; build iOS cần macOS hoặc dịch vụ build đám mây (ví dụ EAS Build) do hạn chế của môi trường Windows. Thiết bị của Shipper phải bật định vị GPS khi giao hàng.
 
 - Hạ tầng dữ liệu: PostgreSQL, MongoDB, Redis, Elasticsearch, RabbitMQ chạy dưới dạng container.
 
@@ -566,7 +566,7 @@ Dưới đây đặc tả chi tiết các use case tiêu biểu, đại diện c
 
 - **Web Admin (React):** đăng nhập; phân hệ Seller (bảng điều khiển, quản lý sản phẩm, đơn hàng, xử lý yêu cầu trả hàng, đánh giá, thống kê gian hàng); phân hệ Admin (duyệt gian hàng, kiểm duyệt sản phẩm/đánh giá, quản lý người dùng, quản lý và phân công shipper, danh mục, phân xử trả hàng – khiếu nại, thống kê toàn sàn). Menu hiển thị theo vai trò.
 
-- **Mobile (React Native/Flutter):** các màn hình tương ứng Web end-user, bổ sung tìm kiếm bằng camera và thông báo đẩy; phân hệ Shipper (danh sách đơn được phân công, cập nhật trạng thái giao, chia sẻ vị trí GPS); điều hướng thanh tab chuẩn di động.
+- **Mobile (React Native + Expo):** các màn hình tương ứng Web end-user, bổ sung tìm kiếm bằng camera và thông báo đẩy; phân hệ Shipper (danh sách đơn được phân công, cập nhật trạng thái giao, chia sẻ vị trí GPS); điều hướng thanh tab chuẩn di động.
 
 - Toàn bộ giao diện bằng tiếng Việt, thiết kế đáp ứng; thông báo lỗi rõ ràng, thân thiện.
 

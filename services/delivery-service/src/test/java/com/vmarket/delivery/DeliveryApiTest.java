@@ -1983,6 +1983,7 @@ class DeliveryApiTest {
         inTransit(id);
         call(get("/api/delivery/shipper/assignments?scope=active"), SHIPPER, "SHIPPER", null)
                 .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].assignedAt").exists())
                 .andExpect(jsonPath("$[0].zone").value("Hải Châu"));
         call(get("/api/delivery/shipper/assignments?scope=finished"), SHIPPER, "SHIPPER", null)
                 .andExpect(jsonPath("$.length()").value(0));
@@ -1994,6 +1995,7 @@ class DeliveryApiTest {
                 .andExpect(status().isOk());
         call(get("/api/delivery/shipper/assignments?scope=finished"), SHIPPER, "SHIPPER", null)
                 .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].assignedAt").exists())
                 .andExpect(jsonPath("$[0].completedAt").exists());
         call(get("/api/delivery/shipper/assignments?scope=bogus"), SHIPPER, "SHIPPER", null)
                 .andExpect(status().isBadRequest());

@@ -1228,6 +1228,7 @@ order by s.id limit ? offset ?
         view.put("codAmount", returning ? 0 : a.getCodAmount());
         view.put("createdAt", a.getCreatedAt());
         view.put("updatedAt", a.getUpdatedAt());
+        view.put("assignedAt", repo.lastTransition(a.getId(), DeliveryStatus.ASSIGNED.name()));
         view.put(
                 "completedAt",
                 a.getStatus().terminal() || a.getStatus() == DeliveryStatus.RETURN_DROPPED_OFF

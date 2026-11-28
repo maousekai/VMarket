@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "VMarket",
+    "slug": "vmarket",
+    "scheme": "vmarket",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "vn.pbl6.vmarket"
+    },
+    "android": {
+      "package": "vn.pbl6.vmarket",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION"]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "./plugins/with-light-android-theme",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "VMarket dùng vị trí của bạn để chia sẻ hành trình giao hàng cho người mua.",
+          "locationAlwaysAndWhenInUsePermission": "VMarket cần vị trí cả khi chạy nền để người mua theo dõi đơn trong lúc bạn đang giao.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ]
+  }
+}
