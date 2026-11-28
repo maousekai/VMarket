@@ -20,12 +20,22 @@ import { GPS_INTERVAL_MS, sendLocation } from '../api/deliveryApi'
 export const LOCATION_TASK = 'vmarket-shipper-location'
 const IDS_KEY = 'vmarket.trackingAssignments'
 const LAST_SENT_KEY = 'vmarket.lastLocationSentAt'
+const REVOKED_KEY = 'vmarket.revokedTrackingAssignments'
 const BACKGROUND_ASKED_KEY = 'vmarket.backgroundPermissionAsked'
 const STORE_OPTIONS = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK }
 // Server tu choi diem gui cach nhau duoi 10s; chan o client de khong ton request.
 const MIN_GAP_MS = 10_000
 
 let lastSentAt = 0
+let trackingRevision = 0
+let startRevision = 0
+let storageUpdates = Promise.resolve()
+
+function updateTrackingState(operation) {
+  const next = storageUpdates.then(operation)
+  storageUpdates = next.catch(() => {})
+  return next
+}
 
 async function readIds() {
   try {
@@ -40,6 +50,23 @@ async function writeIds(ids) {
   else await SecureStore.deleteItemAsync(IDS_KEY, STORE_OPTIONS)
 }
 
+async function readRevoked() {
+  return JSON.parse((await SecureStore.getItemAsync(REVOKED_KEY, STORE_OPTIONS)) || '{}')
+}
+
+async function writeRevoked(revoked) {
+  if (Object.keys(revoked).length)
+    await SecureStore.setItemAsync(REVOKED_KEY, JSON.stringify(revoked), STORE_OPTIONS)
+  else await SecureStore.deleteItemAsync(REVOKED_KEY, STORE_OPTIONS)
+}
+
+export async function trackingAccess(assignmentIds) {
+  const revoked = await readRevoked()
+  const available = assignmentIds.filter((id) => !Object.hasOwn(revoked, id))
+  const error = assignmentIds.map((id) => revoked[id]).find(Boolean)
+  return { available, error, allRevoked: assignmentIds.length > 0 && !available.length }
+}
+
 /** Thoi diem server nhan diem GPS gan nhat (ca tu task nen), de UI chi bao "dang chia se" that. */
 export async function readLastSentAt() {
   const value = Number(await SecureStore.getItemAsync(LAST_SENT_KEY, STORE_OPTIONS))
@@ -48,7 +75,9 @@ export async function readLastSentAt() {
 
 /** Ma loi nghia la chuyen khong con nhan GPS tu shipper nay: bo khoi danh sach theo doi. */
 const stopsTracking = (apiError) =>
-  apiError.code === 'TRACKING_STOPPED' || apiError.status === 404 || apiError.status === 403
+  ['TRACKING_STOPPED', 'GPS_SOURCE_CONFLICT'].includes(apiError.code) ||
+  apiError.status === 404 ||
+  apiError.status === 403
 
 /**
  * Gui mot diem toi moi chuyen dang theo doi. Chuyen bi tu choi (xem stopsTracking) bi bo khoi
@@ -57,7 +86,9 @@ const stopsTracking = (apiError) =>
  */
 export async function pushLocation(coords, now = Date.now()) {
   if (now - lastSentAt < MIN_GAP_MS) return { sent: false }
+  const revision = trackingRevision
   const ids = await readIds()
+  if (revision !== trackingRevision || now - lastSentAt < MIN_GAP_MS) return { sent: false }
   if (!ids.length) {
     await stopTracking()
     return { sent: false, stopped: true }
@@ -66,26 +97,39 @@ export async function pushLocation(coords, now = Date.now()) {
   const point = { latitude: coords.latitude, longitude: coords.longitude }
   const results = await Promise.allSettled(ids.map((id) => sendLocation(id, point)))
   const dropped = []
+  const blocked = {}
   let error
   results.forEach((result, index) => {
     if (result.status === 'fulfilled') return
     const apiError = getApiError(result.reason)
     if (stopsTracking(apiError)) {
       dropped.push(ids[index])
-      if (apiError.status === 403) error = apiError.message
+      if (apiError.status === 403 || apiError.code === 'GPS_SOURCE_CONFLICT') {
+        error =
+          apiError.code === 'GPS_SOURCE_CONFLICT'
+            ? 'Một thiết bị hoặc trình duyệt khác đang chia sẻ vị trí cho chuyến này.'
+            : apiError.message
+        blocked[ids[index]] = error
+      }
     } else if (apiError.status !== 429) error = apiError.message
   })
   const sent = results.some((result) => result.status === 'fulfilled')
-  if (sent) await SecureStore.setItemAsync(LAST_SENT_KEY, String(now), STORE_OPTIONS)
-  if (dropped.length) {
-    const remaining = ids.filter((id) => !dropped.includes(id))
-    await writeIds(remaining)
-    if (!remaining.length) {
-      await stopTracking()
-      return { sent, error, stopped: true }
+  return updateTrackingState(async () => {
+    if (revision !== trackingRevision) return { sent: false }
+    if (sent) await SecureStore.setItemAsync(LAST_SENT_KEY, String(now), STORE_OPTIONS)
+    if (dropped.length) {
+      if (Object.keys(blocked).length) await writeRevoked({ ...(await readRevoked()), ...blocked })
+      const remaining = (await readIds()).filter((id) => !dropped.includes(id))
+      if (!remaining.length) {
+        trackingRevision += 1
+        startRevision += 1
+        await clearTracking(false)
+        return { sent, error, stopped: true }
+      }
+      await writeIds(remaining)
     }
-  }
-  return { sent, error }
+    return { sent, error }
+  })
 }
 
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
@@ -101,7 +145,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 // Phien ket thuc vi bat ky ly do gi (dang xuat, refresh token het han, ACCOUNT_SUSPENDED): dung
 // GPS ngay tai mot cho duy nhat (review PR 69, NFR-SEC-07).
 onSessionChange((token) => {
-  if (!token) stopTracking().catch(() => {})
+  if (!token) stopTracking({ clearRevoked: true }).catch(() => {})
 })
 
 async function backgroundRunning() {
@@ -116,7 +160,7 @@ async function servicesEnabled() {
   try {
     return await Location.hasServicesEnabledAsync()
   } catch {
-    return true
+    return false
   }
 }
 
@@ -140,13 +184,44 @@ async function startBackgroundUpdates() {
  *
  * Quyen chay nen chi duoc XIN mot lan (Android mo thang trang Cai dat moi lan xin); cac lan sau
  * chi kiem tra. Shipper bat lai bang nut "Bat chia se khi chay nen" (requestBackgroundSharing).
- * @returns {Promise<'background'|'foreground'|'denied'|'servicesOff'>}
+ * @returns {Promise<'off'|'background'|'foreground'|'denied'|'servicesOff'|'revoked'>}
  */
 export async function startTracking(assignmentIds) {
-  await writeIds(assignmentIds)
+  if (!assignmentIds.length) {
+    await stopTracking({ clearRevoked: true })
+    return 'off'
+  }
+  const revision = trackingRevision
+  const request = ++startRevision
+  const current = () => request === startRevision && revision === trackingRevision
+  await updateTrackingState(async () => {
+    if (!current()) return
+    const revoked = await readRevoked()
+    await writeRevoked(
+      Object.fromEntries(Object.entries(revoked).filter(([id]) => assignmentIds.includes(id))),
+    )
+  })
+  if (!current()) return 'off'
+  if ((await trackingAccess(assignmentIds)).allRevoked) {
+    if (!current()) return 'off'
+    await stopTracking()
+    return 'revoked'
+  }
   const foreground = await Location.requestForegroundPermissionsAsync()
-  if (foreground.status !== 'granted') return 'denied'
-  if (!(await servicesEnabled())) return 'servicesOff'
+  const enabled = foreground.status === 'granted' && (await servicesEnabled())
+  if (!current()) return 'off'
+  if (!enabled) {
+    await stopTracking()
+    return foreground.status !== 'granted' ? 'denied' : 'servicesOff'
+  }
+  const count = await updateTrackingState(async () => {
+    if (!current()) return 0
+    const { available } = await trackingAccess(assignmentIds)
+    if (available.length) await writeIds(available)
+    return available.length
+  })
+  if (!current()) return 'off'
+  if (!count) return 'revoked'
   if (await backgroundRunning()) return 'background'
   let background = { status: 'denied' }
   try {
@@ -161,10 +236,14 @@ export async function startTracking(assignmentIds) {
   } catch {
     background = { status: 'denied' }
   }
+  if (!current()) return 'off'
   if (background.status !== 'granted') return 'foreground'
   try {
-    await startBackgroundUpdates()
-    return 'background'
+    return await updateTrackingState(async () => {
+      if (!current()) return 'off'
+      if (!(await backgroundRunning())) await startBackgroundUpdates()
+      return 'background'
+    })
   } catch {
     // Expo Go / thieu cau hinh native: van gui khi app dang mo.
     return 'foreground'
@@ -177,15 +256,20 @@ export async function requestBackgroundSharing() {
     if (!(await TaskManager.isAvailableAsync())) return false
     const result = await Location.requestBackgroundPermissionsAsync()
     if (result.status !== 'granted') return false
-    if (!(await backgroundRunning())) await startBackgroundUpdates()
     return true
   } catch {
     return false
   }
 }
 
-export async function stopTracking() {
+export async function canShareInBackground() {
+  return TaskManager.isAvailableAsync().catch(() => false)
+}
+
+async function clearTracking(clearRevoked) {
   await writeIds([])
+  await SecureStore.deleteItemAsync(LAST_SENT_KEY, STORE_OPTIONS)
+  if (clearRevoked) await writeRevoked({})
   if (await backgroundRunning()) {
     try {
       await Location.stopLocationUpdatesAsync(LOCATION_TASK)
@@ -193,6 +277,12 @@ export async function stopTracking() {
       // Da dung.
     }
   }
+}
+
+export function stopTracking({ clearRevoked = false } = {}) {
+  trackingRevision += 1
+  startRevision += 1
+  return updateTrackingState(() => clearTracking(clearRevoked))
 }
 
 /** Chi dung cho test. */

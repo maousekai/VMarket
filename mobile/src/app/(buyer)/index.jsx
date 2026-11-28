@@ -15,8 +15,7 @@ export default function BuyerHome() {
         </Text>
         <Card>
           <Text style={styles.text}>
-            Trang chủ, tìm kiếm, giỏ hàng, đặt hàng và theo dõi đơn đang được hoàn thiện cho ứng
-            dụng di động. Trong lúc chờ, bạn có thể mua sắm trên web VMarket bằng cùng tài khoản.
+            Mua sắm trên web VMarket bằng cùng tài khoản và xem các đơn đã đặt trong ứng dụng.
           </Text>
         </Card>
         {WEB_URL ? (

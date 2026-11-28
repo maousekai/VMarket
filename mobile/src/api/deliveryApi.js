@@ -6,7 +6,8 @@ export { DELIVERY_STATUS_LABELS } from '../deliveryStatus'
 /** Trang thai server nhan GPS (DeliveryStatus.tracking). */
 export const TRACKING_STATUSES = Object.freeze(['PICKED_UP', 'IN_TRANSIT', 'RETURNING'])
 export const isTrackingStatus = (status) => TRACKING_STATUSES.includes(status)
-export const isTerminalStatus = (status) => status === 'DELIVERED' || status === 'RETURNED'
+export const isTerminalStatus = (status) =>
+  ['DELIVERED', 'RETURN_DROPPED_OFF', 'RETURNED'].includes(status)
 
 /** Server tu choi diem GPS cach nhau duoi 10 giay; app gui moi 15 giay (yeu cau 10-30s). */
 export const GPS_INTERVAL_MS = 15_000
@@ -37,7 +38,7 @@ export function parseOrderSnapshot(snapshot) {
 }
 
 export const orderAddress = (order) =>
-  [order?.streetAddress, order?.ward, order?.district, order?.province].filter(Boolean).join(', ')
+  [order?.streetAddress, order?.ward, order?.province].filter(Boolean).join(', ')
 
 /** Hanh dong hop le theo DeliveryService.status/retry. */
 export function shipperActions(assignment) {

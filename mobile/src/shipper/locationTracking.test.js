@@ -88,6 +88,22 @@ describe('pushLocation', () => {
 })
 
 describe('review PR 69: stop collecting location when access is gone', () => {
+  it.each([
+    [403, 'SHIPPER_INACTIVE'],
+    [409, 'GPS_SOURCE_CONFLICT'],
+  ])('keeps a trip returned as %s %s stopped across tracking restarts', async (status, code) => {
+    await startTracking(['a1'])
+    sendLocation.mockRejectedValueOnce(apiError(status, code))
+    expect((await pushLocation(coords, 500_000)).stopped).toBe(true)
+
+    expect(await startTracking(['a1'])).toBe('revoked')
+    expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false)
+    expect(Location.startLocationUpdatesAsync).not.toHaveBeenCalled()
+
+    expect(await startTracking([])).toBe('off')
+    expect(await startTracking(['a1'])).toBe('foreground')
+  })
+
   it('drops a trip on 403 and stops the background task once no trip is left', async () => {
     Location.hasStartedLocationUpdatesAsync.mockResolvedValue(true)
     await startTracking(['a1', 'a2'])
@@ -116,6 +132,28 @@ describe('review PR 69: stop collecting location when access is gone', () => {
     expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false)
     expect(Location.stopLocationUpdatesAsync).toHaveBeenCalledWith('vmarket-shipper-location')
     Location.hasStartedLocationUpdatesAsync.mockResolvedValue(false)
+  })
+
+  it('ignores a location response that arrives after tracking has stopped', async () => {
+    await startTracking(['a1'])
+    let respond
+    let requestSent
+    const sent = new Promise((resolve) => {
+      requestSent = resolve
+    })
+    sendLocation.mockImplementationOnce(() => {
+      requestSent()
+      return new Promise((resolve) => {
+        respond = resolve
+      })
+    })
+    const sending = pushLocation(coords, 560_000)
+    await sent
+    await stopTracking()
+
+    respond({})
+    expect(await sending).toEqual({ sent: false })
+    expect(SecureStore.__store.has('vmarket.lastLocationSentAt')).toBe(false)
   })
 
   it('reports device location services that are switched off', async () => {

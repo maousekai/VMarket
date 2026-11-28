@@ -1,6 +1,11 @@
 import axios from 'axios'
 import * as SecureStore from 'expo-secure-store'
-import client, { onSessionChange, signOutLocally, storeAuthResponse } from './client'
+import client, {
+  onSessionChange,
+  refreshAccessToken,
+  signOutLocally,
+  storeAuthResponse,
+} from './client'
 
 const token = (sub) =>
   `h.${Buffer.from(JSON.stringify({ sub, roles: ['BUYER'] })).toString('base64url')}.s`
@@ -82,4 +87,19 @@ it('keeps the session when refresh fails only because the network is down', asyn
   adapter.mockImplementation(() => respond(401))
   await expect(client.get('/api/a')).rejects.toThrow('HTTP 401')
   expect(SecureStore.__store.get('vmarket.refreshToken')).toBe('r1')
+})
+
+it('ends the session when a direct refresh is rejected because the account was suspended', async () => {
+  await signIn()
+  const changed = jest.fn()
+  const unsubscribe = onSessionChange(changed)
+  jest
+    .spyOn(axios, 'post')
+    .mockImplementation(() => respond(423, { error: { code: 'ACCOUNT_SUSPENDED' } }))
+
+  await expect(refreshAccessToken()).rejects.toThrow('HTTP 423')
+
+  expect(changed).toHaveBeenCalledWith(null)
+  expect(SecureStore.__store.has('vmarket.refreshToken')).toBe(false)
+  unsubscribe()
 })

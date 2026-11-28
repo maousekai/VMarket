@@ -39,10 +39,10 @@ Build trên cloud bằng EAS (không cần Android Studio / máy Mac). Đăng nh
 | Dev build (Android/iOS)     | `npx eas-cli@latest build --profile development`        | App dev client, chạy với `npx expo start` |
 | Android local (Windows)     | `npx expo run:android`                                  | Cần Android Studio + SDK                  |
 
-> **Chưa có URL công khai.** `eas.json` (profile `preview`) đang để giá trị giữ chỗ
-> `https://CHANGE-ME-public-gateway` và `https://CHANGE-ME-public-web`. Trước khi build APK demo, thay
-> bằng URL **HTTPS** thật của API Gateway và trang web (Android chặn HTTP thường ở bản release).
-> Build với giá trị giữ chỗ thì app không gọi được API.
+Trước khi build, đặt `EXPO_PUBLIC_API_URL` và `EXPO_PUBLIC_WEB_URL` trong môi trường EAS
+`preview` (APK demo) hoặc `production` (bản phát hành). Dùng URL **HTTPS** thật của API Gateway
+và trang web, với mức hiển thị `Plain text` vì các giá trị này được nhúng trong app.
+Build `preview` và `production` sẽ báo lỗi nếu thiếu URL hợp lệ.
 
 iOS: chạy qua Expo Go (luồng không cần GPS nền) hoặc dev build cài nội bộ
 (`--profile development`, cần đăng ký UDID thiết bị). TestFlight không dùng vì cần tài khoản Apple

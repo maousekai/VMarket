@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { AppState } from 'react-native'
 import * as Location from 'expo-location'
 import { GPS_INTERVAL_MS, isTrackingStatus } from '../api/deliveryApi'
 import {
+  canShareInBackground,
   pushLocation,
   readLastSentAt,
   requestBackgroundSharing,
   startTracking,
-  stopTracking,
+  trackingAccess,
 } from './locationTracking'
 
 // Chi bao "dang chia se" khi server da nhan mot diem gan day (khong tin rieng viec da xin quyen).
@@ -20,37 +20,54 @@ const FRESH_MS = 60_000
  *
  * mode: off | denied | servicesOff | foreground | background | revoked | error
  */
-export default function useShipperTracking(assignments) {
+export default function useShipperTracking(assignments, revision, reload) {
   const ids = assignments
     .filter((item) => isTrackingStatus(item.status))
     .map((item) => item.id)
     .sort()
   const key = ids.join(',')
-  const [state, setState] = useState({ mode: 'off', lastSentAt: null, error: '' })
-  const [attempt, setAttempt] = useState(0)
+  const [state, setState] = useState({ mode: 'off', lastSentAt: null, error: '', count: 0 })
+  const [backgroundAvailable, setBackgroundAvailable] = useState(false)
+  const [backgroundDenied, setBackgroundDenied] = useState(false)
 
   useEffect(() => {
-    const subscription = AppState.addEventListener?.('change', (next) => {
-      if (next === 'active') setAttempt((value) => value + 1)
+    let active = true
+    canShareInBackground().then((available) => {
+      if (active) setBackgroundAvailable(available)
     })
-    return () => subscription?.remove?.()
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
+    if (!revision) return undefined
     let active = true
     let watcher = null
     let poller = null
     const current = key ? key.split(',') : []
 
     if (!current.length) {
-      stopTracking().catch(() => {})
-      setState({ mode: 'off', lastSentAt: null, error: '' })
+      startTracking([]).catch(() => {})
+      setState({ mode: 'off', lastSentAt: null, error: '', count: 0 })
       return undefined
     }
 
-    const refreshLastSent = async () => {
+    const refreshLastSent = async (initial = false) => {
       const lastSentAt = await readLastSentAt().catch(() => null)
-      if (active) setState((previous) => ({ ...previous, lastSentAt }))
+      const access = await trackingAccess(current).catch(() => null)
+      if (!active) return
+      if (access?.allRevoked) stopWatching()
+      setState((previous) => ({
+        ...previous,
+        mode: access?.allRevoked ? 'revoked' : previous.mode,
+        error: access?.error || previous.error,
+        lastSentAt:
+          access?.allRevoked || initial
+            ? lastSentAt
+            : Math.max(lastSentAt, previous.lastSentAt) || null,
+        count: access?.available.length ?? previous.count,
+      }))
     }
 
     const stopWatching = () => {
@@ -61,8 +78,9 @@ export default function useShipperTracking(assignments) {
     ;(async () => {
       const mode = await startTracking(current).catch(() => 'error')
       if (!active) return
-      setState((previous) => ({ ...previous, mode, error: '' }))
-      refreshLastSent()
+      setState((previous) => ({ ...previous, mode, error: '', count: current.length }))
+      await refreshLastSent(true)
+      if (!active) return
       poller = setInterval(refreshLastSent, 5000)
       if (mode !== 'foreground') return
       try {
@@ -78,6 +96,7 @@ export default function useShipperTracking(assignments) {
                 ...previous,
                 mode: result.error ? 'revoked' : 'off',
                 error: result.error || '',
+                lastSentAt: null,
               }))
               return
             }
@@ -113,17 +132,20 @@ export default function useShipperTracking(assignments) {
       clearInterval(poller)
       // Che do nen cu chay khi roi man hinh; chi dung khi khong con chuyen nao (nhanh tren).
     }
-  }, [key, attempt])
+  }, [key, revision])
 
   const sharing = Boolean(state.lastSentAt && Date.now() - state.lastSentAt < FRESH_MS)
   return {
     ...state,
     sharing,
-    trackingCount: ids.length,
-    retry: () => setAttempt((value) => value + 1),
+    trackingCount: state.mode === 'revoked' ? ids.length : state.count,
+    backgroundAvailable,
+    backgroundDenied,
+    retry: reload,
     enableBackground: async () => {
-      await requestBackgroundSharing()
-      setAttempt((value) => value + 1)
+      const granted = await requestBackgroundSharing()
+      setBackgroundDenied(!granted)
+      if (granted) await reload()
     },
   }
 }

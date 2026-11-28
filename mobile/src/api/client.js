@@ -43,8 +43,11 @@ export async function storeAuthResponse(response) {
 
 export async function signOutLocally() {
   accessToken = null
-  await clearTokens()
-  emit(null)
+  try {
+    await clearTokens()
+  } finally {
+    emit(null)
+  }
 }
 
 const isAuthPath = (url = '') => /\/api\/auth\/(login|register|refresh|password|otp)/.test(url)
@@ -60,9 +63,23 @@ export function refreshAccessToken() {
         withCredentials: false,
       })
       return storeAuthResponse(response)
-    })().finally(() => {
-      refreshing = null
-    })
+    })()
+      .catch(async (error) => {
+        const status = error?.response?.status
+        const code = error?.response?.data?.error?.code
+        if (
+          status === 401 ||
+          status === 403 ||
+          code === 'ACCOUNT_SUSPENDED' ||
+          error?.code === 'NO_SESSION'
+        ) {
+          await signOutLocally()
+        }
+        throw error
+      })
+      .finally(() => {
+        refreshing = null
+      })
   }
   return refreshing
 }
@@ -90,11 +107,7 @@ client.interceptors.response.use(
       const token = await refreshAccessToken()
       config.headers.set('Authorization', `Bearer ${token}`)
       return client(config)
-    } catch (refreshError) {
-      // Refresh token het han / bi thu hoi: buoc dang nhap lai. Loi mang thi giu phien.
-      const status = refreshError?.response?.status
-      if (status === 401 || status === 403 || refreshError?.code === 'NO_SESSION')
-        await signOutLocally()
+    } catch {
       return Promise.reject(error)
     }
   },

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert,
+  AppState,
   FlatList,
   Linking,
   Platform,
@@ -29,12 +30,38 @@ import { Badge, Button, Card, Loading, Notice } from '../components/ui'
 import { isReturnStatus } from '../deliveryStatus'
 import { colors, radius, spacing } from '../theme'
 import { DeliverSheet, FailSheet } from './ActionSheet'
+import { stopTracking } from './locationTracking'
 import useShipperTracking from './useShipperTracking'
 
 const TABS = [
   ['active', 'Đang xử lý'],
   ['done', 'Đã kết thúc'],
 ]
+const ASSIGNMENT_PAGE_SIZE = 50
+const FINISHED_PAGE_SIZE = 20
+const DELIVERY_AREAS = {
+  'Hải Châu': ['Hải Châu', 'Hòa Cường'],
+  'Thanh Khê': ['Thanh Khê', 'An Khê'],
+  'Sơn Trà': ['Sơn Trà', 'An Hải'],
+  'Ngũ Hành Sơn': ['Ngũ Hành Sơn'],
+  'Liên Chiểu': ['Liên Chiểu', 'Hòa Khánh', 'Hải Vân'],
+  'Cẩm Lệ': ['Cẩm Lệ', 'Hòa Xuân'],
+  'Hòa Vang': ['Bà Nà', 'Hòa Tiến', 'Hòa Vang'],
+}
+const areaKey = (text = '') =>
+  String(text ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+const deliveryAreaName = (area, ward) => {
+  const name = Object.keys(DELIVERY_AREAS).find((name) => areaKey(name) === areaKey(area))
+  if (name) return name
+  const wardKey = areaKey(ward).replace(/^(phuong|xa)\s+/, '')
+  return Object.entries(DELIVERY_AREAS).find(([, wards]) =>
+    wards.some((name) => areaKey(name) === wardKey),
+  )?.[0]
+}
 
 const badgeTone = (status) =>
   status === 'DELIVERED'
@@ -49,6 +76,11 @@ const timeFormat = new Intl.DateTimeFormat('vi-VN', {
   second: '2-digit',
   hour12: false,
 })
+const dateFormat = new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
+const displayDate = (value) => {
+  const date = new Date(value)
+  return value && Number.isFinite(date.getTime()) ? dateFormat.format(date) : ''
+}
 
 const openLocationSettings = () =>
   Platform.OS === 'android'
@@ -122,12 +154,20 @@ function TrackingBanner({ tracking }) {
         {message}
         {tracking.error ? `\n${tracking.error}` : ''}
       </Notice>
-      {tracking.mode === 'foreground' && (
+      {tracking.mode === 'foreground' && tracking.backgroundAvailable && (
         <Button
           title="Bật chia sẻ khi chạy nền"
           variant="secondary"
           onPress={tracking.enableBackground}
         />
+      )}
+      {tracking.mode === 'foreground' && tracking.backgroundDenied && (
+        <>
+          <Notice tone="warning">
+            Chưa bật được quyền vị trí khi chạy nền. Chọn Luôn cho phép trong cài đặt của VMarket.
+          </Notice>
+          <Button title="Mở cài đặt" variant="secondary" onPress={() => Linking.openSettings()} />
+        </>
       )}
     </View>
   )
@@ -138,9 +178,20 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
   const [sheet, setSheet] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [locationOff, setLocationOff] = useState(false)
   // Hoan hang: khong giao cho nguoi mua, khong thu COD -> an dia chi va tien thu ho.
   const returning = isReturnStatus(assignment.status)
   const cod = !returning && assignment.paymentMethod === 'COD' && Number(assignment.codAmount) > 0
+  const area = deliveryAreaName(assignment.deliveryArea ?? assignment.district, order.ward)
+  const address = orderAddress(order) || order.ward || assignment.province || ''
+  const destination =
+    Number.isFinite(order.latitude) && Number.isFinite(order.longitude)
+      ? `${order.latitude},${order.longitude}`
+      : address
+  const assignedAt = displayDate(assignment.assignedAt)
+  const completedAt = isTerminalStatus(assignment.status)
+    ? displayDate(assignment.completedAt || assignment.updatedAt)
+    : ''
 
   async function run(action) {
     setBusy(true)
@@ -167,13 +218,25 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
     )
 
   async function pickUp() {
+    setBusy(true)
+    setLocationOff(false)
+    setError('')
     // Xin quyen vi tri TRUOC khi lay hang: tu choi thi khong de chuyen di tiep ma khong co GPS.
-    const permission = await Location.requestForegroundPermissionsAsync().catch(() => null)
-    if (permission?.status !== 'granted') {
-      setError('Cần cấp quyền vị trí trước khi xác nhận lấy hàng để người mua theo dõi được đơn.')
-      return
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync().catch(() => null)
+      if (permission?.status !== 'granted') {
+        setError('Cần cấp quyền vị trí trước khi xác nhận lấy hàng để người mua theo dõi được đơn.')
+        return
+      }
+      if (!(await Location.hasServicesEnabledAsync().catch(() => false))) {
+        setLocationOff(true)
+        setError('Cần bật định vị trước khi xác nhận lấy hàng.')
+        return
+      }
+      await changeStatus('PICKED_UP')
+    } finally {
+      setBusy(false)
     }
-    changeStatus('PICKED_UP')
   }
 
   function confirmReturned() {
@@ -197,6 +260,9 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
         <View style={styles.flex}>
           <Text style={styles.orderId}>Đơn {shortOrderId(assignment.orderId)}</Text>
           <Text style={styles.muted}>Lần giao {assignment.attempt || 1}/3</Text>
+          {area ? <Text style={styles.muted}>Khu {area}</Text> : null}
+          {assignedAt ? <Text style={styles.muted}>Phân công lúc {assignedAt}</Text> : null}
+          {completedAt ? <Text style={styles.muted}>Kết thúc lúc {completedAt}</Text> : null}
         </View>
         <Badge
           label={DELIVERY_STATUS_LABELS[assignment.status] || assignment.status}
@@ -215,16 +281,28 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
           {order.phone ? (
             <Pressable
               accessibilityRole="link"
-              onPress={() => Linking.openURL(`tel:${order.phone}`)}
+              onPress={() =>
+                Linking.openURL(`tel:${order.phone}`).catch(() =>
+                  setError('Không mở được cuộc gọi.'),
+                )
+              }
             >
-              <Text style={styles.link}>{order.phone}</Text>
+              <Text style={styles.link}>Gọi {order.phone}</Text>
             </Pressable>
           ) : null}
           <Text style={styles.label}>Địa chỉ</Text>
-          <Text style={styles.value}>
-            {orderAddress(order) ||
-              [assignment.district, assignment.province].filter(Boolean).join(', ')}
-          </Text>
+          <Text style={styles.value}>{address || '—'}</Text>
+          {destination ? (
+            <Button
+              title="Chỉ đường"
+              variant="secondary"
+              onPress={() =>
+                Linking.openURL(
+                  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`,
+                ).catch(() => setError('Không mở được Google Maps.'))
+              }
+            />
+          ) : null}
           {order.note ? (
             <>
               <Text style={styles.label}>Ghi chú</Text>
@@ -238,6 +316,7 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
         </View>
       )}
       {error && !sheet ? <Notice tone="danger">{error}</Notice> : null}
+      {locationOff && <Button title="Bật định vị" onPress={openLocationSettings} />}
       {shipperActions(assignment).map((action) => (
         <Button
           key={action.label}
@@ -273,33 +352,62 @@ function AssignmentCard({ assignment, onChanged, onStale }) {
 /** Phan he shipper (UC-23, FR-SHIP-03/04): don duoc phan cong, cap nhat trang thai, gui GPS. */
 export default function AssignmentsScreen() {
   const [tab, setTab] = useState('active')
-  const [state, setState] = useState({ status: 'loading', items: [], error: '' })
+  const [state, setState] = useState({ status: 'loading', items: [], error: '', revision: 0 })
   const [refreshing, setRefreshing] = useState(false)
+  const [finishedLimit, setFinishedLimit] = useState(FINISHED_PAGE_SIZE)
+  const request = useRef(0)
 
   const load = useCallback(async () => {
+    const current = ++request.current
     try {
-      const items = await listMyAssignments()
-      setState({ status: 'ready', items: items || [], error: '' })
+      const items = new Map()
+      let page = 0
+      let batch
+      // API hiện tại trộn chuyến đang chạy và đã kết thúc trong cùng thứ tự phân trang.
+      do {
+        batch = (await listMyAssignments({ page, size: ASSIGNMENT_PAGE_SIZE })) || []
+        if (current !== request.current) return
+        batch.forEach((item) => items.set(item.id, item))
+        page += 1
+      } while (batch.length === ASSIGNMENT_PAGE_SIZE)
+      setState((previous) => ({
+        status: 'ready',
+        items: [...items.values()],
+        error: '',
+        revision: previous.revision + 1,
+      }))
     } catch (failure) {
+      if (current !== request.current) return
+      const error = getApiError(failure)
+      if (error.status === 403) await stopTracking().catch(() => {})
+      if (current !== request.current) return
       setState((previous) => ({
         ...previous,
+        items: error.status === 403 ? [] : previous.items,
         status: 'error',
-        error: getApiError(failure).message,
+        error: error.message,
+        revision: error.status === 403 ? 0 : previous.revision,
       }))
     }
   }, [])
 
   useEffect(() => {
     load()
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') load()
+    })
+    return () => subscription.remove()
   }, [load])
 
-  const tracking = useShipperTracking(state.items)
+  const tracking = useShipperTracking(state.items, state.revision, load)
 
-  const onChanged = (updated) =>
+  const onChanged = (updated) => {
+    request.current += 1
     setState((previous) => ({
       ...previous,
       items: previous.items.map((item) => (item.id === updated.id ? updated : item)),
     }))
+  }
 
   async function refresh() {
     setRefreshing(true)
@@ -310,6 +418,7 @@ export default function AssignmentsScreen() {
   const visible = state.items.filter((item) =>
     tab === 'active' ? !isTerminalStatus(item.status) : isTerminalStatus(item.status),
   )
+  const showingFinished = tab === 'done'
 
   if (state.status === 'loading') return <Loading />
 
@@ -341,10 +450,19 @@ export default function AssignmentsScreen() {
         </View>
       )}
       <FlatList
-        data={visible}
+        data={showingFinished ? visible.slice(0, finishedLimit) : visible}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        ListFooterComponent={
+          showingFinished && visible.length > finishedLimit ? (
+            <Button
+              title="Tải thêm"
+              variant="secondary"
+              onPress={() => setFinishedLimit((limit) => limit + FINISHED_PAGE_SIZE)}
+            />
+          ) : null
+        }
         ListEmptyComponent={
           state.status === 'ready' ? (
             <Text style={styles.empty}>

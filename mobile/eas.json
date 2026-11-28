@@ -5,20 +5,19 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://CHANGE-ME-public-gateway",
-        "EXPO_PUBLIC_WEB_URL": "https://CHANGE-ME-public-web"
       }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true
     }
   }

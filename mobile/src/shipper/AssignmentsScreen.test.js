@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import * as Location from 'expo-location'
 import * as SecureStore from 'expo-secure-store'
+import * as TaskManager from 'expo-task-manager'
 import AssignmentsScreen from './AssignmentsScreen'
 import { resetThrottleForTests } from './locationTracking'
 import {
@@ -161,6 +162,46 @@ it('requires location permission before confirming pickup', async () => {
   await fireEvent.press(await screen.findByText('Đã lấy hàng'))
   expect(await screen.findByText(/Cần cấp quyền vị trí trước khi xác nhận lấy hàng/)).toBeTruthy()
   expect(updateAssignmentStatus).not.toHaveBeenCalled()
+})
+
+it('blocks pickup if location services are disabled even when permission is granted', async () => {
+  Location.hasServicesEnabledAsync.mockResolvedValueOnce(false)
+  listMyAssignments.mockResolvedValue([trip()])
+  await render(<AssignmentsScreen />)
+  await fireEvent.press(await screen.findByText('Đã lấy hàng'))
+
+  expect(await screen.findByText('Cần bật định vị trước khi xác nhận lấy hàng.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Bật định vị' })).toBeTruthy()
+  expect(updateAssignmentStatus).not.toHaveBeenCalled()
+})
+
+it('includes older moving assignments and expands the finished list on demand', async () => {
+  const finished = Array.from({ length: 50 }, (_, index) =>
+    trip({ id: `finished-${index}`, orderId: String(index + 10000000), status: 'DELIVERED' }),
+  )
+  listMyAssignments
+    .mockResolvedValueOnce(finished)
+    .mockResolvedValueOnce([trip({ status: 'IN_TRANSIT' })])
+  await render(<AssignmentsScreen />)
+
+  expect(await screen.findByText('Giao thành công')).toBeTruthy()
+  expect(listMyAssignments).toHaveBeenNthCalledWith(2, { page: 1, size: 50 })
+  await fireEvent.press(screen.getByRole('tab', { name: 'Đã kết thúc' }))
+  expect(await screen.findByText('Tải thêm')).toBeTruthy()
+  await fireEvent.press(screen.getByText('Tải thêm'))
+  expect(screen.getByText('Tải thêm')).toBeTruthy()
+})
+
+it('hides the background sharing action when background tasks are unavailable', async () => {
+  TaskManager.isAvailableAsync.mockResolvedValue(false)
+  listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+  try {
+    await render(<AssignmentsScreen />)
+    expect(await screen.findByText(/Đang chờ tín hiệu GPS/)).toBeTruthy()
+    expect(screen.queryByText('Bật chia sẻ khi chạy nền')).toBeNull()
+  } finally {
+    TaskManager.isAvailableAsync.mockResolvedValue(true)
+  }
 })
 
 it('hides the buyer address and COD while returning the parcel', async () => {

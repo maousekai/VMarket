@@ -29,7 +29,7 @@ export default [
     languageOptions: { globals: { ...globals.jest, ...globals.node } },
   },
   {
-    files: ['*.config.js'],
+    files: ['*.config.js', 'plugins/*.js'],
     languageOptions: { globals: globals.node },
   },
   eslintConfigPrettier,
