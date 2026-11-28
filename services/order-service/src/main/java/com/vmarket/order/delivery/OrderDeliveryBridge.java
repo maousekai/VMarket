@@ -107,16 +107,22 @@ public class OrderDeliveryBridge {
                         event.orderId());
         if (versions.isEmpty() || versions.get(0) >= event.version()) return;
         Order order = orders.findById(event.orderId()).orElseThrow();
+        // Anh xa chuyen giao -> don (review PR 68 lan 2, muc 1.3 / 4.7): hoan hang KHONG con la
+        // "huy don" ma la DELIVERY_FAILED -> RETURNED_TO_SELLER.
         OrderStatus next =
                 switch (event.status()) {
-                    case "PICKED_UP", "IN_TRANSIT", "FAILED", "RETURNING" -> OrderStatus.SHIPPED;
+                    case "PICKED_UP", "IN_TRANSIT", "FAILED" -> OrderStatus.SHIPPED;
                     case "DELIVERED" -> OrderStatus.DELIVERED;
-                    case "RETURNED" -> OrderStatus.CANCELLED;
+                    case "RETURNING", "RETURN_DROPPED_OFF" -> OrderStatus.DELIVERY_FAILED;
+                    case "RETURNED" -> OrderStatus.RETURNED_TO_SELLER;
                     default -> null;
                 };
         if (next == null) return;
         if (order.getStatus() == OrderStatus.CANCELLED
-                || order.getStatus() == OrderStatus.DELIVERED) return;
+                || order.getStatus() == OrderStatus.DELIVERED
+                || order.getStatus() == OrderStatus.RETURNED_TO_SELLER) return;
+        // Da sang nhanh hoan hang thi khong quay lai "dang giao".
+        if (order.getStatus() == OrderStatus.DELIVERY_FAILED && next == OrderStatus.SHIPPED) return;
         var before = order.getStatus();
         order.setStatus(next);
         if (next == OrderStatus.DELIVERED && order.getDeliveredAt() == null) {

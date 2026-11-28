@@ -72,6 +72,9 @@ public class OrderCreator {
         order.setDistrict(address.district());
         order.setWard(address.ward());
         order.setStreetAddress(address.streetAddress());
+        // Toa do diem giao (nguoi mua chon tren ban do) -> marker tren ban do giao hang.
+        order.setLatitude(address.latitude());
+        order.setLongitude(address.longitude());
         order.setNote(
                 request.note() == null || request.note().isBlank() ? null : request.note().trim());
 

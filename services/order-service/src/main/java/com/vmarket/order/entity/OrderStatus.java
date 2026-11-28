@@ -37,5 +37,17 @@ public enum OrderStatus {
 	COMPLETED,
 
 	/** Người mua hoặc hệ thống huỷ đơn. */
-	CANCELLED
+	CANCELLED,
+
+	/**
+	 * Giao không thành công, hàng đang hoàn về shop (chuyến giao RETURNING / RETURN_DROPPED_OFF).
+	 * Review PR 68 lần 2, mục 4.7.
+	 */
+	DELIVERY_FAILED,
+
+	/**
+	 * Hàng đã hoàn trả cho shop (chuyến giao RETURNED) - thay cho CANCELLED. Đơn trả trước được
+	 * payment-service hoàn tiền tự động.
+	 */
+	RETURNED_TO_SELLER
 }
