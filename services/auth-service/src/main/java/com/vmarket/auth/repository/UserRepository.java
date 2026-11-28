@@ -115,6 +115,14 @@ public interface UserRepository extends JpaRepository<User, String>, JpaSpecific
 			""")
 	long countActiveWithRole(@Param("id") String id, @Param("role") RoleName role);
 
+	/** Id cac tai khoan dang hoat dong co vai tro {@code role} (vd ADMIN nhan thong bao dieu phoi). */
+	@Query("""
+			select u.id from User u, UserRole ur, Role r
+			 where u.suspendedAt is null and ur.userId = u.id and r.id = ur.roleId and r.name = :role
+			 order by u.id
+			""")
+	java.util.List<String> findActiveIdsWithRole(@Param("role") RoleName role);
+
 	/**
 	 * Admin khoá tài khoản (FR-USER-04). Chỉ ghi khi tài khoản CHƯA bị khoá — trả về
 	 * 0 nghĩa là đã bị khoá từ trước (giữ nguyên thời điểm + lý do lần khoá đầu).

@@ -26,4 +26,20 @@ public class InternalShipperController {
     public Map<String, Boolean> status(@PathVariable String id) {
         return accounts.status(id);
     }
+
+    public record StatusRequest(@jakarta.validation.constraints.NotNull
+            @jakarta.validation.constraints.Size(max = 200) java.util.List<String> ids) {}
+
+    /** Trang thai nhieu shipper trong mot request (danh sach shipper cua admin). */
+    @PostMapping("/status")
+    public Map<String, Object> statuses(@Valid @RequestBody StatusRequest request) {
+        return Map.of("statuses", accounts.statuses(request.ids()));
+    }
+
+    /** Gui lai email kich hoat cho shipper chua xac thuc email. */
+    @PostMapping("/{id}/activation")
+    public Map<String, Object> resendActivation(@RequestHeader("X-Actor-Id") String actor,
+            @PathVariable String id) {
+        return accounts.resendActivation(actor, id);
+    }
 }
