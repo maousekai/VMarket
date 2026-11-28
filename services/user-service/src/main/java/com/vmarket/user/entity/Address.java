@@ -57,6 +57,13 @@ public class Address extends BaseEntity {
 	@Column(length = 255)
 	private String note;
 
+	/** Toa do diem giao (review PR 68, muc 4.10); co the null voi dia chi cu. */
+	@Column(name = "latitude")
+	private Double latitude;
+
+	@Column(name = "longitude")
+	private Double longitude;
+
 	@Column(name = "is_default", nullable = false)
 	private boolean isDefault;
 

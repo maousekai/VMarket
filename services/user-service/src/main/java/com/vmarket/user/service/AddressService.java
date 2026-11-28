@@ -165,5 +165,9 @@ public class AddressService {
 		address.setWard(request.ward().trim());
 		address.setStreetAddress(request.streetAddress().trim());
 		address.setNote(request.note() == null || request.note().isBlank() ? null : request.note().trim());
+		// Toa do di theo cap: thieu mot trong hai thi coi nhu chua chon diem tren ban do.
+		boolean located = request.latitude() != null && request.longitude() != null;
+		address.setLatitude(located ? request.latitude() : null);
+		address.setLongitude(located ? request.longitude() : null);
 	}
 }

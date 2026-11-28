@@ -118,6 +118,10 @@ app:
       # hang / luu lich su. Lich su hoi thoai va phieu ho tro VAN can token o gateway.
       - /api/ai/chat/messages
       - /api/ai/chat/health
+      # WebSocket theo doi giao hang (review PR 68 lan 2, muc 4.2): trinh duyet khong gui
+      # duoc Authorization Bearer khi mo WebSocket. delivery-service tu kiem tra ve dung-mot-lan
+      # (?ticket=, song 30 giay, xin bang API co JWT) truoc khi chap nhan ket noi.
+      - /api/delivery/ws
       - /actuator/**
       - /v3/api-docs/**
       - /v3/api-docs.yaml

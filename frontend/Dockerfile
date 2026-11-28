@@ -44,6 +44,8 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # Dich den cua reverse proxy /api/* - doi duoc luc RUNTIME (khong build lai image).
 # Co hay khong "/" o cuoi deu duoc (script .envsh o tren chuan hoa).
 ENV API_GATEWAY_URL=http://api-gateway:8080
+# WebSocket theo doi giao hang di thang toi delivery-service (Gateway chua proxy WebSocket).
+ENV DELIVERY_WS_UPSTREAM=http://delivery-service:8088
 # DNS noi bo cua Docker cho user-defined network (dung de resolve ten service).
 ENV NGINX_RESOLVER=127.0.0.11
 
