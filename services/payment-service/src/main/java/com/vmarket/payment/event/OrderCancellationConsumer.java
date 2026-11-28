@@ -22,5 +22,7 @@ public class OrderCancellationConsumer implements EventConsumer<OrderStatusChang
 
     public void handle(OrderStatusChanged payload, EventEnvelope envelope) {
         if ("CANCELLED".equals(payload.status())) store.cancelled(payload.orderId());
+        else if ("RETURNED_TO_SELLER".equals(payload.status()))
+            store.returnedToSeller(payload.orderId());
     }
 }

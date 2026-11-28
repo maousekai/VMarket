@@ -6,3 +6,6 @@ test-results/
 blob-report/
 .vitest/
 .cache/
+
+# Ban sao sinh tu shared/delivery/delivery-rules.json (scripts/sync-delivery-rules.mjs)
+src/generated/*.json

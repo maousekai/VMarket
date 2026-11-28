@@ -14,6 +14,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -84,7 +85,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
         ConstraintViolationException.class,
         MissingRequestHeaderException.class,
-        HandlerMethodValidationException.class
+        HandlerMethodValidationException.class,
+        MethodArgumentTypeMismatchException.class
     })
     public ResponseEntity<ErrorResponse> handleParameterValidation(Exception ex) {
         return ResponseEntity.badRequest()

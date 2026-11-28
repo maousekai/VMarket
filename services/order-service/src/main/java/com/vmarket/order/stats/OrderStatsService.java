@@ -90,7 +90,10 @@ public class OrderStatsService {
 			LocalDate date = row.getCreatedAt().atZone(VN).toLocalDate();
 			ordersByDay.computeIfAbsent(date, ignored -> new HashSet<>()).add(row.getOrderId());
 
-			if (status == OrderStatus.CANCELLED) {
+			// Don huy, dang hoan hoac da hoan ve shop khong tinh doanh thu.
+			if (status == OrderStatus.CANCELLED
+					|| status == OrderStatus.DELIVERY_FAILED
+					|| status == OrderStatus.RETURNED_TO_SELLER) {
 				continue;
 			}
 

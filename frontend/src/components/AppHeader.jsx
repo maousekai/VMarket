@@ -199,9 +199,12 @@ export default function AppHeader() {
                       <Link role="menuitem" to="/profile/payments" onClick={() => setOpen(false)}>
                         Lịch sử giao dịch
                       </Link>
-                      <Link role="menuitem" to="/seller" onClick={() => setOpen(false)}>
-                        Kênh người bán
-                      </Link>
+                      {/* Shipper khong ban hang: an kenh nguoi ban (review PR 68). */}
+                      {!session.roles.includes('SHIPPER') && (
+                        <Link role="menuitem" to="/seller" onClick={() => setOpen(false)}>
+                          Kênh người bán
+                        </Link>
+                      )}
                       {session.roles.includes('ADMIN') && (
                         <Link role="menuitem" to="/admin" onClick={() => setOpen(false)}>
                           Khu vực quản trị

@@ -359,6 +359,18 @@ public class PaymentStore {
         }
     }
 
+    /**
+     * Don tra truoc bi hoan ve shop (RETURNED_TO_SELLER, review PR 68 lan 2 muc 4.7): tu dong tao
+     * yeu cau hoan tien. Don COD chua thu tien thi khong co gi de hoan.
+     */
+    @Transactional
+    public void returnedToSeller(String orderId) {
+        var found = payments.lockByOrderId(orderId);
+        if (found.isEmpty()) return;
+        var p = found.get();
+        if (p.getPaidAt() != null) refund(p, "Đơn trả trước bị hoàn về shop");
+    }
+
     private void scheduleCancellation(PaymentTransaction p) {
         p.setCancelPending(true);
         p.setCancelRequestToken(null);
@@ -648,6 +660,14 @@ public class PaymentStore {
         r.setCompletedAt(clock.instant());
         r.setConfirmedBy(admin);
         r.setTransferReference(reference);
+        // Bao nguoi mua "Da hoan tien" (notification-service).
+        payments.findById(r.getPaymentId())
+                .ifPresent(
+                        p ->
+                                outbox.add(
+                                        com.vmarket.events.EventType.PAYMENT_REFUNDED,
+                                        new com.vmarket.events.PaymentRefunded(
+                                                p.getOrderId(), r.getAmount(), r.getReason())));
         return r;
     }
 

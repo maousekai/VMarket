@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { validateAddress } from '../auth/validation'
 import AccountField from './AccountField'
 import Modal from './Modal'
@@ -13,6 +13,10 @@ import {
 } from '../services/api/userApi'
 import './account.css'
 import './accountForms.css'
+import './delivery.css'
+
+// Leaflet chi tai khi nguoi mua mo phan chon diem tren ban do.
+const LocationPicker = lazy(() => import('./LocationPicker'))
 
 const emptyValues = {
   recipientName: '',
@@ -22,6 +26,8 @@ const emptyValues = {
   province: DA_NANG_PROVINCE,
   note: '',
   makeDefault: 'no',
+  latitude: null,
+  longitude: null,
 }
 
 const valuesFrom = (address) => ({
@@ -32,6 +38,8 @@ const valuesFrom = (address) => ({
   province: DA_NANG_PROVINCE,
   note: address.note || '',
   makeDefault: address.isDefault ? 'yes' : 'no',
+  latitude: Number.isFinite(address.latitude) ? address.latitude : null,
+  longitude: Number.isFinite(address.longitude) ? address.longitude : null,
 })
 
 /**
@@ -46,6 +54,28 @@ export default function AddressFormDialog({ address, isFirst, onCancel, onSaved 
   // A retry of the same request reuses its key; any edit starts a new request.
   const attempt = useRef(null)
   const forcedDefault = isFirst || Boolean(address?.isDefault)
+  const [picking, setPicking] = useState(false)
+  const located = Number.isFinite(values.latitude) && Number.isFinite(values.longitude)
+
+  function setPoint(point) {
+    setValues((current) => ({
+      ...current,
+      latitude: point ? point.latitude : null,
+      longitude: point ? point.longitude : null,
+    }))
+  }
+
+  function useCurrentPosition() {
+    navigator.geolocation?.getCurrentPosition(
+      (position) =>
+        setPoint({
+          latitude: Number(position.coords.latitude.toFixed(6)),
+          longitude: Number(position.coords.longitude.toFixed(6)),
+        }),
+      () => setError('Không lấy được vị trí hiện tại. Hãy bấm chọn điểm trên bản đồ.'),
+      { enableHighAccuracy: true, timeout: 15000 },
+    )
+  }
 
   function onChange(event) {
     const { name, value } = event.target
@@ -150,6 +180,53 @@ export default function AddressFormDialog({ address, isFirst, onCancel, onSaved 
           <option value={DA_NANG_PROVINCE}>{DA_NANG_PROVINCE}</option>
         </AccountField>
         <AccountField label="Ghi chú" maxLength={255} {...field('note')} />
+        <div className="location-picker__field">
+          <span className="location-picker__label">Điểm giao trên bản đồ (không bắt buộc)</span>
+          <span className="account-field__hint">
+            {located
+              ? `Đã chọn: ${values.latitude}, ${values.longitude}`
+              : 'Giúp shipper chỉ đường chính xác tới nơi nhận.'}
+          </span>
+          <div className="location-picker__actions">
+            <button
+              type="button"
+              className="account-button account-button--secondary"
+              aria-expanded={picking}
+              disabled={saving}
+              onClick={() => setPicking((value) => !value)}
+            >
+              {picking ? 'Ẩn bản đồ' : 'Chọn điểm trên bản đồ'}
+            </button>
+            {picking && (
+              <button
+                type="button"
+                className="account-button account-button--secondary"
+                disabled={saving}
+                onClick={useCurrentPosition}
+              >
+                Dùng vị trí hiện tại
+              </button>
+            )}
+            {located && (
+              <button
+                type="button"
+                className="account-button account-button--secondary"
+                disabled={saving}
+                onClick={() => setPoint(null)}
+              >
+                Xoá điểm
+              </button>
+            )}
+          </div>
+          {picking && (
+            <Suspense fallback={<div className="delivery-map delivery-map--placeholder" />}>
+              <LocationPicker
+                value={located ? { latitude: values.latitude, longitude: values.longitude } : null}
+                onChange={setPoint}
+              />
+            </Suspense>
+          )}
+        </div>
         <AccountField
           as="select"
           label="Địa chỉ mặc định"

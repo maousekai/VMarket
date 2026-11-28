@@ -374,7 +374,7 @@ export default function CartPage() {
             </div>
             <div>
               <dt>Phí vận chuyển</dt>
-              <dd>Tính khi giao</dd>
+              <dd>Miễn phí</dd>
             </div>
           </dl>
           <div className="cart-summary__total">

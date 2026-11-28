@@ -80,6 +80,39 @@ class AddressApiTest {
 	}
 
 	@Test
+	void diaChiLuuToaDoDiemGiaoKhiChonTrenBanDo() throws Exception {
+		// Review PR 68 lan 2, muc 4.10: nguoi mua chon diem giao tren ban do.
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Đà Nẵng","ward":"Phường Hòa Cường",
+						 "streetAddress":"1 Bạch Đằng","latitude":16.0544,"longitude":108.2022}
+						"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.latitude").value(16.0544))
+				.andExpect(jsonPath("$.longitude").value(108.2022));
+		// Chi co mot toa do -> coi nhu chua chon diem.
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Đà Nẵng","ward":"Phường Hòa Cường",
+						 "streetAddress":"2 Bạch Đằng","latitude":16.0544}
+						"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.latitude").doesNotExist());
+		mockMvc.perform(post("/api/users/me/addresses")
+				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"recipientName":"An","phone":"0912345678","province":"Đà Nẵng","ward":"Phường Hòa Cường",
+						 "streetAddress":"3 Bạch Đằng","latitude":120,"longitude":108}
+						"""))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
 	void diaChiDauTien_tuDongThanhMacDinh() throws Exception {
 		mockMvc.perform(post("/api/users/me/addresses")
 				.header(HttpHeaders.AUTHORIZATION, tokenFor(USER_A))

@@ -58,6 +58,15 @@ public class InternalClients {
 		return get(auth, "/internal/users/{id}/contact", userId, UserContact.class);
 	}
 
+	/** Admin dang hoat dong (auth-service) de bao chuyen giao cho phan cong. */
+	public java.util.List<String> admins() {
+		var body = auth.get().uri("/internal/admins").retrieve().body(AdminDirectory.class);
+		return body == null || body.ids() == null ? java.util.List.of() : body.ids();
+	}
+
+	public record AdminDirectory(java.util.List<String> ids) {
+	}
+
 	public Optional<ShopOwnerInfo> shopOwner(String shopId) {
 		return get(shop, "/internal/shops/{id}/owner", shopId, ShopOwnerInfo.class);
 	}

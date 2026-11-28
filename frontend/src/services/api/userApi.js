@@ -58,7 +58,7 @@ export const setDefaultAddress = async (addressId, idempotencyKey) =>
 // The default flag is not part of the body (separate endpoint) and neither is the district,
 // which no longer exists in Da Nang since 01/07/2025.
 export function addressRequestBody(values) {
-  return {
+  const body = {
     recipientName: values.recipientName?.trim() || '',
     phone: values.phone?.trim() || '',
     province: values.province?.trim() || '',
@@ -66,6 +66,12 @@ export function addressRequestBody(values) {
     streetAddress: values.streetAddress?.trim() || '',
     note: values.note?.trim() || null,
   }
+  // Toa do diem giao di theo cap (review PR 68, muc 4.10); chua chon thi khong gui.
+  if (Number.isFinite(values.latitude) && Number.isFinite(values.longitude)) {
+    body.latitude = values.latitude
+    body.longitude = values.longitude
+  }
+  return body
 }
 
 // No Idempotency-Key here on purpose: a 504 PASSWORD_CHANGE_UNKNOWN must never be resent.

@@ -4,7 +4,12 @@ import Modal from '../components/Modal'
 import { OrderItemsList, OrderStatusBadge, ReturnStatusBadge } from '../components/OrderParts'
 import Pagination from '../components/Pagination'
 import { getApiError } from '../services/api/apiClient'
-import { DELIVERY_STATUS_LABELS, getDelivery, handoffOrder } from '../services/api/deliveryApi'
+import {
+  confirmReturnReceived,
+  DELIVERY_STATUS_LABELS,
+  getDelivery,
+  handoffOrder,
+} from '../services/api/deliveryApi'
 import {
   acceptReturn,
   confirmReturnReceipt,
@@ -48,7 +53,9 @@ const HANDOFF_STATUSES = ['PENDING', 'PROCESSING']
 function useDelivery(order, version) {
   const [delivery, setDelivery] = useState({ status: 'idle', data: null })
   const relevant =
-    (HANDOFF_STATUSES.includes(order.status) && order.shopConfirmed) || order.status === 'SHIPPED'
+    (HANDOFF_STATUSES.includes(order.status) && order.shopConfirmed) ||
+    order.status === 'SHIPPED' ||
+    order.status === 'DELIVERY_FAILED'
   useEffect(() => {
     if (!relevant) return undefined
     let current = true
@@ -62,13 +69,27 @@ function useDelivery(order, version) {
   return delivery
 }
 
+// Ton kho duoc giu bat dong bo sau khi xac nhan: delivery tu cho vai giay, het luot thi tra
+// ORDER_NOT_READY; khoa nut them mot luc roi cho thu lai (review PR 68 lan 3, muc 1.3).
+const HANDOFF_COOLDOWN_MS = 5000
+
 function SellerOrderCard({ order, onChanged }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [coolingDown, setCoolingDown] = useState(false)
+  useEffect(() => {
+    if (!coolingDown) return undefined
+    const timer = setTimeout(() => setCoolingDown(false), HANDOFF_COOLDOWN_MS)
+    return () => clearTimeout(timer)
+  }, [coolingDown])
   const [version, setVersion] = useState(0)
   const delivery = useDelivery(order, version)
   const handedOff = (delivery.data?.pickups || []).length > 0
   const deliveryStatus = delivery.data?.assignment?.status
+  // Hang hoan da ve shop: seller xac nhan "Da nhan lai hang" (review PR 68 lan 2, muc 4.5).
+  const awaitingReturnReceipt =
+    deliveryStatus === 'RETURN_DROPPED_OFF' &&
+    (delivery.data?.pickups || []).some((pickup) => !pickup.return_received_at)
 
   async function run(name, action, message) {
     setBusy(name)
@@ -78,7 +99,9 @@ function SellerOrderCard({ order, onChanged }) {
       setVersion((value) => value + 1)
       onChanged(message)
     } catch (failure) {
-      setError(getApiError(failure).message)
+      const apiError = getApiError(failure)
+      setError(apiError.message)
+      if (name === 'handoff' && apiError.code === 'ORDER_NOT_READY') setCoolingDown(true)
     } finally {
       setBusy('')
     }
@@ -138,27 +161,47 @@ function SellerOrderCard({ order, onChanged }) {
           {order.status === 'PENDING' && order.shopConfirmed && !handedOff && (
             <span className="seller-order__hint">Đã xác nhận</span>
           )}
-          {HANDOFF_STATUSES.includes(order.status) &&
-            order.shopConfirmed &&
-            delivery.status !== 'idle' &&
-            !handedOff && (
-              <button
-                type="button"
-                className="account-button account-button--secondary"
-                disabled={Boolean(busy)}
-                onClick={() =>
-                  run(
-                    'handoff',
-                    () => handoffOrder(order.id),
-                    `Đã bàn giao đơn ${shortOrderId(order.id)} cho đơn vị vận chuyển.`,
-                  )
-                }
-              >
-                {busy === 'handoff' ? 'Đang bàn giao…' : 'Bàn giao vận chuyển'}
-              </button>
-            )}
+          {/* Hien nut ngay khi shop da xac nhan (khoa trong luc kiem tra chuyen giao) thay vi
+              doi request xong moi hien - review PR 68. */}
+          {HANDOFF_STATUSES.includes(order.status) && order.shopConfirmed && !handedOff && (
+            <button
+              type="button"
+              className="account-button account-button--secondary"
+              disabled={Boolean(busy) || delivery.status === 'idle' || coolingDown}
+              aria-busy={delivery.status === 'idle' ? 'true' : undefined}
+              onClick={() =>
+                run(
+                  'handoff',
+                  () => handoffOrder(order.id),
+                  `Đã bàn giao đơn ${shortOrderId(order.id)} cho đơn vị vận chuyển.`,
+                )
+              }
+            >
+              {busy === 'handoff'
+                ? 'Đang bàn giao…'
+                : coolingDown
+                  ? 'Đang giữ hàng…'
+                  : 'Bàn giao vận chuyển'}
+            </button>
+          )}
           {handedOff && HANDOFF_STATUSES.includes(order.status) && (
             <span className="seller-order__hint">Đã bàn giao</span>
+          )}
+          {awaitingReturnReceipt && (
+            <button
+              type="button"
+              className="account-button"
+              disabled={Boolean(busy)}
+              onClick={() =>
+                run(
+                  'return',
+                  () => confirmReturnReceived(order.id),
+                  `Đã xác nhận nhận lại hàng hoàn của đơn ${shortOrderId(order.id)}.`,
+                )
+              }
+            >
+              {busy === 'return' ? 'Đang xác nhận…' : 'Đã nhận lại hàng'}
+            </button>
           )}
         </div>
       </footer>

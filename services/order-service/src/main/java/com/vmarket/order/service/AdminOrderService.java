@@ -68,6 +68,11 @@ public class AdminOrderService {
 		if (order.getStatus() == OrderStatus.COMPLETED) {
 			throw ApiException.conflict("ORDER_ALREADY_COMPLETED", "Đơn hàng đã hoàn tất, không thể huỷ");
 		}
+		// Don dang / da hoan hang di theo luong hoan cua giao hang, khong huy tay.
+		if (order.getStatus() == OrderStatus.DELIVERY_FAILED
+				|| order.getStatus() == OrderStatus.RETURNED_TO_SELLER) {
+			throw ApiException.conflict("ORDER_IN_RETURN", "Đơn đang hoàn về shop, không thể huỷ");
+		}
 
 		OrderStatus previous = order.getStatus();
 		order.setStatus(OrderStatus.CANCELLED);

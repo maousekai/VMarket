@@ -322,7 +322,7 @@ export default function CheckoutPage() {
             </div>
             <div>
               <dt>Phí giao hàng</dt>
-              <dd>Tính khi giao</dd>
+              <dd>Miễn phí</dd>
             </div>
           </dl>
           <div className="cart-summary__total">
