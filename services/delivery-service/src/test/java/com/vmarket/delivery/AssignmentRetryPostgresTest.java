@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Testcontainers(disabledWithoutDocker = true)
 class AssignmentRetryPostgresTest {
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine");
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
