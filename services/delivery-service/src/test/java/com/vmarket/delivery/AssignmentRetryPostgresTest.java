@@ -57,8 +57,8 @@ class AssignmentRetryPostgresTest {
                         "shippers")) jdbc.update("delete from " + table);
         jdbc.update(
                 """
-insert into shippers (id,provision_key,name,phone,province,district,active,created_at)
-values ('shipper','provision','Shipper','0900000000','da nang','hai chau',true,CURRENT_TIMESTAMP)
+insert into shippers (id,provision_key,name,phone,province,district,active,created_at,on_shift)
+values ('shipper','provision','Shipper','0900000000','da nang','hai chau',true,CURRENT_TIMESTAMP,true)
 """);
         jdbc.update(
                 """

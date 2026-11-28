@@ -25,5 +25,6 @@ app:
   tracking-listener: false
   delivery:
     internal-api-key: test-only-internal-api-key-0123456789-0123456789
+    stock-wait-millis: 0
   cors:
     allowed-origins: http://localhost:5173

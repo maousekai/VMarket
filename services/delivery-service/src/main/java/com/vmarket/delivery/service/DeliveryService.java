@@ -49,6 +49,7 @@ public class DeliveryService {
     private final PlatformTransactionManager transactions;
     private final ApplicationEventPublisher applicationEvents;
     private final Clock clock;
+    private final com.vmarket.delivery.config.DeliveryProperties properties;
 
     private final DeliveryRules rules = DeliveryRules.get();
 
@@ -131,6 +132,12 @@ public class DeliveryService {
 
     public List<Map<String, Object>> shippers(
             String actor, String province, String district, int page, int size) {
+        return shippers(actor, province, district, "", page, size);
+    }
+
+    public List<Map<String, Object>> shippers(
+            String actor, String province, String district, String shift, int page, int size) {
+        String shiftFilter = shift == null ? "" : shift;
         clients.admin(actor);
         // Ti le thanh cong = DELIVERED / (DELIVERED + RETURNED do loi shipper): don hoan vi khach
         // tu choi / sai dia chi khong tinh vao shipper (review PR 68, muc 4.11).
@@ -138,7 +145,7 @@ public class DeliveryService {
                 DeliveryRepository.lowercaseKeys(
                         jdbc.queryForList(
                                 """
-select s.id, s.name, s.phone, s.province, s.district, s.active,
+select s.id, s.name, s.phone, s.province, s.district, s.active, s.on_shift, s.shift_changed_at,
     count(d.id) as total_orders,
     coalesce(sum(case when d.status in ('ASSIGNED','PICKED_UP','IN_TRANSIT','FAILED','RETURNING')
         then 1 else 0 end),0) as active_orders,
@@ -153,13 +160,17 @@ select s.id, s.name, s.phone, s.province, s.district, s.active,
          else 0 end as success_rate_percent
 from shippers s left join delivery_assignments d on d.shipper_id=s.id
 where (?='' or s.province=?) and (?='' or s.district=?)
-group by s.id, s.name, s.phone, s.province, s.district, s.active
+    and (?='' or (?='on' and s.on_shift=true) or (?='off' and s.on_shift=false))
+group by s.id, s.name, s.phone, s.province, s.district, s.active, s.on_shift, s.shift_changed_at
 order by s.id limit ? offset ?
 """,
                                 area(province),
                                 area(province),
                                 area(district),
                                 area(district),
+                                shiftFilter,
+                                shiftFilter,
+                                shiftFilter,
                                 size,
                                 (long) page * size));
         // Mot request toi auth-service cho ca trang (khong goi tung dong).
@@ -243,6 +254,12 @@ order by s.id limit ? offset ?
                             jdbc.update(
                                     "update shippers set active=? where id=?", !locked, shipper);
                             if (!locked) return;
+                            // Khoa shipper thi tu ket thuc ca (review PR 68 lan 3, phan 2).
+                            jdbc.update(
+                                    "update shippers set on_shift=false, shift_changed_at=? where"
+                                            + " id=? and on_shift=true",
+                                    Timestamp.from(clock.instant()),
+                                    shipper);
                             for (String id :
                                     jdbc.queryForList(
                                             "select id from delivery_assignments where"
@@ -252,19 +269,7 @@ order by s.id limit ? offset ?
                                 Assignment a = repo.find(id, true);
                                 revoke(a, shipper);
                                 if (a.getStatus() == DeliveryStatus.ASSIGNED) {
-                                    a.setShipperId(null);
-                                    a.setStatus(DeliveryStatus.WAITING_ASSIGNMENT);
-                                    a.setVersion(a.getVersion() + 1);
-                                    a.setTrackingSequence(a.getTrackingSequence() + 1);
-                                    repo.save(a);
-                                    repo.history(a, actor, "Shipper bị khoá", shipper, false);
-                                    jdbc.update(
-                                            "update delivery_assignments set"
-                                                + " assignment_failure_notified=false,"
-                                                + " next_assignment_at=CURRENT_TIMESTAMP where"
-                                                + " id=?",
-                                            id);
-                                    tracking(a);
+                                    releaseToDispatch(a, actor, "Shipper bị khoá", shipper);
                                     released.add(id);
                                 } else if (a.getStatus().pickedUp()) {
                                     a.setNeedsAttention(true);
@@ -275,7 +280,164 @@ order by s.id limit ? offset ?
         for (String id : released) autoAssign(repo.find(id, false), actor);
     }
 
+    /** Chuyen chua lay hang quay ve "Cho phan cong" (khoa shipper / shipper ket thuc ca). */
+    private void releaseToDispatch(Assignment a, String actor, String note, String shipper) {
+        a.setShipperId(null);
+        a.setStatus(DeliveryStatus.WAITING_ASSIGNMENT);
+        a.setVersion(a.getVersion() + 1);
+        a.setTrackingSequence(a.getTrackingSequence() + 1);
+        repo.save(a);
+        repo.history(a, actor, note, shipper, false);
+        jdbc.update(
+                "update delivery_assignments set assignment_failure_notified=false,"
+                        + " next_assignment_at=CURRENT_TIMESTAMP where id=?",
+                a.getId());
+        tracking(a);
+    }
+
+    // ---------------------------------------------------------------- shift
+
+    private static final String PICKED_UP_SQL = "('PICKED_UP','IN_TRANSIT','FAILED','RETURNING')";
+
+    public Map<String, Object> shift(String actor) {
+        requireLocalShipper(actor);
+        return shiftView(actor);
+    }
+
+    private Map<String, Object> shiftView(String actor) {
+        Map<String, Object> s = repo.shipper(actor);
+        Map<String, Object> counts =
+                DeliveryRepository.lowercaseKeys(
+                                jdbc.queryForList(
+                                        "select coalesce(sum(case when status='ASSIGNED' then 1"
+                                                + " else 0 end),0) as unpicked, coalesce(sum(case"
+                                                + " when status in "
+                                                + PICKED_UP_SQL
+                                                + " then 1 else 0 end),0) as picked from"
+                                                + " delivery_assignments where shipper_id=?",
+                                        actor))
+                        .get(0);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("onShift", Boolean.TRUE.equals(s.get("on_shift")));
+        Object changed = s.get("shift_changed_at");
+        view.put("shiftChangedAt", changed instanceof Timestamp ts ? ts.toInstant() : changed);
+        view.put("unpickedTrips", ((Number) counts.get("unpicked")).intValue());
+        view.put("activeTrips", ((Number) counts.get("picked")).intValue());
+        return view;
+    }
+
+    /** Bat dau ca: duoc tu dong phan cong; chay lai phan cong cho cac chuyen dang cho trong khu. */
+    public Map<String, Object> startShift(String actor) {
+        requireActiveShipper(actor);
+        jdbc.update(
+                "update shippers set on_shift=true, shift_changed_at=? where id=? and"
+                        + " on_shift=false",
+                Timestamp.from(clock.instant()),
+                actor);
+        Map<String, Object> s = repo.shipper(actor);
+        String district = s.get("district") == null ? "" : (String) s.get("district");
+        for (String id :
+                jdbc.queryForList(
+                        "select id from delivery_assignments where status='WAITING_ASSIGNMENT'"
+                                + " and province=? and district is not null and (?='' or"
+                                + " district=?) order by created_at, id limit 50",
+                        String.class,
+                        s.get("province"),
+                        district,
+                        district)) {
+            autoAssign(repo.find(id, false), "system:shift-start");
+        }
+        return shiftView(actor);
+    }
+
+    /**
+     * Ket thuc ca: con chuyen da lay hang thi khong cho (SHIFT_HAS_ACTIVE_TRIPS); con chuyen chua
+     * lay hang thi can xac nhan, cac chuyen do quay ve cho phan cong cho nguoi khac.
+     */
+    public Map<String, Object> endShift(String actor, boolean releaseUnpicked) {
+        requireLocalShipper(actor);
+        List<String> released = new ArrayList<>();
+        tx().executeWithoutResult(
+                        ignored -> {
+                            jdbc.queryForList(
+                                    "select id from shippers where id=? for update",
+                                    String.class,
+                                    actor);
+                            Integer picked =
+                                    jdbc.queryForObject(
+                                            "select count(*) from delivery_assignments where"
+                                                    + " shipper_id=? and status in "
+                                                    + PICKED_UP_SQL,
+                                            Integer.class,
+                                            actor);
+                            if (picked != null && picked > 0)
+                                throw ApiException.conflict(
+                                        "SHIFT_HAS_ACTIVE_TRIPS",
+                                        "Còn "
+                                                + picked
+                                                + " chuyến đã lấy hàng; hãy giao xong hoặc trả"
+                                                + " hàng trước khi kết thúc ca");
+                            List<String> unpicked =
+                                    jdbc.queryForList(
+                                            "select id from delivery_assignments where"
+                                                    + " shipper_id=? and status='ASSIGNED'",
+                                            String.class,
+                                            actor);
+                            if (!unpicked.isEmpty() && !releaseUnpicked)
+                                throw ApiException.conflict(
+                                        "SHIFT_END_CONFIRM_REQUIRED",
+                                        "Còn "
+                                                + unpicked.size()
+                                                + " chuyến chưa lấy hàng sẽ chuyển cho shipper"
+                                                + " khác");
+                            for (String id : unpicked) {
+                                Assignment a = repo.find(id, true);
+                                if (a.getStatus() != DeliveryStatus.ASSIGNED) continue;
+                                revoke(a, actor);
+                                releaseToDispatch(a, actor, "Shipper kết thúc ca", actor);
+                                released.add(id);
+                            }
+                            jdbc.update(
+                                    "update shippers set on_shift=false, shift_changed_at=?"
+                                            + " where id=? and on_shift=true",
+                                    Timestamp.from(clock.instant()),
+                                    actor);
+                        });
+        for (String id : released) autoAssign(repo.find(id, false), "system:shift-end");
+        return shiftView(actor);
+    }
+
     // ---------------------------------------------------------------- handoff & assignment
+
+    static final String STOCK_PENDING_MESSAGE = "Đơn đang giữ hàng, thử lại sau vài giây";
+
+    /**
+     * Giu ton kho chay bat dong bo sau khi seller xac nhan: cho ngan roi moi claim, thay vi tra 409
+     * mo ho (review PR 68 lan 3, muc 1.3). Het luot cho van chua giu duoc thi bao ORDER_NOT_READY.
+     */
+    private JsonNode claimWhenStockReserved(String orderId, JsonNode snapshot) {
+        int attempts = Math.max(1, properties.getStockWaitAttempts());
+        for (int attempt = 1; ; attempt++) {
+            if (snapshot.path("stockReserved").asBoolean()) {
+                try {
+                    JsonNode claimed = clients.order(orderId, true);
+                    if (claimed.path("stockReserved").asBoolean()) return claimed;
+                } catch (ApiException ex) {
+                    if (!"STOCK_NOT_RESERVED".equals(ex.getCode())) throw ex;
+                }
+            }
+            if (attempt >= attempts
+                    || !Set.of("PENDING", "PROCESSING").contains(snapshot.path("status").asString()))
+                throw ApiException.conflict("ORDER_NOT_READY", STOCK_PENDING_MESSAGE);
+            try {
+                Thread.sleep(properties.getStockWaitMillis());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw ApiException.conflict("ORDER_NOT_READY", STOCK_PENDING_MESSAGE);
+            }
+            snapshot = clients.order(orderId, false);
+        }
+    }
 
     public Assignment handoff(String actor, String bearer, String orderId) {
         JsonNode shop = clients.shop(bearer);
@@ -291,9 +453,8 @@ order by s.id limit ? offset ?
                 && existing.get().getStatus() != DeliveryStatus.WAITING_ASSIGNMENT)
             return existing.get();
         // Claim is repeatable; the remote Order lock rejects cancelled/unpaid/unreserved orders.
-        snapshot = clients.order(orderId, true);
-        if (!snapshot.path("stockReserved").asBoolean()
-                || !Set.of("PENDING", "PROCESSING").contains(snapshot.path("status").asString())) {
+        snapshot = claimWhenStockReserved(orderId, snapshot);
+        if (!Set.of("PENDING", "PROCESSING").contains(snapshot.path("status").asString())) {
             throw ApiException.conflict("ORDER_NOT_READY", "Đơn chưa sẵn sàng giao");
         }
         if (snapshot.path("userId").asString().isBlank())
@@ -510,11 +671,18 @@ order by s.id limit ? offset ?
                                 throw ApiException.conflict(
                                         "AREA_MISMATCH", "Shipper không phụ trách khu vực này");
                             }
-                            if (mismatch
-                                    && (request.reason() == null || request.reason().isBlank())) {
+                            boolean noReason =
+                                    request.reason() == null || request.reason().isBlank();
+                            if (mismatch && noReason) {
                                 throw ApiException.badRequest(
                                         "ASSIGNMENT_REASON_REQUIRED",
                                         "Cần lý do khi gán shipper khác khu");
+                            }
+                            // Gan tay cho shipper ngoai ca duoc, nhung bat buoc ly do.
+                            if (!Boolean.TRUE.equals(s.get("on_shift")) && noReason) {
+                                throw ApiException.badRequest(
+                                        "SHIFT_REASON_REQUIRED",
+                                        "Cần lý do khi gán shipper đang ngoài ca");
                             }
                             fence(a, request.expectedVersion());
                             assign(a, shipper, actor, request.reason(), mismatch);
@@ -1014,6 +1182,47 @@ order by s.id limit ? offset ?
                             revokeBuyerIfHidden(a, previous);
                             tracking(a);
                             return a;
+                        });
+    }
+
+    /**
+     * Chuyen dang hoan ma shipper bi khoa (co "Can xu ly") khong con ai di tiep: admin xac nhan hang
+     * da ve shop, chuyen sang RETURN_DROPPED_OFF de seller xac nhan / tu dong dong (review PR 68
+     * lan 3, muc 1.4).
+     */
+    public Assignment adminReturnDroppedOff(
+            String actor, String id, DeliveryRequests.Return request) {
+        clients.admin(actor);
+        return tx().execute(
+                        ignored -> {
+                            Assignment a = repo.find(id, true);
+                            if (a.getStatus() == DeliveryStatus.RETURN_DROPPED_OFF
+                                    && a.getVersion() == request.expectedVersion() + 1) return a;
+                            fence(a, request.expectedVersion());
+                            if (a.getStatus() != DeliveryStatus.RETURNING)
+                                throw ApiException.conflict(
+                                        "INVALID_TRANSITION", "Chuyến không ở bước hoàn hàng");
+                            Instant now = clock.instant();
+                            for (Map<String, Object> h : repo.handoffs(a.getId())) {
+                                if (h.get("returned_at") == null)
+                                    repo.markHandoff(
+                                            a.getId(), (String) h.get("shop_id"), "returned_at", now);
+                            }
+                            if (a.getShipperId() != null) revoke(a, a.getShipperId());
+                            a.setStatus(DeliveryStatus.RETURN_DROPPED_OFF);
+                            a.setDroppedOffAt(now);
+                            a.setNeedsAttention(false);
+                            a.setVersion(a.getVersion() + 1);
+                            a.setTrackingSequence(a.getTrackingSequence() + 1);
+                            repo.save(a);
+                            repo.history(a, actor, request.reason());
+                            event(
+                                    a,
+                                    EventType.DELIVERY_STATUS_CHANGED,
+                                    new DeliveryStatusChanged(
+                                            a.getOrderId(), "RETURN_DROPPED_OFF", a.getVersion()));
+                            tracking(a);
+                            return repo.find(id, false);
                         });
     }
 

@@ -81,7 +81,7 @@ class DeliveryOutboxMigrationTest {
                         + " values ('a-empty', 'o-empty', 'b-1', 'WAITING_ASSIGNMENT', 1, 'COD', 0, 'da nang', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
         var flyway = Flyway.configure().dataSource(url, "sa", "").load();
         flyway.migrate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
         String pickup = jdbc.queryForObject("select pickup_snapshot from delivery_handoffs", String.class);
         assertThat(pickup).contains("Shop", "0901", "1 A").doesNotContain("999", "s@x.vn", "ownerId");
         assertThat(jdbc.queryForObject("select district from delivery_assignments where id='a-ward'", String.class))

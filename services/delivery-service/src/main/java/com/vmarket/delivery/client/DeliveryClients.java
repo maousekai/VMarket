@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -17,6 +18,11 @@ import java.util.Map;
 
 @Component
 public class DeliveryClients {
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+    /** Ma loi cua service nguon duoc giu nguyen de nghiep vu xu ly rieng (vd. cho giu ton kho). */
+    private static final java.util.Set<String> PASSTHROUGH_CODES =
+            java.util.Set.of("STOCK_NOT_RESERVED", "ORDER_NOT_READY", "ORDER_NOT_CONFIRMED");
+
     private final DeliveryProperties config;
     private final RestClient http;
 
@@ -36,6 +42,12 @@ public class DeliveryClients {
             return result;
         } catch (RestClientResponseException ex) {
             if (ex.getStatusCode().is4xxClientError()) {
+                String code = upstreamCode(ex);
+                if (PASSTHROUGH_CODES.contains(code))
+                    throw new ApiException(
+                            code,
+                            HttpStatus.valueOf(ex.getStatusCode().value()),
+                            "Service nguồn từ chối thao tác");
                 throw new ApiException(
                         "UPSTREAM_REJECTED",
                         HttpStatus.valueOf(ex.getStatusCode().value()),
@@ -47,6 +59,14 @@ public class DeliveryClients {
         } catch (Exception ex) {
             throw ApiException.unavailable(
                     "DEPENDENCY_UNAVAILABLE", "Không kết nối được service nguồn");
+        }
+    }
+
+    static String upstreamCode(RestClientResponseException ex) {
+        try {
+            return JSON.readTree(ex.getResponseBodyAsString()).path("error").path("code").asString("");
+        } catch (Exception ignored) {
+            return "";
         }
     }
 

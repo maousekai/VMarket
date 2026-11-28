@@ -9,6 +9,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.nullValue;
 
+import com.vmarket.delivery.exception.ApiException;
 import com.vmarket.delivery.client.DeliveryClients;
 import com.vmarket.delivery.domain.DeliveryStatus;
 import com.vmarket.delivery.repository.DeliveryRepository;
@@ -87,8 +88,8 @@ class DeliveryApiTest {
                         "shippers")) jdbc.update("delete from " + table);
         jdbc.update(
                 "insert into shippers (id, provision_key, name, phone, province, district, active,"
-                    + " created_at) values (?, ?, 'Shipper', '0901234567', 'da nang', 'hai chau',"
-                    + " true, CURRENT_TIMESTAMP)",
+                    + " created_at,on_shift) values (?, ?, 'Shipper', '0901234567', 'da nang', 'hai chau',"
+                    + " true, CURRENT_TIMESTAMP,true)",
                 SHIPPER,
                 "provision-1");
         when(clients.activeShipper(anyString())).thenReturn(true);
@@ -144,7 +145,7 @@ class DeliveryApiTest {
                         .getRequestURI();
         var matcher =
                 java.util.regex.Pattern.compile(
-                                "/assignments/([^/]+)/(status|assign|retry|return|pickups/[^/]+|returns/[^/]+)$")
+                                "/assignments/([^/]+)/(status|assign|retry|return|return-dropped-off|pickups/[^/]+|returns/[^/]+)$")
                         .matcher(uri);
         if (matcher.find()) {
             var node =
@@ -494,6 +495,39 @@ class DeliveryApiTest {
                 .andExpect(status().isConflict());
         assertThat(jdbc.queryForObject("select count(*) from delivery_assignments", Integer.class))
                 .isZero();
+    }
+
+    @Test
+    void handoffRightAfterConfirmationWaitsForTheStockReservation() throws Exception {
+        var pending = (tools.jackson.databind.node.ObjectNode) order("COD", false);
+        pending.put("stockReserved", false);
+        // Lan doc dau ton kho chua giu; claim lan dau bi order-service tu choi; lan sau thanh cong.
+        when(clients.order(ORDER, false)).thenReturn(pending, order("COD", false));
+        when(clients.order(ORDER, true))
+                .thenThrow(
+                        new ApiException(
+                                "STOCK_NOT_RESERVED",
+                                org.springframework.http.HttpStatus.CONFLICT,
+                                "x"))
+                .thenReturn(order("COD", false));
+        call(post("/api/delivery/seller/orders/{id}/handoff", ORDER), SELLER, "SELLER", null)
+                .andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select count(*) from delivery_assignments", Integer.class))
+                .isOne();
+    }
+
+    @Test
+    void handoffExplainsWhenTheStockIsStillBeingReserved() throws Exception {
+        var pending = (tools.jackson.databind.node.ObjectNode) order("COD", false);
+        pending.put("stockReserved", false);
+        when(clients.order(anyString(), anyBoolean())).thenReturn(pending);
+        call(post("/api/delivery/seller/orders/{id}/handoff", ORDER), SELLER, "SELLER", null)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ORDER_NOT_READY"))
+                .andExpect(
+                        jsonPath("$.error.message")
+                                .value("Đơn đang giữ hàng, thử lại sau vài giây"));
+        verify(clients, never()).order(ORDER, true);
     }
 
     @Test
@@ -847,9 +881,9 @@ class DeliveryApiTest {
                 .andExpect(jsonPath("$[0].needs_attention").value(true));
         jdbc.update(
                 "insert into shippers"
-                    + " (id,provision_key,name,phone,province,district,active,created_at) values"
+                    + " (id,provision_key,name,phone,province,district,active,created_at,on_shift) values"
                     + " ('shipper-2','provision-2','Backup','0900000000','da nang','hai"
-                    + " chau',true,CURRENT_TIMESTAMP)");
+                    + " chau',true,CURRENT_TIMESTAMP,true)");
         // Hang da roi shop: khong doi shipper, chi chuyen hoan hang.
         call(
                         post("/api/delivery/admin/assignments/{id}/assign", id),
@@ -871,14 +905,193 @@ class DeliveryApiTest {
                 .andExpect(status().isForbidden());
     }
 
+    private void returningTrip(String id) throws Exception {
+        inTransit(id);
+        call(
+                        put("/api/delivery/shipper/assignments/{id}/status", id),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"status\":\"FAILED\",\"reasonCode\":\"CUSTOMER_REFUSED\"}")
+                .andExpect(status().isOk());
+        assertThat(repo.find(id, false).getStatus()).isEqualTo(DeliveryStatus.RETURNING);
+    }
+
+    @Test
+    void adminUnblocksAReturnStuckWithALockedShipper() throws Exception {
+        String id = handoff();
+        returningTrip(id);
+        call(
+                        put("/api/delivery/admin/shippers/{id}/lock", SHIPPER),
+                        "admin",
+                        "ADMIN",
+                        "{\"locked\":true}")
+                .andExpect(status().isOk());
+        assertThat(repo.find(id, false).isNeedsAttention()).isTrue();
+        call(
+                        post("/api/delivery/admin/assignments/{id}/return-dropped-off", id),
+                        "admin",
+                        "ADMIN",
+                        "{}")
+                .andExpect(status().isBadRequest());
+        call(
+                        post("/api/delivery/admin/assignments/{id}/return-dropped-off", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"reason\":\"Kho xác nhận hàng đã về shop\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RETURN_DROPPED_OFF"));
+        var trip = repo.find(id, false);
+        assertThat(trip.isNeedsAttention()).isFalse();
+        assertThat(trip.getDroppedOffAt()).isNotNull();
+        assertThat(repo.handoffs(id)).allSatisfy(h -> assertThat(h.get("returned_at")).isNotNull());
+        // Seller xac nhan nhu luong binh thuong.
+        call(post("/api/delivery/seller/orders/{id}/return-received", ORDER), SELLER, "SELLER", null)
+                .andExpect(status().isOk());
+        assertThat(repo.find(id, false).getStatus()).isEqualTo(DeliveryStatus.RETURNED);
+    }
+
+    @Test
+    void adminDropOffOnlyAppliesToReturningTrips() throws Exception {
+        String id = handoff();
+        inTransit(id);
+        call(
+                        post("/api/delivery/admin/assignments/{id}/return-dropped-off", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"reason\":\"Nhầm\"}")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("INVALID_TRANSITION"));
+    }
+
+    // ------------------------------------------------------------ ca lam viec (review lan 3)
+
+    private void offShift(String shipper) {
+        jdbc.update("update shippers set on_shift=false where id=?", shipper);
+    }
+
+    private void insertBackup(boolean onShift) {
+        jdbc.update(
+                "insert into shippers"
+                    + " (id,provision_key,name,phone,province,district,active,created_at,on_shift)"
+                    + " values ('shipper-2','provision-2','Backup','0900000000','da nang','hai"
+                    + " chau',true,CURRENT_TIMESTAMP,?)",
+                onShift);
+        when(clients.activeShipper("shipper-2")).thenReturn(true);
+    }
+
+    @Test
+    void autoAssignmentOnlyPicksShippersOnShiftAndStartingAShiftPicksUpWaitingTrips()
+            throws Exception {
+        offShift(SHIPPER);
+        String id = handoff("WAITING_ASSIGNMENT");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select assignment_failure_notified from delivery_assignments"
+                                        + " where id=?",
+                                Boolean.class,
+                                id))
+                .isTrue();
+        call(get("/api/delivery/shipper/shift"), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onShift").value(false));
+        call(post("/api/delivery/shipper/shift/start"), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onShift").value(true))
+                .andExpect(jsonPath("$.unpickedTrips").value(1));
+        var trip = repo.find(id, false);
+        assertThat(trip.getStatus()).isEqualTo(DeliveryStatus.ASSIGNED);
+        assertThat(trip.getShipperId()).isEqualTo(SHIPPER);
+    }
+
+    @Test
+    void endingAShiftWithCargoIsRefused() throws Exception {
+        String id = handoff();
+        state(id, "PICKED_UP");
+        call(post("/api/delivery/shipper/shift/end"), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("SHIFT_HAS_ACTIVE_TRIPS"));
+        assertThat(
+                        jdbc.queryForObject(
+                                "select on_shift from shippers where id=?", Boolean.class, SHIPPER))
+                .isTrue();
+    }
+
+    @Test
+    void endingAShiftAsksBeforeHandingUnpickedTripsToSomeoneElse() throws Exception {
+        String id = handoff();
+        insertBackup(true);
+        call(post("/api/delivery/shipper/shift/end"), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("SHIFT_END_CONFIRM_REQUIRED"));
+        assertThat(repo.find(id, false).getShipperId()).isEqualTo(SHIPPER);
+        call(
+                        post("/api/delivery/shipper/shift/end"),
+                        SHIPPER,
+                        "SHIPPER",
+                        "{\"releaseUnpicked\":true}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onShift").value(false))
+                .andExpect(jsonPath("$.unpickedTrips").value(0));
+        var trip = repo.find(id, false);
+        assertThat(trip.getStatus()).isEqualTo(DeliveryStatus.ASSIGNED);
+        assertThat(trip.getShipperId()).isEqualTo("shipper-2");
+    }
+
+    @Test
+    void endingAShiftWithoutTripsJustGoesOffShift() throws Exception {
+        call(post("/api/delivery/shipper/shift/end"), SHIPPER, "SHIPPER", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.onShift").value(false));
+    }
+
+    @Test
+    void manualAssignmentToAnOffShiftShipperNeedsAReason() throws Exception {
+        offShift(SHIPPER);
+        String id = handoff("WAITING_ASSIGNMENT");
+        call(
+                        post("/api/delivery/admin/assignments/{id}/assign", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"shipperId\":\"" + SHIPPER + "\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("SHIFT_REASON_REQUIRED"));
+        call(
+                        post("/api/delivery/admin/assignments/{id}/assign", id),
+                        "admin",
+                        "ADMIN",
+                        "{\"shipperId\":\"" + SHIPPER + "\",\"reason\":\"Gọi điện đã nhận\"}")
+                .andExpect(status().isOk());
+        assertThat(repo.find(id, false).getShipperId()).isEqualTo(SHIPPER);
+    }
+
+    @Test
+    void lockingAShipperEndsTheShiftAndAdminCanFilterByShift() throws Exception {
+        insertBackup(false);
+        call(get("/api/delivery/admin/shippers?shift=on"), "admin", "ADMIN", null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(SHIPPER))
+                .andExpect(jsonPath("$[0].on_shift").value(true));
+        call(
+                        put("/api/delivery/admin/shippers/{id}/lock", SHIPPER),
+                        "admin",
+                        "ADMIN",
+                        "{\"locked\":true}")
+                .andExpect(status().isOk());
+        call(get("/api/delivery/admin/shippers?shift=off"), "admin", "ADMIN", null)
+                .andExpect(jsonPath("$.length()").value(2));
+        call(get("/api/delivery/admin/shippers?shift=bogus"), "admin", "ADMIN", null)
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void lockingShipperReturnsNotPickedUpTripToDispatchAndReassignsIt() throws Exception {
         String id = handoff("ASSIGNED");
         jdbc.update(
                 "insert into shippers"
-                    + " (id,provision_key,name,phone,province,district,active,created_at) values"
+                    + " (id,provision_key,name,phone,province,district,active,created_at,on_shift) values"
                     + " ('shipper-2','provision-2','Backup','0900000000','da nang','hai"
-                    + " chau',true,CURRENT_TIMESTAMP)");
+                    + " chau',true,CURRENT_TIMESTAMP,true)");
         call(
                         put("/api/delivery/admin/shippers/{id}/lock", SHIPPER),
                         "admin",
@@ -1202,8 +1415,8 @@ class DeliveryApiTest {
         String id = handoff("WAITING_ASSIGNMENT");
         jdbc.update(
                 "insert into shippers (id, provision_key, name, phone, province, district, active,"
-                    + " created_at) values ('shipper-2','provision-2','Second','0900000000','da"
-                    + " nang','hai chau',true,CURRENT_TIMESTAMP)");
+                    + " created_at,on_shift) values ('shipper-2','provision-2','Second','0900000000','da"
+                    + " nang','hai chau',true,CURRENT_TIMESTAMP,true)");
         CountDownLatch checking = new CountDownLatch(1), release = new CountDownLatch(1);
         when(clients.activeShipper(SHIPPER))
                 .thenAnswer(
@@ -1461,8 +1674,8 @@ class DeliveryApiTest {
     void donKhongCoQuanHuyen_ganShipperDungKhuCuaPhuong() throws Exception {
         String shipper2 = "shipper-2";
         jdbc.update(
-                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
-                        + " values (?, 'provision-2', 'Shipper 2', '0907654321', 'da nang', 'son tra', true, CURRENT_TIMESTAMP)",
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at,on_shift)"
+                        + " values (?, 'provision-2', 'Shipper 2', '0907654321', 'da nang', 'son tra', true, CURRENT_TIMESTAMP,true)",
                 shipper2);
         when(clients.activeShipper(shipper2)).thenReturn(true);
 
@@ -1544,8 +1757,8 @@ class DeliveryApiTest {
     void locShipperTheoTinhThanh_khiKhongCoQuanHuyen_traVeTatCaShipperTrongTinh() throws Exception {
         String shipperNoDistrict = "shipper-no-district";
         jdbc.update(
-                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
-                        + " values (?, 'provision-nd', 'Shipper ND', '0901111111', 'da nang', null, true, CURRENT_TIMESTAMP)",
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at,on_shift)"
+                        + " values (?, 'provision-nd', 'Shipper ND', '0901111111', 'da nang', null, true, CURRENT_TIMESTAMP,true)",
                 shipperNoDistrict);
 
         String shipperHanoi = "shipper-hanoi";
@@ -1570,8 +1783,8 @@ class DeliveryApiTest {
     void adminGanShipper_cungTinhKhongCoQuanHuyen_khongCanLyDoVaKhongLoiAreaMismatch() throws Exception {
         String shipperNoDistrict = "shipper-free";
         jdbc.update(
-                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
-                        + " values (?, 'provision-free', 'Shipper Free', '0903333333', 'da nang', null, true, CURRENT_TIMESTAMP)",
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at,on_shift)"
+                        + " values (?, 'provision-free', 'Shipper Free', '0903333333', 'da nang', null, true, CURRENT_TIMESTAMP,true)",
                 shipperNoDistrict);
         when(clients.activeShipper(shipperNoDistrict)).thenReturn(true);
 
@@ -1592,8 +1805,8 @@ class DeliveryApiTest {
     void adminGanShipper_khacTinh_duKhongCoQuanHuyen_vanYeuCauOverrideAreaVaLyDo() throws Exception {
         String shipperHanoi = "shipper-hn-free";
         jdbc.update(
-                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
-                        + " values (?, 'provision-hn-free', 'Shipper HN', '0904444444', 'ha noi', null, true, CURRENT_TIMESTAMP)",
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at,on_shift)"
+                        + " values (?, 'provision-hn-free', 'Shipper HN', '0904444444', 'ha noi', null, true, CURRENT_TIMESTAMP,true)",
                 shipperHanoi);
         when(clients.activeShipper(shipperHanoi)).thenReturn(true);
 
@@ -1642,8 +1855,8 @@ class DeliveryApiTest {
     @Test
     void ganShipperKhacKhu_batBuocLyDo() throws Exception {
         jdbc.update(
-                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
-                        + " values ('shipper-st', 'provision-st', 'Son Tra', '0906666666', 'da nang', 'son tra', true, CURRENT_TIMESTAMP)");
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at,on_shift)"
+                        + " values ('shipper-st', 'provision-st', 'Son Tra', '0906666666', 'da nang', 'son tra', true, CURRENT_TIMESTAMP,true)");
         when(clients.activeShipper("shipper-st")).thenReturn(true);
         String id = handoff("ASSIGNED");
         call(
@@ -1665,8 +1878,8 @@ class DeliveryApiTest {
     void donCoQuanHuyen_uuTienShipperChuyenQuanTruocShipperToanTinh() throws Exception {
         String shipperToanTinh = "shipper-toan-tinh";
         jdbc.update(
-                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at)"
-                        + " values (?, 'provision-tt', 'Shipper TT', '0905555555', 'da nang', null, true, CURRENT_TIMESTAMP)",
+                "insert into shippers (id, provision_key, name, phone, province, district, active, created_at,on_shift)"
+                        + " values (?, 'provision-tt', 'Shipper TT', '0905555555', 'da nang', null, true, CURRENT_TIMESTAMP,true)",
                 shipperToanTinh);
         when(clients.activeShipper(shipperToanTinh)).thenReturn(true);
 

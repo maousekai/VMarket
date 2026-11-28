@@ -39,6 +39,13 @@ public final class DeliveryRequests {
 
     public record Lock(@NotNull Boolean locked) {}
 
+    /** Ket thuc ca: releaseUnpicked=true xac nhan chuyen chua lay hang quay ve cho phan cong. */
+    public record ShiftEnd(Boolean releaseUnpicked) {
+        public boolean confirmed() {
+            return Boolean.TRUE.equals(releaseUnpicked);
+        }
+    }
+
     /**
      * @param reasonCode ma ly do chuan khi FAILED (DeliveryRules.failureReasons)
      * @param reason ghi chu noi bo cua shipper (bat buoc voi OTHER), nguoi mua khong thay

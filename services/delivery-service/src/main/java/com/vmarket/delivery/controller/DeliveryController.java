@@ -41,9 +41,10 @@ public class DeliveryController {
             Authentication auth,
             @RequestParam(defaultValue = "") String province,
             @RequestParam(defaultValue = "") String district,
+            @RequestParam(defaultValue = "") @Pattern(regexp = "|on|off") String shift,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return service.shippers(auth.getName(), province, district, page, size);
+        return service.shippers(auth.getName(), province, district, shift, page, size);
     }
 
     @PutMapping("/admin/shippers/{id}/lock")
@@ -95,6 +96,30 @@ public class DeliveryController {
     public Assignment returnFailed(
             Authentication auth, @PathVariable String id, @Valid @RequestBody Return body) {
         return service.returnFailed(auth.getName(), id, body);
+    }
+
+    /** Chuyen dang hoan bi ket (shipper bi khoa): admin xac nhan hang da ve shop. */
+    @PostMapping("/admin/assignments/{id}/return-dropped-off")
+    public Assignment returnDroppedOff(
+            Authentication auth, @PathVariable String id, @Valid @RequestBody Return body) {
+        return service.adminReturnDroppedOff(auth.getName(), id, body);
+    }
+
+    /** Ca lam viec (review PR 68 lan 3, phan 2). */
+    @GetMapping("/shipper/shift")
+    public Map<String, Object> shift(Authentication auth) {
+        return service.shift(auth.getName());
+    }
+
+    @PostMapping("/shipper/shift/start")
+    public Map<String, Object> startShift(Authentication auth) {
+        return service.startShift(auth.getName());
+    }
+
+    @PostMapping("/shipper/shift/end")
+    public Map<String, Object> endShift(
+            Authentication auth, @RequestBody(required = false) ShiftEnd body) {
+        return service.endShift(auth.getName(), body != null && body.confirmed());
     }
 
     /**
