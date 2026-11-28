@@ -28,5 +28,11 @@ public enum NotificationType {
 	/** Buyer: yêu cầu trả hàng đã có kết quả. */
 	RETURN_RESOLVED,
 	/** Seller: người mua gửi yêu cầu trả hàng, cần phản hồi trong 48 giờ (FR-ORD-07). */
-	RETURN_REQUESTED
+	RETURN_REQUESTED,
+	/** Buyer: khoản hoàn tiền đã được chuyển (PaymentRefunded). */
+	PAYMENT_REFUNDED,
+	/** Seller: shipper đã trả hàng hoàn về shop, cần xác nhận đã nhận lại. */
+	RETURN_DROPPED_OFF,
+	/** Admin: tự động phân công giao hàng thất bại, cần phân công tay. */
+	DELIVERY_NEEDS_DISPATCH
 }
