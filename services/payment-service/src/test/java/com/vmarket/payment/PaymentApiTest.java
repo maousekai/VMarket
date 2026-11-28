@@ -408,6 +408,35 @@ class PaymentApiTest {
     }
 
     @Test
+    void prepaidOrderReturnedToSellerIsRefundedOnceAndConfirmationNotifiesBuyer() throws Exception {
+        Long id = create();
+        ipnOk(data(id));
+        events.deleteAll();
+        // Review PR 68 lan 2, muc 4.7: hang hoan ve shop -> tu dong hoan tien don tra truoc.
+        store.returnedToSeller(ORDER);
+        store.returnedToSeller(ORDER);
+        assertThat(refunds.count()).isEqualTo(1);
+        String refundId = refunds.findByPaymentId(id).orElseThrow().getId();
+        mvc.perform(
+                        put("/api/payments/admin/refunds/" + refundId + "/confirm")
+                                .header("Authorization", token("admin", "ADMIN"))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"transferReference\":\"bank-ref-1\"}"))
+                .andExpect(status().isOk());
+        assertThat(events.findAll())
+                .extracting(OutboxEvent::getEventType)
+                .containsExactly("PaymentRefunded");
+        assertThat(events.findAll().get(0).getPayload()).contains(ORDER);
+    }
+
+    @Test
+    void unpaidOrderReturnedToSellerHasNothingToRefund() throws Exception {
+        create();
+        store.returnedToSeller(ORDER);
+        assertThat(refunds.count()).isZero();
+    }
+
+    @Test
     void manualRefundIsAdminOnlyAndAudited() throws Exception {
         Long id = create();
         var data = data(id);

@@ -15,6 +15,12 @@ npx expo start                  # quét QR bằng Expo Go, hoặc nhấn a để
 Backend: `docker compose up -d` ở thư mục gốc rồi chạy gateway + auth + delivery (`scripts\vmarket.cmd core`,
 `scripts\vmarket.cmd service delivery-service`).
 
+Theo dõi đơn trên app lấy trạng thái và vé qua API Gateway, rồi kết nối WebSocket qua web VMarket
+(nginx hoặc Vite proxy). Đặt `EXPO_PUBLIC_WEB_URL` thành URL mà thiết bị truy cập được và cho phép
+origin tương ứng trong `CORS_ALLOWED_ORIGINS` của delivery-service. Khi proxy WebSocket ở host riêng,
+dùng `EXPO_PUBLIC_DELIVERY_WS_ORIGIN`. Một URL WebSocket tuyệt đối do delivery-service trả về được
+ưu tiên. Bản phát hành dùng HTTPS và WSS.
+
 > **GPS chạy nền** cần bản build thật (development build / APK): Expo Go không hỗ trợ background
 > location. Trong Expo Go app vẫn gửi GPS khi đang mở.
 

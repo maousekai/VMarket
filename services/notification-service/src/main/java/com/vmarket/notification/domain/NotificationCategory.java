@@ -9,9 +9,10 @@ import java.util.Set;
 public enum NotificationCategory {
 	ORDER("Đơn hàng & giao hàng", EnumSet.of(NotificationType.ORDER_PLACED, NotificationType.NEW_ORDER,
 			NotificationType.ORDER_STATUS_CHANGED, NotificationType.ORDER_CANCELLED, NotificationType.ORDER_DELIVERED,
-			NotificationType.DELIVERY_ASSIGNED, NotificationType.DELIVERY_FAILED, NotificationType.RETURN_REQUESTED)),
+			NotificationType.DELIVERY_ASSIGNED, NotificationType.DELIVERY_FAILED, NotificationType.RETURN_REQUESTED,
+			NotificationType.RETURN_DROPPED_OFF, NotificationType.DELIVERY_NEEDS_DISPATCH)),
 	PAYMENT("Thanh toán & hoàn tiền", EnumSet.of(NotificationType.PAYMENT_SUCCEEDED,
-			NotificationType.PAYMENT_FAILED, NotificationType.RETURN_RESOLVED)),
+			NotificationType.PAYMENT_FAILED, NotificationType.RETURN_RESOLVED, NotificationType.PAYMENT_REFUNDED)),
 	SHOP("Gian hàng & sản phẩm", EnumSet.of(NotificationType.SHOP_APPROVED, NotificationType.SHOP_REINSTATED,
 			NotificationType.SHOP_SUSPENDED, NotificationType.PRODUCT_REMOVED, NotificationType.PRODUCT_RESTORED));
 

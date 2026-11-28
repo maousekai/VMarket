@@ -28,7 +28,8 @@ public class OrderStatusChangedInventoryConsumer implements EventConsumer<OrderS
 	@Override
 	public void handle(OrderStatusChanged payload, EventEnvelope envelope) {
 		String status = normalize(payload.status());
-		if ("CANCELLED".equals(status)) {
+		// Hang hoan ve shop (RETURNED_TO_SELLER, review PR 68 lan 2) cung cong lai ton kho nhu huy don.
+		if ("CANCELLED".equals(status) || "RETURNED_TO_SELLER".equals(status)) {
 			try {
 				inventoryService.releaseOrDefer(payload.orderId());
 			} catch (DuplicateKeyException ex) {

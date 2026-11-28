@@ -55,5 +55,20 @@ public record AddressRequest(
 
 		@Schema(example = "Gọi trước khi giao")
 		@Size(max = 255, message = "Ghi chú tối đa 255 ký tự")
-		String note) {
+		String note,
+
+		@Schema(example = "16.0678", description = "Vĩ độ điểm giao người mua chọn trên bản đồ (không bắt buộc)")
+		@jakarta.validation.constraints.DecimalMin(value = "-90", message = "Vĩ độ không hợp lệ")
+		@jakarta.validation.constraints.DecimalMax(value = "90", message = "Vĩ độ không hợp lệ")
+		Double latitude,
+
+		@Schema(example = "108.2208", description = "Kinh độ điểm giao (không bắt buộc, đi cùng vĩ độ)")
+		@jakarta.validation.constraints.DecimalMin(value = "-180", message = "Kinh độ không hợp lệ")
+		@jakarta.validation.constraints.DecimalMax(value = "180", message = "Kinh độ không hợp lệ")
+		Double longitude) {
+
+	public AddressRequest(String recipientName, String phone, String province, String district, String ward,
+			String streetAddress, String note) {
+		this(recipientName, phone, province, district, ward, streetAddress, note, null, null);
+	}
 }

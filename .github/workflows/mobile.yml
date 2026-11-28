@@ -3,10 +3,10 @@ name: mobile
 on:
   push:
     branches: [dev, release, product]
-    paths: ['mobile/**', '.github/workflows/mobile.yml']
+    paths: ['mobile/**', 'shared/delivery/**', '.github/workflows/mobile.yml']
   pull_request:
-    branches: [dev, release, product]
-    paths: ['mobile/**', '.github/workflows/mobile.yml']
+    branches: [dev, release, product, PBL6-33-delivery-ui]
+    paths: ['mobile/**', 'shared/delivery/**', '.github/workflows/mobile.yml']
   workflow_dispatch:
 
 permissions:

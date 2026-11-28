@@ -1,9 +1,9 @@
-import { Linking, StyleSheet, Text } from 'react-native'
+import { Link } from 'expo-router'
+import { StyleSheet, Text } from 'react-native'
 import { listBuyerOrders } from '../../api/buyerApi'
 import { formatMoney, shortOrderId } from '../../api/deliveryApi'
 import BuyerList from '../../buyer/BuyerList'
-import { Badge, Button, Card } from '../../components/ui'
-import { WEB_URL } from '../../config'
+import { Badge, Card } from '../../components/ui'
 import { colors } from '../../theme'
 
 const LABELS = {
@@ -14,8 +14,8 @@ const LABELS = {
   DELIVERED: 'Đã giao',
   COMPLETED: 'Hoàn thành',
   CANCELLED: 'Đã huỷ',
-  DELIVERY_FAILED: 'Đang hoàn hàng',
-  RETURNED_TO_SELLER: 'Đã hoàn hàng về shop',
+  DELIVERY_FAILED: 'Giao không thành công, đang hoàn về shop',
+  RETURNED_TO_SELLER: 'Đã hoàn trả cho shop',
 }
 
 const fetchOrders = async (_page, signal) => ({
@@ -31,17 +31,12 @@ function renderOrder({ item }) {
       {item.totalAmount != null && (
         <Text style={styles.value}>{formatMoney(item.totalAmount)}</Text>
       )}
-      {WEB_URL && (
-        <Button
-          title="Xem đơn trên web"
-          variant="secondary"
-          onPress={() =>
-            Linking.openURL(`${WEB_URL}/profile/orders/${encodeURIComponent(item.id)}`).catch(
-              () => {},
-            )
-          }
-        />
-      )}
+      <Link
+        href={{ pathname: '/(buyer)/delivery/[orderId]', params: { orderId: item.id } }}
+        style={styles.link}
+      >
+        Theo dõi giao hàng
+      </Link>
     </Card>
   )
 }
@@ -60,4 +55,5 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   title: { color: colors.text, fontWeight: '700', fontSize: 16 },
   value: { color: colors.text },
+  link: { fontWeight: '600', color: colors.primary, paddingVertical: 8 },
 })

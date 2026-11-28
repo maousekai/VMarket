@@ -1,22 +1,27 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native'
+import { Alert } from 'react-native'
 import * as Location from 'expo-location'
 import * as SecureStore from 'expo-secure-store'
 import * as TaskManager from 'expo-task-manager'
 import AssignmentsScreen from './AssignmentsScreen'
 import { resetThrottleForTests } from './locationTracking'
 import {
+  confirmPickup,
+  confirmReturn,
   listMyAssignments,
   retryAssignment,
-  sendLocation,
+  sendLocations,
   updateAssignmentStatus,
 } from '../api/deliveryApi'
 
 jest.mock('../api/deliveryApi', () => ({
   ...jest.requireActual('../api/deliveryApi'),
+  confirmPickup: jest.fn(),
+  confirmReturn: jest.fn(),
   listMyAssignments: jest.fn(),
   updateAssignmentStatus: jest.fn(),
   retryAssignment: jest.fn(),
-  sendLocation: jest.fn(async () => ({})),
+  sendLocations: jest.fn(async () => ({})),
 }))
 
 const trip = (overrides = {}) => ({
@@ -27,12 +32,8 @@ const trip = (overrides = {}) => ({
   version: 3,
   paymentMethod: 'COD',
   codAmount: 150000,
-  orderSnapshot: JSON.stringify({
-    recipientName: 'Nguyễn Văn An',
-    phone: '0905123456',
-    streetAddress: '1 Bạch Đằng',
-    province: 'Đà Nẵng',
-  }),
+  recipient: { name: 'Nguyễn Văn An', phone: '0905123456', address: '1 Bạch Đằng, Đà Nẵng' },
+  pickups: [{ shop_id: 'shop-1', name: 'Gian hàng A' }],
   ...overrides,
 })
 
@@ -40,7 +41,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   SecureStore.__store.clear()
   resetThrottleForTests()
-  sendLocation.mockResolvedValue({})
+  listMyAssignments.mockReset()
+  sendLocations.mockResolvedValue({ results: [{ assignmentId: 'a1', result: 'OK' }] })
 })
 
 /** watchPositionAsync gia: phat ngay mot diem GPS. */
@@ -58,16 +60,30 @@ it('lists the trip with recipient, address and COD', async () => {
   expect(screen.getByText(/COD/)).toBeTruthy()
 })
 
-it('advances the trip with the current version', async () => {
-  listMyAssignments.mockResolvedValue([trip()])
-  updateAssignmentStatus.mockResolvedValue(trip({ status: 'PICKED_UP', version: 4 }))
+it('confirms shop pickups in order with the latest returned version', async () => {
+  const shops = [
+    { shop_id: 'shop-1', name: 'Gian hàng A' },
+    { shop_id: 'shop-2', name: 'Gian hàng B' },
+  ]
+  listMyAssignments.mockResolvedValue([trip({ pickups: shops })])
+  confirmPickup
+    .mockResolvedValueOnce(
+      trip({
+        pickups: [{ ...shops[0], picked_up_at: '2026-11-27T10:00:00Z' }, shops[1]],
+        version: 4,
+      }),
+    )
+    .mockResolvedValueOnce(trip({ status: 'PICKED_UP', version: 5 }))
   await render(<AssignmentsScreen />)
-  await fireEvent.press(await screen.findByText('Đã lấy hàng'))
+  await fireEvent.press((await screen.findAllByText('Đã lấy hàng ở shop này'))[0])
+  await waitFor(() => expect(screen.getAllByText('Đã lấy hàng ở shop này')).toHaveLength(1))
+  expect(screen.queryByText('Bắt đầu giao')).toBeNull()
+  await fireEvent.press(screen.getByText('Đã lấy hàng ở shop này'))
   expect(await screen.findByText('Bắt đầu giao')).toBeTruthy()
-  expect(updateAssignmentStatus).toHaveBeenCalledWith('a1', {
-    status: 'PICKED_UP',
-    expectedVersion: 3,
-  })
+  expect(confirmPickup.mock.calls).toEqual([
+    ['a1', 'shop-1', 3],
+    ['a1', 'shop-2', 4],
+  ])
 })
 
 it('confirms delivery only with the exact COD amount', async () => {
@@ -89,20 +105,58 @@ it('confirms delivery only with the exact COD amount', async () => {
   )
 })
 
-it('requires a reason to report a failed delivery', async () => {
+it('requires a note for Other and submits the standard reason code', async () => {
   listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
   updateAssignmentStatus.mockResolvedValue(trip({ status: 'FAILED', version: 4 }))
   await render(<AssignmentsScreen />)
   await fireEvent.press(await screen.findByText('Giao thất bại'))
-  await fireEvent.changeText(screen.getByLabelText('Lý do'), 'Không liên lạc được')
+  await fireEvent.press(screen.getByRole('radio', { name: 'Khác' }))
+  await fireEvent.press(screen.getByText('Xác nhận thất bại'))
+  expect(updateAssignmentStatus).not.toHaveBeenCalled()
+  await fireEvent.changeText(screen.getByLabelText('Ghi chú nội bộ (bắt buộc)'), 'Ghi chú nội bộ')
   await fireEvent.press(screen.getByText('Xác nhận thất bại'))
   await waitFor(() =>
     expect(updateAssignmentStatus).toHaveBeenCalledWith('a1', {
       status: 'FAILED',
       expectedVersion: 3,
-      reason: 'Không liên lạc được',
+      reasonCode: 'OTHER',
+      reason: 'Ghi chú nội bộ',
     }),
   )
+})
+
+it('warns when the chosen reason sends the parcel directly to return', async () => {
+  listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
+  updateAssignmentStatus.mockResolvedValue(trip({ status: 'RETURNING', version: 4 }))
+  await render(<AssignmentsScreen />)
+  await fireEvent.press(await screen.findByText('Giao thất bại'))
+  await fireEvent.press(screen.getByRole('radio', { name: 'Khách từ chối nhận hàng' }))
+  expect(screen.getByText(/sẽ chuyển ngay sang hoàn hàng/)).toBeTruthy()
+  await fireEvent.press(screen.getByText('Xác nhận thất bại'))
+  await waitFor(() =>
+    expect(updateAssignmentStatus).toHaveBeenCalledWith('a1', {
+      status: 'FAILED',
+      expectedVersion: 3,
+      reasonCode: 'CUSTOMER_REFUSED',
+    }),
+  )
+})
+
+it('keeps retry disabled until the server timestamp and shows public reasons', async () => {
+  listMyAssignments.mockResolvedValue([
+    trip({
+      status: 'FAILED',
+      earliestRetryAt: new Date(Date.now() + 3600_000).toISOString(),
+      failures: [
+        { attempt: 1, public_reason: 'Khách hẹn giao lại', occurred_at: '2026-11-27T10:00:00Z' },
+      ],
+    }),
+  ])
+  await render(<AssignmentsScreen />)
+  expect(await screen.findByText(/Có thể giao lại sau/)).toBeTruthy()
+  expect(screen.getByText(/Khách hẹn giao lại/)).toBeTruthy()
+  await fireEvent.press(screen.getByText('Giao lại'))
+  expect(retryAssignment).not.toHaveBeenCalled()
 })
 
 it('retries a failed trip', async () => {
@@ -118,7 +172,7 @@ it('starts GPS only for moving trips and says "sharing" only after a point was a
   listMyAssignments.mockResolvedValue([trip({ status: 'IN_TRANSIT' })])
   await render(<AssignmentsScreen />)
   expect(await screen.findByText(/Đang chia sẻ vị trí cho 1 chuyến/)).toBeTruthy()
-  expect(sendLocation).toHaveBeenCalledWith('a1', { latitude: 16.05, longitude: 108.2 })
+  expect(sendLocations).toHaveBeenCalledWith({ latitude: 16.05, longitude: 108.2 })
 })
 
 it('waits for a GPS fix instead of claiming to share', async () => {
@@ -141,7 +195,7 @@ it('stops watching and says so when the server revokes access (403)', async () =
     setTimeout(() => callback({ coords: { latitude: 16.05, longitude: 108.2 } }), 0)
     return { remove }
   })
-  sendLocation.mockRejectedValue(
+  sendLocations.mockRejectedValue(
     Object.assign(new Error('403'), {
       response: {
         status: 403,
@@ -159,7 +213,7 @@ it('requires location permission before confirming pickup', async () => {
   Location.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: 'denied' })
   listMyAssignments.mockResolvedValue([trip({ status: 'ASSIGNED' })])
   await render(<AssignmentsScreen />)
-  await fireEvent.press(await screen.findByText('Đã lấy hàng'))
+  await fireEvent.press(await screen.findByText('Đã lấy hàng ở shop này'))
   expect(await screen.findByText(/Cần cấp quyền vị trí trước khi xác nhận lấy hàng/)).toBeTruthy()
   expect(updateAssignmentStatus).not.toHaveBeenCalled()
 })
@@ -168,28 +222,52 @@ it('blocks pickup if location services are disabled even when permission is gran
   Location.hasServicesEnabledAsync.mockResolvedValueOnce(false)
   listMyAssignments.mockResolvedValue([trip()])
   await render(<AssignmentsScreen />)
-  await fireEvent.press(await screen.findByText('Đã lấy hàng'))
+  await fireEvent.press(await screen.findByText('Đã lấy hàng ở shop này'))
 
   expect(await screen.findByText('Cần bật định vị trước khi xác nhận lấy hàng.')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Bật định vị' })).toBeTruthy()
   expect(updateAssignmentStatus).not.toHaveBeenCalled()
 })
 
-it('includes older moving assignments and expands the finished list on demand', async () => {
-  const finished = Array.from({ length: 50 }, (_, index) =>
+it('loads active trips separately and requests finished pages on demand', async () => {
+  const finished = Array.from({ length: 20 }, (_, index) =>
     trip({ id: `finished-${index}`, orderId: String(index + 10000000), status: 'DELIVERED' }),
   )
   listMyAssignments
-    .mockResolvedValueOnce(finished)
     .mockResolvedValueOnce([trip({ status: 'IN_TRANSIT' })])
+    .mockResolvedValueOnce(finished)
+    .mockResolvedValueOnce([trip({ id: 'last', orderId: 'last', status: 'RETURN_DROPPED_OFF' })])
   await render(<AssignmentsScreen />)
-
   expect(await screen.findByText('Giao thành công')).toBeTruthy()
-  expect(listMyAssignments).toHaveBeenNthCalledWith(2, { page: 1, size: 50 })
+  expect(listMyAssignments).toHaveBeenCalledWith({ scope: 'active' })
   await fireEvent.press(screen.getByRole('tab', { name: 'Đã kết thúc' }))
-  expect(await screen.findByText('Tải thêm')).toBeTruthy()
-  await fireEvent.press(screen.getByText('Tải thêm'))
-  expect(screen.getByText('Tải thêm')).toBeTruthy()
+  await fireEvent.press(await screen.findByText('Tải thêm'))
+  await waitFor(() =>
+    expect(listMyAssignments).toHaveBeenLastCalledWith({
+      scope: 'finished',
+      page: 1,
+      size: 20,
+      signal: expect.anything(),
+    }),
+  )
+  await waitFor(() => expect(screen.queryByText('Tải thêm')).toBeNull())
+})
+
+it('confirms a return for the selected shop and stops tracking at drop-off', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+    buttons[1].onPress()
+  })
+  try {
+    listMyAssignments.mockResolvedValue([trip({ status: 'RETURNING' })])
+    confirmReturn.mockResolvedValue(trip({ status: 'RETURN_DROPPED_OFF', version: 4 }))
+    await render(<AssignmentsScreen />)
+    await fireEvent.press(await screen.findByText('Đã trả hàng ở shop này'))
+    expect(confirmReturn).toHaveBeenCalledWith('a1', 'shop-1', 3)
+    await waitFor(() => expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false))
+    expect(screen.queryByText('Đã trả hàng ở shop này')).toBeNull()
+  } finally {
+    alert.mockRestore()
+  }
 })
 
 it('hides the background sharing action when background tasks are unavailable', async () => {
@@ -221,7 +299,7 @@ it('uses the shared label for an assigned trip', async () => {
 it('does not ask for location before pickup', async () => {
   listMyAssignments.mockResolvedValue([trip({ status: 'ASSIGNED' })])
   await render(<AssignmentsScreen />)
-  await screen.findByText('Đã lấy hàng')
+  await screen.findByText('Đã lấy hàng ở shop này')
   expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled()
 })
 

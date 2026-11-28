@@ -67,6 +67,11 @@ public class NotificationTemplates {
 			case "SHIPPED" -> "Đơn hàng " + orderId + " đang được giao tới bạn.";
 			case "DELIVERED" -> "Đơn hàng " + orderId + " đã được giao thành công. Hãy đánh giá sản phẩm nhé!";
 			case "CANCELLED" -> "Đơn hàng " + orderId + " đã bị huỷ.";
+			// Review PR 68 lan 2, muc 4.8: hoan hang KHONG con bao "don da huy".
+			case "DELIVERY_FAILED" -> "Đơn hàng " + orderId
+					+ " giao không thành công và đang được hoàn về shop.";
+			case "RETURNED_TO_SELLER" -> "Đơn hàng " + orderId
+					+ " đã được hoàn trả cho shop. Nếu bạn đã thanh toán trước, tiền sẽ được hoàn lại.";
 			default -> null;
 		};
 		if (text == null) {
@@ -81,9 +86,40 @@ public class NotificationTemplates {
 	}
 
 	public NotificationMessage deliveryFailed(String orderId) {
+		return deliveryFailed(orderId, null, null);
+	}
+
+	/** Kem ly do cong khai (khong co ghi chu noi bo) va gio som nhat giao lai neu co. */
+	public NotificationMessage deliveryFailed(String orderId, String publicReason, java.time.Instant retryAt) {
+		StringBuilder body = new StringBuilder("Shipper chưa giao được đơn hàng ").append(orderId);
+		if (publicReason != null && !publicReason.isBlank()) body.append(" (").append(publicReason).append(")");
+		body.append(". Đơn sẽ được giao lại");
+		if (retryAt != null)
+			body.append(" từ ").append(java.time.format.DateTimeFormatter.ofPattern("HH:mm dd/MM/yyyy")
+					.withZone(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).format(retryAt));
+		body.append(", vui lòng chú ý điện thoại.");
 		return new NotificationMessage(NotificationType.DELIVERY_FAILED, "Giao hàng chưa thành công",
-				"Shipper chưa giao được đơn hàng " + orderId + ". Đơn sẽ được giao lại, vui lòng chú ý điện thoại.",
-				orderLink(orderId), Map.of("orderId", orderId), true, null);
+				body.toString(), orderLink(orderId),
+				Map.of("orderId", orderId, "publicReason", publicReason == null ? "" : publicReason), true, null);
+	}
+
+	public NotificationMessage paymentRefunded(String orderId, long amount) {
+		String text = "Đơn hàng " + orderId + " đã được hoàn tiền "
+				+ java.text.NumberFormat.getIntegerInstance(Locale.forLanguageTag("vi-VN")).format(amount) + " ₫.";
+		String link = orderLink(orderId);
+		return new NotificationMessage(NotificationType.PAYMENT_REFUNDED, "Đã hoàn tiền", text, link,
+				Map.of("orderId", orderId, "amount", String.valueOf(amount)), true,
+				email("Đã hoàn tiền đơn hàng #" + orderId, "Đã hoàn tiền", text, link, "Xem đơn hàng"));
+	}
+
+	/** Admin: tu dong phan cong that bai, can phan cong tay. */
+	public NotificationMessage deliveryNeedsDispatch(String orderId, String reason) {
+		String detail = "UNKNOWN_ZONE".equals(reason)
+				? "phường của địa chỉ chưa thuộc khu giao hàng nào"
+				: "không có shipper phù hợp đang hoạt động";
+		return new NotificationMessage(NotificationType.DELIVERY_NEEDS_DISPATCH, "Có chuyến giao chờ phân công",
+				"Đơn hàng " + orderId + " chưa có shipper (" + detail + "). Vui lòng phân công tay.",
+				"/admin/shippers", Map.of("orderId", orderId), true, null);
 	}
 
 	public NotificationMessage returnResolved(String orderId, String returnId, boolean restock) {
@@ -112,6 +148,13 @@ public class NotificationTemplates {
 				sellerReturnsLink(orderId), Map.of("orderId", orderId, "returnId", returnId == null ? "" : returnId,
 						"shopId", shopId),
 				true, null);
+	}
+
+	public NotificationMessage sellerReturnDroppedOff(String orderId, String shopId) {
+		return new NotificationMessage(NotificationType.RETURN_DROPPED_OFF, "Hàng hoàn đã về shop",
+				"Shipper đã trả hàng hoàn của đơn " + orderId
+						+ ". Hãy kiểm tra và xác nhận \"Đã nhận lại hàng\" (tự động xác nhận sau 3 ngày).",
+				sellerOrderLink(orderId), Map.of("orderId", orderId, "shopId", shopId), true, null);
 	}
 
 	public NotificationMessage sellerOrderCancelled(String orderId, String shopId) {
@@ -185,6 +228,8 @@ public class NotificationTemplates {
 			case "SHIPPED" -> "Đang giao";
 			case "DELIVERED" -> "Đã giao";
 			case "CANCELLED" -> "Đã huỷ";
+			case "DELIVERY_FAILED" -> "Giao không thành công";
+			case "RETURNED_TO_SELLER" -> "Đã hoàn trả cho shop";
 			default -> status;
 		};
 	}

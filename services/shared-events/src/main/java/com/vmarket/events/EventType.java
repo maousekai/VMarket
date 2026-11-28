@@ -39,11 +39,15 @@ public final class EventType {
 	/** Payment Service phát theo kết quả giao dịch (IPN/return của VNPay). */
 	public static final String PAYMENT_SUCCEEDED = "PaymentSucceeded";
 	public static final String PAYMENT_FAILED = "PaymentFailed";
+	/** Payment Service phat khi hoan tien da duoc xac nhan. */
+	public static final String PAYMENT_REFUNDED = "PaymentRefunded";
 
 	/** Delivery Service phát khi phân công shipper. */
 	public static final String DELIVERY_ASSIGNED = "DeliveryAssigned";
 	public static final String COD_COLLECTED = "CodCollected";
 	public static final String DELIVERY_STATUS_CHANGED = "DeliveryStatusChanged";
+	/** Delivery Service phat khi tu dong phan cong that bai -> bao admin. */
+	public static final String DELIVERY_ASSIGNMENT_FAILED = "DeliveryAssignmentFailed";
 
 	/** Review Service phát khi có đánh giá mới. */
 	public static final String REVIEW_CREATED = "ReviewCreated";

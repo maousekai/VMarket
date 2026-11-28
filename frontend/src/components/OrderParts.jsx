@@ -33,7 +33,11 @@ export function OrderTimeline({ status }) {
   if (current < 0) {
     return (
       <p className="order-timeline__cancelled" role="status">
-        Đơn hàng đã bị huỷ.
+        {status === 'DELIVERY_FAILED'
+          ? 'Giao không thành công, đơn đang được hoàn về shop.'
+          : status === 'RETURNED_TO_SELLER'
+            ? 'Đơn đã được hoàn trả cho shop.'
+            : 'Đơn hàng đã bị huỷ.'}
       </p>
     )
   }

@@ -1,7 +1,7 @@
 import * as Location from 'expo-location'
 import * as SecureStore from 'expo-secure-store'
 import { signOutLocally } from '../api/client'
-import { sendLocation } from '../api/deliveryApi'
+import { sendLocations } from '../api/deliveryApi'
 import {
   pushLocation,
   resetThrottleForTests,
@@ -11,10 +11,13 @@ import {
 
 jest.mock('../api/deliveryApi', () => ({
   ...jest.requireActual('../api/deliveryApi'),
-  sendLocation: jest.fn(),
+  sendLocations: jest.fn(),
 }))
 
 const coords = { latitude: 16.05, longitude: 108.2 }
+const batch = (outcomes) => ({
+  results: Object.entries(outcomes).map(([assignmentId, result]) => ({ assignmentId, result })),
+})
 const apiError = (status, code) =>
   Object.assign(new Error(code), { response: { status, data: { error: { code } } } })
 
@@ -22,7 +25,7 @@ beforeEach(() => {
   SecureStore.__store.clear()
   resetThrottleForTests()
   jest.clearAllMocks()
-  sendLocation.mockResolvedValue({})
+  sendLocations.mockResolvedValue(batch({ a1: 'OK', a2: 'OK' }))
 })
 
 describe('startTracking', () => {
@@ -53,18 +56,18 @@ describe('pushLocation', () => {
   it('sends one point to every moving trip and throttles below 10 seconds', async () => {
     await startTracking(['a1', 'a2'])
     expect(await pushLocation(coords, 100_000)).toEqual({ sent: true, error: undefined })
-    expect(sendLocation).toHaveBeenCalledTimes(2)
-    expect(sendLocation).toHaveBeenCalledWith('a1', coords)
+    expect(sendLocations).toHaveBeenCalledTimes(1)
+    expect(sendLocations).toHaveBeenCalledWith(coords)
     expect((await pushLocation(coords, 105_000)).sent).toBe(false)
-    expect(sendLocation).toHaveBeenCalledTimes(2)
+    expect(sendLocations).toHaveBeenCalledTimes(1)
     await pushLocation(coords, 111_000)
-    expect(sendLocation).toHaveBeenCalledTimes(4)
+    expect(sendLocations).toHaveBeenCalledTimes(2)
   })
 
   it('drops finished trips and stops once none is left', async () => {
     Location.hasStartedLocationUpdatesAsync.mockResolvedValue(true)
     await startTracking(['a1'])
-    sendLocation.mockRejectedValueOnce(apiError(409, 'TRACKING_STOPPED'))
+    sendLocations.mockResolvedValueOnce(batch({}))
     await pushLocation(coords, 200_000)
     expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false)
     expect(Location.stopLocationUpdatesAsync).toHaveBeenCalledWith('vmarket-shipper-location')
@@ -73,9 +76,9 @@ describe('pushLocation', () => {
 
   it('ignores the server rate limit but reports other errors', async () => {
     await startTracking(['a1'])
-    sendLocation.mockRejectedValueOnce(apiError(429, 'PING_TOO_FREQUENT'))
+    sendLocations.mockRejectedValueOnce(apiError(429, 'PING_TOO_FREQUENT'))
     expect((await pushLocation(coords, 300_000)).error).toBeUndefined()
-    sendLocation.mockRejectedValueOnce(apiError(500, 'BOOM'))
+    sendLocations.mockRejectedValueOnce(apiError(500, 'BOOM'))
     expect((await pushLocation(coords, 320_000)).error).toBeTruthy()
   })
 
@@ -83,7 +86,7 @@ describe('pushLocation', () => {
     await startTracking(['a1'])
     await stopTracking()
     expect((await pushLocation(coords, 400_000)).sent).toBe(false)
-    expect(sendLocation).not.toHaveBeenCalled()
+    expect(sendLocations).not.toHaveBeenCalled()
   })
 })
 
@@ -93,7 +96,8 @@ describe('review PR 69: stop collecting location when access is gone', () => {
     [409, 'GPS_SOURCE_CONFLICT'],
   ])('keeps a trip returned as %s %s stopped across tracking restarts', async (status, code) => {
     await startTracking(['a1'])
-    sendLocation.mockRejectedValueOnce(apiError(status, code))
+    if (status === 403) sendLocations.mockRejectedValueOnce(apiError(status, code))
+    else sendLocations.mockResolvedValueOnce(batch({ a1: code }))
     expect((await pushLocation(coords, 500_000)).stopped).toBe(true)
 
     expect(await startTracking(['a1'])).toBe('revoked')
@@ -107,16 +111,13 @@ describe('review PR 69: stop collecting location when access is gone', () => {
   it('drops a trip on 403 and stops the background task once no trip is left', async () => {
     Location.hasStartedLocationUpdatesAsync.mockResolvedValue(true)
     await startTracking(['a1', 'a2'])
-    sendLocation.mockImplementation(async (id) => {
-      if (id === 'a1') throw apiError(403, 'SHIPPER_INACTIVE')
-      return {}
-    })
+    sendLocations.mockResolvedValueOnce(batch({ a1: 'FORBIDDEN', a2: 'OK' }))
     const first = await pushLocation(coords, 500_000)
     expect(first.stopped).toBeUndefined()
     expect(JSON.parse(SecureStore.__store.get('vmarket.trackingAssignments'))).toEqual(['a2'])
     expect(Location.stopLocationUpdatesAsync).not.toHaveBeenCalled()
 
-    sendLocation.mockRejectedValue(apiError(403, 'FORBIDDEN'))
+    sendLocations.mockRejectedValue(apiError(403, 'FORBIDDEN'))
     const second = await pushLocation(coords, 520_000)
     expect(second).toMatchObject({ stopped: true })
     expect(SecureStore.__store.has('vmarket.trackingAssignments')).toBe(false)
@@ -141,7 +142,7 @@ describe('review PR 69: stop collecting location when access is gone', () => {
     const sent = new Promise((resolve) => {
       requestSent = resolve
     })
-    sendLocation.mockImplementationOnce(() => {
+    sendLocations.mockImplementationOnce(() => {
       requestSent()
       return new Promise((resolve) => {
         respond = resolve
@@ -151,7 +152,7 @@ describe('review PR 69: stop collecting location when access is gone', () => {
     await sent
     await stopTracking()
 
-    respond({})
+    respond(batch({ a1: 'OK' }))
     expect(await sending).toEqual({ sent: false })
     expect(SecureStore.__store.has('vmarket.lastLocationSentAt')).toBe(false)
   })

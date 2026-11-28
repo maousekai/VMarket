@@ -41,7 +41,10 @@ vi.mock('../services/api/orderApi', async (importOriginal) => ({
 vi.mock('../services/api/deliveryApi', async (importOriginal) => ({
   ...(await importOriginal()),
   getDelivery: vi.fn(),
+  getRoute: vi.fn().mockResolvedValue([]),
+  issueTrackingTicket: vi.fn().mockRejectedValue({ response: { status: 404, data: {} } }),
 }))
+vi.mock('../components/DeliveryMap', () => ({ default: () => <div data-testid="delivery-map" /> }))
 vi.mock('../services/api/productApi', () => ({ getProduct: vi.fn() }))
 vi.mock('../services/api/shopApi', () => ({ getPublicShop: vi.fn() }))
 vi.mock('../services/api/reviewApi', async (importOriginal) => ({
@@ -484,6 +487,21 @@ describe('OrderDetailPage', () => {
     getOrder.mockResolvedValue({ ...pending, status: 'SHIPPED' })
     getDelivery.mockResolvedValue({ assignment: { status: 'IN_TRANSIT' } })
     renderAt(`/profile/orders/${pending.id}`)
-    expect(await screen.findByText('Đang giao hàng')).toBeInTheDocument()
+    const panel = await screen.findByRole('region', { name: 'Theo dõi giao hàng' })
+    expect(within(panel).getByText('Đang giao')).toBeInTheDocument()
+    expect(await within(panel).findByTestId('delivery-map')).toBeInTheDocument()
+  })
+
+  it('hides the shipper position and internal reasons while the parcel is returning', async () => {
+    getOrder.mockResolvedValue({ ...pending, status: 'SHIPPED' })
+    getDelivery.mockResolvedValue({
+      assignment: { status: 'RETURNING', latitude: 16.05, longitude: 108.2 },
+      history: [{ status: 'FAILED', occurred_at: '2026-11-26T01:00:00Z', reason: 'note nội bộ' }],
+    })
+    renderAt(`/profile/orders/${pending.id}`)
+    const panel = await screen.findByRole('region', { name: 'Theo dõi giao hàng' })
+    expect(within(panel).getByText('Giao không thành công, đang hoàn về shop')).toBeInTheDocument()
+    expect(within(panel).queryByTestId('delivery-map')).toBeNull()
+    expect(within(panel).queryByText(/note nội bộ/)).toBeNull()
   })
 })

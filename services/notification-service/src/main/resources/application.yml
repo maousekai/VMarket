@@ -73,6 +73,9 @@ app:
       # Seller nhan yeu cau tra hang moi (SRS 8.1). Thieu binding nay Order Service khong route duoc
       # ReturnRequested va outbox chan moi su kien sau cua don (ke ca ReturnResolved).
       - ReturnRequested
+      # Review PR 68 lan 2: bao nguoi mua da hoan tien; bao admin chuyen chua phan cong duoc.
+      - PaymentRefunded
+      - DeliveryAssignmentFailed
   notification:
     # Khoa API noi bo: goi order-service (nguoi mua / gian hang cua don),
     # auth-service (email nguoi nhan) va shop-service (chu gian hang).

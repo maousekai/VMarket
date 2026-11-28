@@ -79,6 +79,16 @@ class InventoryEventConsumerTest {
 	}
 
 	@Test
+	void parcelReturnedToSellerRestocksLikeCancellation() {
+		OrderStatusChangedInventoryConsumer consumer = new OrderStatusChangedInventoryConsumer(inventoryService);
+
+		consumer.handle(new OrderStatusChanged("order-9", "DELIVERY_FAILED", "RETURNED_TO_SELLER", "VNPAY"),
+				new EventEnvelope("event-9", "OrderStatusChanged", 0, null));
+
+		verify(inventoryService).releaseOrDefer("order-9");
+	}
+
+	@Test
 	void acceptedReturnRestocksReturnedItems() {
 		ReturnResolvedInventoryConsumer consumer = new ReturnResolvedInventoryConsumer(inventoryService);
 		List<StockItem> items = List.of(new StockItem("product-1", "variant-1", 1));

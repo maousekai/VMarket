@@ -146,6 +146,63 @@ class EventConsumersTest {
 	}
 
 	@Test
+	void failedDeliveryShowsThePublicReasonAndRetryTime() {
+		order("COD");
+		new DeliveryStatusChangedConsumer(dispatcher, templates, recipients).handle(
+				new DeliveryStatusChanged("o1", "FAILED", 4, "Khách hẹn giao lại",
+						java.time.Instant.parse("2026-11-28T03:00:00Z")),
+				envelope);
+		verify(dispatcher).deliver(eq("buyer-1"),
+				argThat(m -> m.type() == NotificationType.DELIVERY_FAILED
+						&& m.body().contains("Khách hẹn giao lại") && m.body().contains("10:00 28/11/2026")),
+				eq(envelope));
+	}
+
+	@Test
+	void returnJourneyNotifiesBuyerWithoutSayingCancelled() {
+		order("VNPAY");
+		var consumer = new OrderStatusChangedConsumer(dispatcher, templates, recipients);
+		consumer.handle(new OrderStatusChanged("o1", "SHIPPED", "DELIVERY_FAILED", "VNPAY"), envelope);
+		consumer.handle(new OrderStatusChanged("o1", "DELIVERY_FAILED", "RETURNED_TO_SELLER", "VNPAY"), envelope);
+		verify(dispatcher).deliver(eq("buyer-1"),
+				argThat(m -> m.type() == NotificationType.ORDER_STATUS_CHANGED && m.body().contains("hoàn về shop")
+						&& !m.body().contains("huỷ")),
+				eq(envelope));
+		verify(dispatcher).deliver(eq("buyer-1"),
+				argThat(m -> m.type() == NotificationType.ORDER_STATUS_CHANGED && m.body().contains("hoàn trả cho shop")),
+				eq(envelope));
+		verify(dispatcher, org.mockito.Mockito.never()).deliver(eq("seller-1"),
+				argThat(type(NotificationType.ORDER_CANCELLED)), any());
+	}
+
+	@Test
+	void droppedOffReturnAsksEachSellerToConfirm() {
+		order("COD");
+		new DeliveryStatusChangedConsumer(dispatcher, templates, recipients)
+				.handle(new DeliveryStatusChanged("o1", "RETURN_DROPPED_OFF", 7), envelope);
+		verify(dispatcher).deliver(eq("seller-1"), argThat(type(NotificationType.RETURN_DROPPED_OFF)), eq(envelope));
+	}
+
+	@Test
+	void refundNotifiesTheBuyer() {
+		order("VNPAY");
+		new PaymentRefundedConsumer(dispatcher, templates, recipients)
+				.handle(new com.vmarket.events.PaymentRefunded("o1", 125000, "hoàn hàng"), envelope);
+		verify(dispatcher).deliver(eq("buyer-1"),
+				argThat(m -> m.type() == NotificationType.PAYMENT_REFUNDED && m.body().contains("125.000")),
+				eq(envelope));
+	}
+
+	@Test
+	void failedAutoAssignmentNotifiesEveryAdmin() {
+		when(clients.admins()).thenReturn(List.of("admin-1", "admin-2"));
+		new DeliveryAssignmentFailedConsumer(dispatcher, templates, clients)
+				.handle(new com.vmarket.events.DeliveryAssignmentFailed("a1", "o1", "UNKNOWN_ZONE"), envelope);
+		verify(dispatcher).deliver(eq("admin-1"), argThat(type(NotificationType.DELIVERY_NEEDS_DISPATCH)), eq(envelope));
+		verify(dispatcher).deliver(eq("admin-2"), argThat(type(NotificationType.DELIVERY_NEEDS_DISPATCH)), eq(envelope));
+	}
+
+	@Test
 	void deliveryAssignedNotifiesShipperAndSeller() {
 		order("COD");
 

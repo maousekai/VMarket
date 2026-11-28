@@ -1,4 +1,5 @@
 import client from './client'
+import { MAX_ATTEMPTS } from '../deliveryStatus'
 
 // Delivery Service (PBL6-20) - phan he shipper. Cung quy tac voi frontend/src/services/api/deliveryApi.js.
 export { DELIVERY_STATUS_LABELS } from '../deliveryStatus'
@@ -14,9 +15,29 @@ export const GPS_INTERVAL_MS = 15_000
 
 const enc = encodeURIComponent
 const base = '/api/delivery/shipper/assignments'
+const orderUrl = (id) => `/api/delivery/orders/${enc(id)}`
+let serverOffset = 0
+export const serverNow = () => Date.now() + serverOffset
 
-export const listMyAssignments = async ({ page = 0, size = 50 } = {}) =>
-  (await client.get(base, { params: { page, size } })).data
+function withServerClock(response) {
+  const timestamp = Date.parse(response.headers?.date)
+  if (Number.isFinite(timestamp)) serverOffset = timestamp - Date.now()
+  return response.data
+}
+
+export const listMyAssignments = async ({ scope = 'active', page = 0, size = 20, signal } = {}) =>
+  withServerClock(await client.get(base, { params: { scope, page, size }, signal }))
+
+export const getDelivery = async (id, signal) => (await client.get(orderUrl(id), { signal })).data
+
+export const issueTrackingTicket = async (id, signal) =>
+  (await client.post(`${orderUrl(id)}/tracking-ticket`, null, { signal })).data
+
+export const confirmPickup = async (id, shopId, expectedVersion) =>
+  (await client.post(`${base}/${enc(id)}/pickups/${enc(shopId)}`, { expectedVersion })).data
+
+export const confirmReturn = async (id, shopId, expectedVersion) =>
+  (await client.post(`${base}/${enc(id)}/returns/${enc(shopId)}`, { expectedVersion })).data
 
 export const updateAssignmentStatus = async (id, body) =>
   (await client.put(`${base}/${enc(id)}/status`, body)).data
@@ -24,27 +45,13 @@ export const updateAssignmentStatus = async (id, body) =>
 export const retryAssignment = async (id, expectedVersion) =>
   (await client.post(`${base}/${enc(id)}/retry`, { expectedVersion })).data
 
-export const sendLocation = async (id, { latitude, longitude }) =>
-  (await client.post(`${base}/${enc(id)}/location`, { latitude, longitude })).data
-
-export function parseOrderSnapshot(snapshot) {
-  if (!snapshot) return {}
-  if (typeof snapshot === 'object') return snapshot
-  try {
-    return JSON.parse(snapshot) || {}
-  } catch {
-    return {}
-  }
-}
-
-export const orderAddress = (order) =>
-  [order?.streetAddress, order?.ward, order?.province].filter(Boolean).join(', ')
+export const sendLocations = async ({ latitude, longitude }) =>
+  (await client.post('/api/delivery/shipper/locations', { latitude, longitude, source: 'MOBILE' }))
+    .data
 
 /** Hanh dong hop le theo DeliveryService.status/retry. */
 export function shipperActions(assignment) {
   switch (assignment?.status) {
-    case 'ASSIGNED':
-      return [{ kind: 'status', status: 'PICKED_UP', label: 'Đã lấy hàng' }]
     case 'PICKED_UP':
       return [{ kind: 'status', status: 'IN_TRANSIT', label: 'Bắt đầu giao' }]
     case 'IN_TRANSIT':
@@ -53,9 +60,9 @@ export function shipperActions(assignment) {
         { kind: 'fail', status: 'FAILED', label: 'Giao thất bại', danger: true },
       ]
     case 'FAILED':
-      return assignment.attempt < 3 ? [{ kind: 'retry', label: 'Giao lại' }] : []
-    case 'RETURNING':
-      return [{ kind: 'status', status: 'RETURNED', label: 'Đã hoàn hàng về shop' }]
+      return assignment.attempt < (assignment.maxAttempts || MAX_ATTEMPTS)
+        ? [{ kind: 'retry', label: 'Giao lại' }]
+        : []
     default:
       return []
   }

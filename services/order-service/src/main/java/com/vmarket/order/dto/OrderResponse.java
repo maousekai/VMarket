@@ -44,7 +44,12 @@ public record OrderResponse(
 		@Schema(description = "Lần đổi trạng thái gần nhất") Instant updatedAt,
 
 		@Schema(description = "Thời điểm giao thành công; hạn trả hàng 7 ngày tính từ đây")
-		Instant deliveredAt) {
+		Instant deliveredAt,
+
+		@Schema(description = "Vĩ độ điểm giao (người mua chọn trên bản đồ); có thể null")
+		Double latitude,
+
+		@Schema(description = "Kinh độ điểm giao; có thể null") Double longitude) {
 
 	public static OrderResponse from(Order order) {
 		return new OrderResponse(
@@ -60,6 +65,6 @@ public record OrderResponse(
 				order.getTotalAmount(),
 				order.getCreatedAt(),
 				order.getItems().stream().map(OrderItemResponse::from).toList(), order.getPaymentMethod(), order.getPaymentExpiresAt(), order.isStockReserved(),
-				order.getUpdatedAt(), order.getDeliveredAt());
+				order.getUpdatedAt(), order.getDeliveredAt(), order.getLatitude(), order.getLongitude());
 	}
 }

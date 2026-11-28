@@ -31,7 +31,11 @@ public record AddressResponse(
 
 		Instant createdAt,
 
-		Instant updatedAt) {
+		Instant updatedAt,
+
+		@Schema(description = "Toạ độ điểm giao (null nếu chưa chọn trên bản đồ)") Double latitude,
+
+		Double longitude) {
 
 	public static AddressResponse from(Address a) {
 		return new AddressResponse(
@@ -45,6 +49,8 @@ public record AddressResponse(
 				a.getNote(),
 				a.isDefault(),
 				a.getCreatedAt(),
-				a.getUpdatedAt());
+				a.getUpdatedAt(),
+				a.getLatitude(),
+				a.getLongitude());
 	}
 }

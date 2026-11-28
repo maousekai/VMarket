@@ -5,3 +5,4 @@ dist
 android
 ios
 coverage
+src/generated/delivery-rules.json

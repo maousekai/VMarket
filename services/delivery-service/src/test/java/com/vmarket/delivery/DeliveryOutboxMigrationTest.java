@@ -35,7 +35,35 @@ class DeliveryOutboxMigrationTest {
         a.setProvince("province");
         a.setDistrict("district");
         a.setOrderSnapshot("{}");
-        repo.insert(a);
+        // Chen bang SQL cua schema V1 (repo.insert dung cot cua ban moi nhat).
+        jdbc.update(
+                "insert into delivery_assignments(id, order_id, buyer_id, status, attempt,"
+                        + " payment_method, cod_amount, province, district, order_snapshot, version,"
+                        + " created_at, updated_at) values (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0,"
+                        + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                a.getId(),
+                a.getOrderId(),
+                a.getBuyerId(),
+                a.getStatus().name(),
+                a.getPaymentMethod(),
+                a.getCodAmount(),
+                a.getProvince(),
+                a.getDistrict(),
+                a.getOrderSnapshot());
+        // Review PR 68 lan 2: snapshot lay hang cu co thong tin ngan hang; don cu chi co phuong.
+        jdbc.update(
+                "insert into delivery_handoffs (assignment_id, shop_id, seller_id, pickup_snapshot,"
+                        + " created_at) values (?, 'shop-1', 'seller-1', ?, CURRENT_TIMESTAMP)",
+                a.getId(),
+                "{\"id\":\"shop-1\",\"name\":\"Shop\",\"phone\":\"0901\",\"ownerId\":\"seller-1\","
+                        + "\"bankAccountNumber\":\"999\",\"email\":\"s@x.vn\",\"streetAddress\":\"1 A\"}");
+        jdbc.update(
+                "insert into delivery_assignments (id, order_id, buyer_id, status, attempt,"
+                        + " payment_method, cod_amount, province, district, order_snapshot,"
+                        + " created_at, updated_at) values ('a-ward', 'o-ward', 'b-1',"
+                        + " 'WAITING_ASSIGNMENT', 1, 'COD', 0, 'da nang', '', ?, CURRENT_TIMESTAMP,"
+                        + " CURRENT_TIMESTAMP)",
+                "{\"ward\":\"Phường Hòa Cường\"}");
         repo.outbox(a, "DeliveryAssigned", "{\"pending\":true}");
         jdbc.update(
                 "update delivery_assignments set version=9, province=?, district=?",
@@ -53,7 +81,13 @@ class DeliveryOutboxMigrationTest {
                         + " values ('a-empty', 'o-empty', 'b-1', 'WAITING_ASSIGNMENT', 1, 'COD', 0, 'da nang', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
         var flyway = Flyway.configure().dataSource(url, "sa", "").load();
         flyway.migrate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        String pickup = jdbc.queryForObject("select pickup_snapshot from delivery_handoffs", String.class);
+        assertThat(pickup).contains("Shop", "0901", "1 A").doesNotContain("999", "s@x.vn", "ownerId");
+        assertThat(jdbc.queryForObject("select district from delivery_assignments where id='a-ward'", String.class))
+                .isEqualTo("hai chau");
+        assertThat(jdbc.queryForObject("select ward from delivery_assignments where id='a-ward'", String.class))
+                .isEqualTo("Phường Hòa Cường");
         try (var c = new DriverManagerDataSource(url, "sa", "").getConnection()) {
             assertThat(columnIsNullable(c, "shippers", "district")).isTrue();
             assertThat(columnIsNullable(c, "delivery_assignments", "district")).isTrue();

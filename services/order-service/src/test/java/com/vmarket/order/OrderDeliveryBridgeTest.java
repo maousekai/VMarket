@@ -128,12 +128,38 @@ class OrderDeliveryBridgeTest {
         bridge.apply(new DeliveryStatusChanged(order.getId(), "RETURNED", 12));
         bridge.apply(new DeliveryStatusChanged(order.getId(), "RETURNED", 12));
         bridge.apply(new DeliveryStatusChanged(order.getId(), "DELIVERED", 11));
+        // Hoan hang ve shop khong con la "huy don" (review PR 68 lan 2, muc 4.7).
         assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
-                .isEqualTo(OrderStatus.CANCELLED);
+                .isEqualTo(OrderStatus.RETURNED_TO_SELLER);
         assertThat(jdbc.queryForObject("select count(*) from event_outbox", Integer.class))
                 .isEqualTo(2);
         assertThat(jdbc.queryForList("select payload from event_outbox", String.class))
-                .anyMatch(p -> p.contains("CANCELLED"));
+                .anyMatch(p -> p.contains("RETURNED_TO_SELLER"))
+                .noneMatch(p -> p.contains("CANCELLED"));
+    }
+
+    @Test
+    void returnJourneyMapsToDeliveryFailedThenReturnedToSeller() {
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "IN_TRANSIT", 1));
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "FAILED", 2));
+        assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.SHIPPED);
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "RETURNING", 3));
+        assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.DELIVERY_FAILED);
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "RETURN_DROPPED_OFF", 4));
+        assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.DELIVERY_FAILED);
+        // Su kien giao hang cu toi muon khong keo don ve "dang giao".
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "IN_TRANSIT", 5));
+        assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.DELIVERY_FAILED);
+        bridge.apply(new DeliveryStatusChanged(order.getId(), "RETURNED", 6));
+        assertThat(orders.findById(order.getId()).orElseThrow().getStatus())
+                .isEqualTo(OrderStatus.RETURNED_TO_SELLER);
+        assertThat(jdbc.queryForList("select payload from event_outbox", String.class))
+                .anyMatch(p -> p.contains("\"status\":\"DELIVERY_FAILED\""))
+                .anyMatch(p -> p.contains("\"status\":\"RETURNED_TO_SELLER\""));
     }
 
     @Test

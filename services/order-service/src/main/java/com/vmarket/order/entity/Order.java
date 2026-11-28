@@ -111,6 +111,13 @@ public class Order extends BaseEntity {
 	@Column(name = "delivered_at")
 	private Instant deliveredAt;
 
+	/** Toa do diem giao chep tu dia chi luc dat hang (review PR 68, muc 4.10); co the null. */
+	@Column(name = "latitude")
+	private Double latitude;
+
+	@Column(name = "longitude")
+	private Double longitude;
+
 	/**
 	 * Lớp phòng thủ bổ sung cho các đường ghi không đi qua khoá dòng (PBL6-53).
 	 * Các luồng hiện tại đều tuần tự hoá bằng {@code PESSIMISTIC_WRITE} /

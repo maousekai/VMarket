@@ -40,10 +40,20 @@ public class DeliveryStatusChangedConsumer implements EventConsumer<DeliveryStat
 
 	@Override
 	public void handle(DeliveryStatusChanged event, EventEnvelope envelope) {
-		if (!"FAILED".equals(event.status())) {
+		if ("FAILED".equals(event.status())) {
+			recipients.order(event.orderId()).ifPresent(order -> dispatcher.deliver(order.userId(),
+					templates.deliveryFailed(order.id(), event.publicReason(), event.earliestRetryAt()), envelope));
 			return;
 		}
-		recipients.order(event.orderId())
-				.ifPresent(order -> dispatcher.deliver(order.userId(), templates.deliveryFailed(order.id()), envelope));
+		// Shipper da tra hang hoan: seller tung shop xac nhan "Da nhan lai hang".
+		if ("RETURN_DROPPED_OFF".equals(event.status())) {
+			recipients.order(event.orderId()).ifPresent(order -> {
+				var sellers = recipients.sellers(order);
+				java.util.List<NotificationDispatcher.Delivery> deliveries = new java.util.ArrayList<>();
+				sellers.owners().forEach((shopId, ownerId) -> deliveries.add(
+						new NotificationDispatcher.Delivery(ownerId, templates.sellerReturnDroppedOff(order.id(), shopId))));
+				dispatcher.deliverAll(deliveries, envelope, sellers.failure());
+			});
+		}
 	}
 }

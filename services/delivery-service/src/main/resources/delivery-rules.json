@@ -1,0 +1,51 @@
+{
+  "$comment": "NGUON DUY NHAT cho nhan trang thai giao hang, ly do that bai va khu giao hang (review PR 68/69). Sua file nay roi chay: node scripts/sync-delivery-rules.mjs. Ban sao sinh ra: frontend/src/generated, mobile/src/generated, services/delivery-service/src/main/resources.",
+  "statusLabels": {
+    "staff": {
+      "WAITING_HANDOFF": "Chờ shop bàn giao",
+      "WAITING_ASSIGNMENT": "Chờ phân công",
+      "ASSIGNED": "Đã phân công shipper",
+      "PICKED_UP": "Đã lấy hàng",
+      "IN_TRANSIT": "Đang giao",
+      "FAILED": "Giao thất bại",
+      "DELIVERED": "Đã giao",
+      "RETURNING": "Đang hoàn hàng",
+      "RETURN_DROPPED_OFF": "Chờ shop xác nhận nhận lại",
+      "RETURNED": "Đã hoàn hàng"
+    },
+    "buyer": {
+      "WAITING_HANDOFF": "Đang chuẩn bị hàng",
+      "WAITING_ASSIGNMENT": "Đang chuẩn bị hàng",
+      "ASSIGNED": "Đang chuẩn bị hàng",
+      "PICKED_UP": "Đang giao",
+      "IN_TRANSIT": "Đang giao",
+      "FAILED": "Giao chưa thành công, sẽ giao lại",
+      "DELIVERED": "Đã giao",
+      "RETURNING": "Giao không thành công, đang hoàn về shop",
+      "RETURN_DROPPED_OFF": "Giao không thành công, đang hoàn về shop",
+      "RETURNED": "Đã hoàn trả cho shop"
+    }
+  },
+  "failureReasons": [
+    { "code": "CUSTOMER_UNREACHABLE", "label": "Không liên lạc được khách", "returnImmediately": false, "shipperFault": false, "noteRequired": false },
+    { "code": "CUSTOMER_RESCHEDULED", "label": "Khách hẹn giao lại", "returnImmediately": false, "shipperFault": false, "noteRequired": false },
+    { "code": "CUSTOMER_REFUSED", "label": "Khách từ chối nhận hàng", "returnImmediately": true, "shipperFault": false, "noteRequired": false },
+    { "code": "WRONG_ADDRESS", "label": "Sai hoặc không tìm thấy địa chỉ", "returnImmediately": true, "shipperFault": false, "noteRequired": false },
+    { "code": "SHIPPER_ISSUE", "label": "Sự cố phía shipper (xe hỏng, hết giờ…)", "returnImmediately": false, "shipperFault": true, "noteRequired": false },
+    { "code": "OTHER", "label": "Khác", "returnImmediately": false, "shipperFault": true, "noteRequired": true }
+  ],
+  "retry": { "minHoursBetweenAttempts": 2, "maxAttempts": 3 },
+  "returnAutoCloseDays": 3,
+  "zones": {
+    "province": "Đà Nẵng",
+    "list": [
+      { "name": "Hải Châu", "wards": ["Phường Hải Châu", "Phường Hòa Cường"] },
+      { "name": "Thanh Khê", "wards": ["Phường Thanh Khê", "Phường An Khê"] },
+      { "name": "Sơn Trà", "wards": ["Phường Sơn Trà", "Phường An Hải"] },
+      { "name": "Ngũ Hành Sơn", "wards": ["Phường Ngũ Hành Sơn"] },
+      { "name": "Liên Chiểu", "wards": ["Phường Liên Chiểu", "Phường Hòa Khánh", "Phường Hải Vân"] },
+      { "name": "Cẩm Lệ", "wards": ["Phường Cẩm Lệ", "Phường Hòa Xuân"] },
+      { "name": "Hòa Vang", "wards": ["Xã Bà Nà", "Xã Hòa Tiến", "Xã Hòa Vang"] }
+    ]
+  }
+}

@@ -13,6 +13,7 @@ export default function BuyerTabs() {
     >
       <Tabs.Screen name="index" options={{ title: 'Trang chủ' }} />
       <Tabs.Screen name="orders" options={{ title: 'Đơn của tôi' }} />
+      <Tabs.Screen name="delivery/[orderId]" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ title: 'Thông báo' }} />
       <Tabs.Screen name="account" options={{ title: 'Tài khoản' }} />
     </Tabs>

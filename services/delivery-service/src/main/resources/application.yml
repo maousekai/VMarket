@@ -54,4 +54,6 @@ app:
     auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
     order-url: ${ORDER_SERVICE_URL:http://localhost:8086}
     shop-url: ${SHOP_SERVICE_URL:http://localhost:8083}
-    web-socket-url: ${DELIVERY_WS_URL:ws://localhost:8088/api/delivery/ws}
+    # Mac dinh tuong doi: trinh duyet noi WebSocket tren origin frontend (Vite / nginx chuyen
+    # thang toi delivery-service). App mobile dat DELIVERY_WS_URL tuyet doi hoac tu ghep tu API.
+    web-socket-url: ${DELIVERY_WS_URL:/api/delivery/ws}

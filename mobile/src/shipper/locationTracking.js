@@ -2,7 +2,7 @@ import * as Location from 'expo-location'
 import * as SecureStore from 'expo-secure-store'
 import * as TaskManager from 'expo-task-manager'
 import { getApiError, onSessionChange } from '../api/client'
-import { GPS_INTERVAL_MS, sendLocation } from '../api/deliveryApi'
+import { GPS_INTERVAL_MS, sendLocations } from '../api/deliveryApi'
 
 /**
  * Gui GPS cua shipper (FR-SHIP-04): moi GPS_INTERVAL_MS (15s, trong khoang 10-30s) mot diem cho
@@ -73,17 +73,11 @@ export async function readLastSentAt() {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
-/** Ma loi nghia la chuyen khong con nhan GPS tu shipper nay: bo khoi danh sach theo doi. */
-const stopsTracking = (apiError) =>
-  ['TRACKING_STOPPED', 'GPS_SOURCE_CONFLICT'].includes(apiError.code) ||
-  apiError.status === 404 ||
-  apiError.status === 403
+const CONFLICT = 'Một thiết bị hoặc trình duyệt khác đang chia sẻ vị trí cho chuyến này.'
+const REVOKED = 'Bạn không còn quyền chia sẻ vị trí cho chuyến này.'
+const ACCESS_ERRORS = new Set(['FORBIDDEN', 'SHIPPER_INACTIVE', 'ACCOUNT_SUSPENDED'])
 
-/**
- * Gui mot diem toi moi chuyen dang theo doi. Chuyen bi tu choi (xem stopsTracking) bi bo khoi
- * danh sach; het chuyen thi dung han viec lay vi tri (ke ca task nen va thong bao thuong truc).
- * @returns {Promise<{sent: boolean, error?: string, stopped?: boolean}>}
- */
+/** Gửi một điểm cho các chuyến đang chạy qua API theo lô. */
 export async function pushLocation(coords, now = Date.now()) {
   if (now - lastSentAt < MIN_GAP_MS) return { sent: false }
   const revision = trackingRevision
@@ -93,33 +87,50 @@ export async function pushLocation(coords, now = Date.now()) {
     await stopTracking()
     return { sent: false, stopped: true }
   }
+
   lastSentAt = now
-  const point = { latitude: coords.latitude, longitude: coords.longitude }
-  const results = await Promise.allSettled(ids.map((id) => sendLocation(id, point)))
-  const dropped = []
-  const blocked = {}
-  let error
-  results.forEach((result, index) => {
-    if (result.status === 'fulfilled') return
-    const apiError = getApiError(result.reason)
-    if (stopsTracking(apiError)) {
-      dropped.push(ids[index])
-      if (apiError.status === 403 || apiError.code === 'GPS_SOURCE_CONFLICT') {
-        error =
-          apiError.code === 'GPS_SOURCE_CONFLICT'
-            ? 'Một thiết bị hoặc trình duyệt khác đang chia sẻ vị trí cho chuyến này.'
-            : apiError.message
-        blocked[ids[index]] = error
-      }
-    } else if (apiError.status !== 429) error = apiError.message
-  })
-  const sent = results.some((result) => result.status === 'fulfilled')
+  let outcomes
+  let denial
+  try {
+    const response = await sendLocations(coords)
+    outcomes = new Map(response.results.map(({ assignmentId, result }) => [assignmentId, result]))
+  } catch (failure) {
+    const error = getApiError(failure)
+    if (revision !== trackingRevision) return { sent: false, stopped: true }
+    if (error.status !== 403 && !ACCESS_ERRORS.has(error.code)) {
+      return { sent: false, error: error.status === 429 ? undefined : error.message }
+    }
+    denial = error.message
+    outcomes = new Map()
+  }
+
   return updateTrackingState(async () => {
     if (revision !== trackingRevision) return { sent: false }
+    const currentIds = await readIds()
+    const dropped = new Set()
+    const blocked = {}
+    let error
+    let sent = false
+    // Preserve assignments added after the request started. The server omits trips that ended
+    // or changed shipper and reports in-flight failures per assignment.
+    for (const id of ids) {
+      if (!currentIds.includes(id)) continue
+      const result = outcomes.get(id)
+      if (result === 'OK') sent = true
+      else if (denial || result === 'GPS_SOURCE_CONFLICT' || ACCESS_ERRORS.has(result)) {
+        error = denial || (result === 'GPS_SOURCE_CONFLICT' ? CONFLICT : REVOKED)
+        blocked[id] = error
+        dropped.add(id)
+      } else if (!result || ['TRACKING_STOPPED', 'DELIVERY_NOT_FOUND'].includes(result)) {
+        dropped.add(id)
+      } else if (result !== 'PING_TOO_FREQUENT') {
+        error = 'Không thể gửi vị trí cho một chuyến. Vui lòng thử lại.'
+      }
+    }
     if (sent) await SecureStore.setItemAsync(LAST_SENT_KEY, String(now), STORE_OPTIONS)
-    if (dropped.length) {
+    if (dropped.size) {
       if (Object.keys(blocked).length) await writeRevoked({ ...(await readRevoked()), ...blocked })
-      const remaining = (await readIds()).filter((id) => !dropped.includes(id))
+      const remaining = currentIds.filter((id) => !dropped.has(id))
       if (!remaining.length) {
         trackingRevision += 1
         startRevision += 1
@@ -173,7 +184,7 @@ async function startBackgroundUpdates() {
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'VMarket đang chia sẻ vị trí',
-      notificationBody: 'Người mua đang theo dõi đơn bạn giao. Tự tắt khi giao xong.',
+      notificationBody: 'Vị trí chỉ được gửi trong lúc thực hiện chuyến giao.',
       notificationColor: '#0670CE',
     },
   })

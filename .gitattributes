@@ -21,3 +21,4 @@ mvnw text eol=lf
 
 # SVG là text
 *.svg text
+shared/** text eol=lf

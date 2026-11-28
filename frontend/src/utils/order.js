@@ -8,7 +8,14 @@ export const ORDER_STATUS_LABELS = Object.freeze({
   DELIVERED: 'Đã giao',
   COMPLETED: 'Hoàn thành',
   CANCELLED: 'Đã huỷ',
+  // Review PR 68 lan 2, muc 4.7: hoan hang khong con la "huy don".
+  DELIVERY_FAILED: 'Giao không thành công, đang hoàn về shop',
+  RETURNED_TO_SELLER: 'Đã hoàn trả cho shop',
 })
+
+/** Don dang / da hoan ve shop (khong con giao toi nguoi mua). */
+export const isReturnedOrder = (status) =>
+  status === 'DELIVERY_FAILED' || status === 'RETURNED_TO_SELLER'
 
 export const RETURN_STATUS_LABELS = Object.freeze({
   PENDING: 'Chờ gian hàng xử lý',
@@ -43,8 +50,9 @@ const STEP_INDEX = {
   COMPLETED: 4,
 }
 
-/** Chi so buoc hien tai (0..4), -1 khi don da huy. */
-export const orderStepIndex = (status) => (status === 'CANCELLED' ? -1 : (STEP_INDEX[status] ?? 0))
+/** Chi so buoc hien tai (0..4), -1 khi don da huy hoac dang / da hoan ve shop. */
+export const orderStepIndex = (status) =>
+  status === 'CANCELLED' || isReturnedOrder(status) ? -1 : (STEP_INDEX[status] ?? 0)
 
 export const RETURN_WINDOW_DAYS = 7
 const DAY_MS = 24 * 60 * 60 * 1000

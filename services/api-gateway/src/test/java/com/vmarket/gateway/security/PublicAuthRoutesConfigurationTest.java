@@ -60,6 +60,27 @@ class PublicAuthRoutesConfigurationTest {
 		assertThat(response.getStatus()).as(path).isEqualTo(404);
 	}
 
+	/** Review PR 68 lan 2, muc 4.2: WebSocket theo doi khong bi 401 o gateway (ve do delivery-service kiem). */
+	@org.junit.jupiter.api.Test
+	void deliveryTrackingWebSocketHandshakeIsNotRejectedForMissingBearer() throws Exception {
+		MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/delivery/ws");
+		request.setQueryString("ticket=abc");
+		request.addHeader("Upgrade", "websocket");
+		request.addHeader("Connection", "Upgrade");
+		AtomicBoolean reached = new AtomicBoolean();
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		filter.doFilter(request, response, (in, out) -> reached.set(true));
+		assertThat(reached).isTrue();
+		assertThat(response.getStatus()).isNotEqualTo(401);
+		// Cac API giao hang khac van can JWT.
+		MockHttpServletResponse protectedResponse = new MockHttpServletResponse();
+		AtomicBoolean protectedReached = new AtomicBoolean();
+		filter.doFilter(new MockHttpServletRequest("GET", "/api/delivery/orders/o1"), protectedResponse,
+				(in, out) -> protectedReached.set(true));
+		assertThat(protectedReached).isFalse();
+		assertThat(protectedResponse.getStatus()).isEqualTo(401);
+	}
+
 	@ParameterizedTest
 	@ValueSource(strings = {
 			"/api/auth/otp/request", "/api/auth/otp/verify",

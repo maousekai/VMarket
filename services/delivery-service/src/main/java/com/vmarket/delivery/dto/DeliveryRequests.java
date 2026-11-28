@@ -39,13 +39,33 @@ public final class DeliveryRequests {
 
     public record Lock(@NotNull Boolean locked) {}
 
+    /**
+     * @param reasonCode ma ly do chuan khi FAILED (DeliveryRules.failureReasons)
+     * @param reason ghi chu noi bo cua shipper (bat buoc voi OTHER), nguoi mua khong thay
+     */
     public record Status(
             @NotNull DeliveryStatus status,
             @Size(max = 255) String reason,
             @PositiveOrZero Long codCollected,
-            @NotNull @PositiveOrZero Long expectedVersion) {}
+            @NotNull @PositiveOrZero Long expectedVersion,
+            @Size(max = 40) String reasonCode) {
+        public Status(
+                DeliveryStatus status, String reason, Long codCollected, Long expectedVersion) {
+            this(status, reason, codCollected, expectedVersion, null);
+        }
+    }
 
+    /** source: MOBILE (nguon chinh, mac dinh) hoac WEB (chi khi shipper chu dong bat). */
     public record Location(
             @NotNull @DecimalMin("-90") @DecimalMax("90") Double latitude,
-            @NotNull @DecimalMin("-180") @DecimalMax("180") Double longitude) {}
+            @NotNull @DecimalMin("-180") @DecimalMax("180") Double longitude,
+            @Pattern(regexp = "MOBILE|WEB") String source) {
+        public Location(Double latitude, Double longitude) {
+            this(latitude, longitude, null);
+        }
+
+        public String sourceOrDefault() {
+            return source == null ? "MOBILE" : source;
+        }
+    }
 }

@@ -3,6 +3,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +11,7 @@ import {
 } from 'react-native'
 import { Button, Field, Notice } from '../components/ui'
 import { formatMoney } from '../api/deliveryApi'
+import { FAILURE_REASONS, MAX_ATTEMPTS } from '../deliveryStatus'
 import { colors, radius, spacing } from '../theme'
 
 function Sheet({ title, description, onClose, children }) {
@@ -72,33 +74,43 @@ export function DeliverSheet({ assignment, busy, error, onClose, onSubmit }) {
 }
 
 export function FailSheet({ assignment, busy, error, onClose, onSubmit }) {
-  const [reason, setReason] = useState('')
-  const last = assignment.attempt >= 3
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState('')
+  const selected = FAILURE_REASONS.find((reason) => reason.code === code)
+  const last = assignment.attempt >= (assignment.maxAttempts || MAX_ATTEMPTS)
   return (
-    <Sheet
-      title="Báo giao thất bại"
-      description={
-        last
-          ? 'Đây là lần giao thứ 3: đơn sẽ chuyển sang hoàn hàng về gian hàng.'
-          : `Lần giao ${assignment.attempt || 1}/3. Bạn có thể giao lại sau.`
-      }
-      onClose={onClose}
-    >
+    <Sheet title="Báo giao thất bại" onClose={onClose}>
+      <View accessibilityRole="radiogroup" style={styles.reasons}>
+        {FAILURE_REASONS.map((reason) => (
+          <Pressable
+            key={reason.code}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: reason.code === code, disabled: busy }}
+            disabled={busy}
+            onPress={() => setCode(reason.code)}
+            style={[styles.reason, reason.code === code && styles.selected]}
+          >
+            <Text style={styles.reasonLabel}>{reason.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {(last || selected?.returnImmediately) && (
+        <Notice tone="warning">Chuyến này sẽ chuyển ngay sang hoàn hàng về gian hàng.</Notice>
+      )}
       <Field
-        label="Lý do"
-        value={reason}
-        onChangeText={setReason}
+        label={selected?.noteRequired ? 'Ghi chú nội bộ (bắt buộc)' : 'Ghi chú nội bộ'}
+        value={note}
+        onChangeText={setNote}
         maxLength={255}
         multiline
-        placeholder="Ví dụ: không liên lạc được người nhận"
       />
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <Button
         title="Xác nhận thất bại"
         variant="danger"
         loading={busy}
-        disabled={!reason.trim()}
-        onPress={() => onSubmit({ reason: reason.trim() })}
+        disabled={!selected || (selected.noteRequired && !note.trim())}
+        onPress={() => onSubmit({ reasonCode: code, ...(note.trim() && { reason: note.trim() }) })}
       />
       <Button title="Huỷ" variant="secondary" onPress={onClose} />
     </Sheet>
@@ -118,4 +130,13 @@ const styles = StyleSheet.create({
   content: { gap: spacing(3) },
   title: { fontSize: 18, fontWeight: '700', color: colors.text },
   description: { fontSize: 14, color: colors.muted },
+  reasons: { gap: spacing(2) },
+  reason: {
+    padding: spacing(3),
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  selected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  reasonLabel: { color: colors.text, fontSize: 14 },
 })

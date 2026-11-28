@@ -9,5 +9,7 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8080
 
 export const REQUEST_TIMEOUT_MS = 15000
 
-/** Trang web VMarket (luong nguoi mua chua co tren app). Bo trong thi an nut mo web. */
+/** Web và nginx chuyển tiếp WebSocket của delivery-service. */
 export const WEB_URL = (process.env.EXPO_PUBLIC_WEB_URL || '').replace(/\/+$/, '')
+
+export const DELIVERY_WS_ORIGIN = process.env.EXPO_PUBLIC_DELIVERY_WS_ORIGIN || WEB_URL || API_URL
