@@ -91,9 +91,9 @@ public class AuthController {
 	@Operation(summary = "Làm mới access token (FR-AUTH-02)",
 			description = "Dùng refresh token trong cookie HttpOnly `refresh_token` để lấy access token "
 					+ "mới (xoay vòng — cookie được ghi đè bằng refresh token mới). Refresh token cũ bị "
-					+ "thu hồi. Dùng lại token đã thu hồi → toàn bộ phiên của user bị thu hồi. Lỗi do token "
-					+ "thật sự chết (hết hạn/reused/tài khoản bị Admin khoá) đều xoá luôn cookie hiện tại — trình "
-					+ "duyệt không tiếp tục gửi lại một token không còn dùng được. Riêng "
+					+ "thu hồi. Dùng lại token đã xoay vòng sau thời gian ân hạn sẽ thu hồi toàn bộ phiên "
+					+ "(REFRESH_TOKEN_REUSED). Token bị thu hồi mà chưa xoay vòng trả về REFRESH_TOKEN_REVOKED "
+					+ "và giữ nguyên các phiên khác. Khi token không còn dùng được, server xoá cookie hiện tại. Riêng "
 					+ "REFRESH_TOKEN_ROTATION_CONFLICT (thua một request /refresh khác chạy song song "
 					+ "cùng token cũ) KHÔNG xoá cookie — request thắng cuộc có thể đã ghi cookie mới hợp "
 					+ "lệ, xoá nhầm sẽ đăng xuất người dùng dù phiên còn sống. Khoá thao tác mật khẩu "
@@ -103,7 +103,7 @@ public class AuthController {
 					content = @Content(schema = @Schema(implementation = TokenResponse.class))),
 			@ApiResponse(responseCode = "401",
 					description = "REFRESH_TOKEN_MISSING / INVALID_REFRESH_TOKEN / REFRESH_TOKEN_EXPIRED / "
-							+ "REFRESH_TOKEN_REUSED / REFRESH_TOKEN_ROTATION_CONFLICT",
+							+ "REFRESH_TOKEN_REVOKED / REFRESH_TOKEN_REUSED / REFRESH_TOKEN_ROTATION_CONFLICT",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
 			@ApiResponse(responseCode = "423", description = "Tài khoản bị Admin khoá (ACCOUNT_SUSPENDED)",
 					content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -118,7 +118,7 @@ public class AuthController {
 		try {
 			issued = authenticationService.refresh(rawRefreshToken, deviceMetaResolver.resolve(httpRequest));
 		} catch (ApiException ex) {
-			// Token hỏng/hết hạn/bị đánh cắp/tài khoản bị khoá: xoá cookie ngay, đừng
+			// Token hỏng/hết hạn/bị thu hồi/bị đánh cắp/tài khoản bị khoá: xoá cookie ngay, đừng
 			// để client tiếp tục gửi lại một refresh token không còn dùng được.
 			// TRỪ rotation conflict (thua race /refresh song song): cookie hiện tại có
 			// thể đã là token mới hợp lệ do request thắng cuộc ghi — không được xoá.

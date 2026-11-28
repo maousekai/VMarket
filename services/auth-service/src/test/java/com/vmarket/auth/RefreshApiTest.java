@@ -107,6 +107,23 @@ class RefreshApiTest {
 	}
 
 	@Test
+	void refresh_afterLogout_rejectsLoggedOutDevice_andPreservesOtherDevice() throws Exception {
+		String deviceA = loginAndGetRefreshCookie();
+		String deviceB = loginAndGetRefreshCookie();
+
+		mockMvc.perform(post("/api/auth/logout")
+				.cookie(new MockCookie(RefreshTokenCookieService.COOKIE_NAME, deviceA)))
+				.andExpect(status().isOk());
+
+		refresh(deviceA).andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error.code").value("REFRESH_TOKEN_REVOKED"))
+				.andExpect(cookie().maxAge(RefreshTokenCookieService.COOKIE_NAME, 0));
+
+		refresh(deviceB).andExpect(status().isOk())
+				.andExpect(jsonPath("$.accessToken").isNotEmpty());
+	}
+
+	@Test
 	void refresh_reuseAfterGrace_revokesEntireChain_persisted() throws Exception {
 		String rt1 = loginAndGetRefreshCookie();
 		String rt2 = newCookieFrom(refresh(rt1).andExpect(status().isOk()));

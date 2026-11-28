@@ -358,6 +358,16 @@ class CartServiceTest {
 	}
 
 	@Test
+	void unexpectedReadAndDeleteFailuresArePropagated() {
+		var failure = new IllegalStateException("Unexpected cart code failure");
+		when(ops.get("cart:user-1")).thenThrow(failure);
+		doThrow(failure).when(redis).delete("cart:user-1");
+
+		assertThatThrownBy(() -> cartService.getCart("user-1")).isSameAs(failure);
+		assertThatThrownBy(() -> cartService.clearCart("user-1")).isSameAs(failure);
+	}
+
+	@Test
 	void corruptJsonIsReadAsEmptyWithoutWritingAndNextAddRecovers() {
 		store.put("cart:user-1", "{invalid-json");
 		var before = Map.copyOf(store);

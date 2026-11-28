@@ -72,6 +72,11 @@ tách rời với các service khác.
 
 > Không cần cài Maven (mỗi service có sẵn Maven Wrapper `mvnw`).
 
+Khi chạy `mvn wrapper:wrapper` trong `services/`, kiểm tra lại `mvnw.cmd` vì lệnh này
+có thể ghi đè phần xử lý dành cho thư mục `MAVEN_USER_HOME` thông thường trên Windows.
+Có thể kiểm tra bằng `.\mvnw.cmd -v` trên Windows với `MAVEN_USER_HOME` trỏ tới một
+thư mục không phải liên kết.
+
 ## Chạy hạ tầng (tối ưu tài nguyên)
 
 Từ thư mục gốc, tạo `.env` từ `.env.example` nếu chưa có. `MINIO_ROOT_USER` và
